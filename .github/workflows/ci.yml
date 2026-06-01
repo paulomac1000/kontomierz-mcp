@@ -62,8 +62,7 @@ jobs:
         run: |
           pytest tests/unit/ -v --tb=short \
             --cov=kontomierz_mcp \
-            --cov-report=term-missing \
-            --cov-report=xml
+            --cov-report=term-missing
 
       - name: Run integration tests
         run: pytest tests/integration/ -v --tb=short
