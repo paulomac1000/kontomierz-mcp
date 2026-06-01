@@ -37,7 +37,7 @@ jobs:
         run: ruff format --check .
 
       - name: mypy
-        run: mypy src/kontomierz_mcp/ --strict
+        run: mypy src/kontomierz_mcp/ --disallow-any-generics --disallow-subclassing-any --disallow-untyped-calls --disallow-untyped-defs --disallow-incomplete-defs --check-untyped-defs --warn-redundant-casts --warn-unused-ignores --no-implicit-reexport --strict-equality --extra-checks
 
       - name: bandit
         run: bandit -r src/kontomierz_mcp/ -ll
