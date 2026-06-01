@@ -12,25 +12,25 @@ from ..response import error_dict, invoke_tool
 def _do_get_pie_chart(
     client: KontomierzClient,
     chart_kind: str = "pie",
-    start_on: str | None = None,
-    end_on: str | None = None,
-    direction: str | None = None,
-    category_group_id: int | None = None,
-    category_id: int | None = None,
-    user_account_id: int | None = None,
-    q: str | None = None,
-    tag_name: str | None = None,
+    start_on: str = "",
+    end_on: str = "",
+    direction: str = "",
+    category_group_id: int = 0,
+    category_id: int = 0,
+    user_account_id: int = 0,
+    q: str = "",
+    tag_name: str = "",
 ) -> dict[str, Any]:
     result = client.get_pie_chart(
         chart_kind=chart_kind,
-        start_on=start_on,
-        end_on=end_on,
-        direction=direction,
-        category_group_id=category_group_id,
-        category_id=category_id,
-        user_account_id=user_account_id,
-        q=q,
-        tag_name=tag_name,
+        start_on=start_on or None,
+        end_on=end_on or None,
+        direction=direction or None,
+        category_group_id=category_group_id or None,
+        category_id=category_id or None,
+        user_account_id=user_account_id or None,
+        q=q or None,
+        tag_name=tag_name or None,
     )
     if result is None:
         return {"success": False, "error": error_dict("API_ERROR", "Failed to fetch pie chart data.", retryable=True)}
@@ -39,10 +39,10 @@ def _do_get_pie_chart(
 
 def _do_get_wealth_points(
     client: KontomierzClient,
-    start_on: str | None = None,
-    end_on: str | None = None,
+    start_on: str = "",
+    end_on: str = "",
 ) -> dict[str, Any]:
-    result = client.get_wealth_points(start_on, end_on)
+    result = client.get_wealth_points(start_on or None, end_on or None)
     if result is None:
         return {"success": False, "error": error_dict("API_ERROR", "Failed to fetch wealth points.", retryable=True)}
     return {"success": True, "data": result}
@@ -53,14 +53,14 @@ def register_charts_wealth_tools(mcp: Any) -> None:
     @mcp.tool()
     async def get_pie_chart(
         chart_kind: str = "pie",
-        start_on: str | None = None,
-        end_on: str | None = None,
-        direction: str | None = None,
-        category_group_id: int | None = None,
-        category_id: int | None = None,
-        user_account_id: int | None = None,
-        q: str | None = None,
-        tag_name: str | None = None,
+        start_on: str = "",
+        end_on: str = "",
+        direction: str = "",
+        category_group_id: int = 0,
+        category_id: int = 0,
+        user_account_id: int = 0,
+        q: str = "",
+        tag_name: str = "",
     ) -> str:
         """[READ] Get pie chart data for transaction breakdown.
 
@@ -93,8 +93,8 @@ def register_charts_wealth_tools(mcp: Any) -> None:
 
     @mcp.tool()
     async def list_wealth_points(
-        start_on: str | None = None,
-        end_on: str | None = None,
+        start_on: str = "",
+        end_on: str = "",
     ) -> str:
         """[READ] List net worth history points (one per month).
 

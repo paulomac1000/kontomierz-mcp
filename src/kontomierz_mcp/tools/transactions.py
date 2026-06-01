@@ -7,35 +7,35 @@ from typing import Any
 
 from ..client import KontomierzClient
 from ..response import error_dict, invoke_tool
-from ..validators import check_write_enabled
+from ..validators import check_write_enabled, validate_currency_name, validate_date, validate_direction, validate_required
 
 
 def _do_list_transactions(
     client: KontomierzClient,
     page: int = 1,
-    per_page: int | None = None,
-    user_account_id: int | None = None,
-    q: str | None = None,
-    start_on: str | None = None,
-    end_on: str | None = None,
-    direction: str | None = None,
-    tag_name: str | None = None,
-    category_group_id: int | None = None,
-    category_id: int | None = None,
-    show_hidden_transactions: str | None = None,
+    per_page: int = 0,
+    user_account_id: int = 0,
+    q: str = "",
+    start_on: str = "",
+    end_on: str = "",
+    direction: str = "",
+    tag_name: str = "",
+    category_group_id: int = 0,
+    category_id: int = 0,
+    show_hidden_transactions: str = "",
 ) -> dict[str, Any]:
     transactions = client.get_money_transactions(
         page=page,
-        per_page=per_page,
-        user_account_id=user_account_id,
-        q=q,
-        start_on=start_on,
-        end_on=end_on,
-        direction=direction,
-        tag_name=tag_name,
-        category_group_id=category_group_id,
-        category_id=category_id,
-        show_hidden_transactions=show_hidden_transactions,
+        per_page=per_page or None,
+        user_account_id=user_account_id or None,
+        q=q or None,
+        start_on=start_on or None,
+        end_on=end_on or None,
+        direction=direction or None,
+        tag_name=tag_name or None,
+        category_group_id=category_group_id or None,
+        category_id=category_id or None,
+        show_hidden_transactions=show_hidden_transactions or None,
     )
     if transactions is None:
         return {"success": False, "error": error_dict("API_ERROR", "Failed to fetch transactions.", retryable=True)}
@@ -44,8 +44,10 @@ def _do_list_transactions(
         "data": {
             "transactions": transactions,
             "page": page,
+            "limit": per_page,
             "has_more": len(transactions) == (per_page or 0) or len(transactions) > 0,
-            "total_count": len(transactions),
+            "next_offset": page + 1 if (len(transactions) == (per_page or 0) or len(transactions) > 0) else None,
+            "total": len(transactions),
         },
     }
 
@@ -65,8 +67,8 @@ def _do_get_transaction(client: KontomierzClient, transaction_id: int) -> dict[s
 def _do_create_transaction(
     client: KontomierzClient,
     client_assigned_id: str,
-    user_account_id: int | None = None,
-    category_id: int | None = None,
+    user_account_id: int = 0,
+    category_id: int = 0,
     currency_amount: str = "",
     currency_name: str = "",
     direction: str = "withdrawal",
@@ -75,10 +77,17 @@ def _do_create_transaction(
     transaction_on: str = "",
 ) -> dict[str, Any]:
     check_write_enabled()
+    validate_required(client_assigned_id, "client_assigned_id")
+    if currency_name:
+        validate_currency_name(currency_name)
+    if direction:
+        validate_direction(direction)
+    if transaction_on:
+        validate_date(transaction_on, "transaction_on")
     result = client.create_money_transaction(
         client_assigned_id=client_assigned_id,
-        user_account_id=user_account_id,
-        category_id=category_id,
+        user_account_id=user_account_id or None,
+        category_id=category_id or None,
         currency_amount=currency_amount,
         currency_name=currency_name,
         direction=direction,
@@ -94,8 +103,8 @@ def _do_create_transaction(
 def _do_update_transaction(
     client: KontomierzClient,
     transaction_id: int,
-    user_account_id: int | None = None,
-    category_id: int | None = None,
+    user_account_id: int = 0,
+    category_id: int = 0,
     currency_amount: str = "",
     currency_name: str = "",
     direction: str = "",
@@ -106,8 +115,8 @@ def _do_update_transaction(
     check_write_enabled()
     result = client.update_money_transaction(
         transaction_id=transaction_id,
-        user_account_id=user_account_id,
-        category_id=category_id,
+        user_account_id=user_account_id or None,
+        category_id=category_id or None,
         currency_amount=currency_amount,
         currency_name=currency_name,
         direction=direction,
@@ -138,16 +147,16 @@ def register_transactions_tools(mcp: Any) -> None:
     @mcp.tool()
     async def list_transactions(
         page: int = 1,
-        per_page: int | None = None,
-        user_account_id: int | None = None,
-        q: str | None = None,
-        start_on: str | None = None,
-        end_on: str | None = None,
-        direction: str | None = None,
-        tag_name: str | None = None,
-        category_group_id: int | None = None,
-        category_id: int | None = None,
-        show_hidden_transactions: str | None = None,
+        per_page: int = 0,
+        user_account_id: int = 0,
+        q: str = "",
+        start_on: str = "",
+        end_on: str = "",
+        direction: str = "",
+        tag_name: str = "",
+        category_group_id: int = 0,
+        category_id: int = 0,
+        show_hidden_transactions: str = "",
     ) -> str:
         """[READ] List money transactions with pagination and filters.
 
@@ -201,8 +210,8 @@ def register_transactions_tools(mcp: Any) -> None:
     @mcp.tool()
     async def create_transaction(
         client_assigned_id: str,
-        user_account_id: int | None = None,
-        category_id: int | None = None,
+        user_account_id: int = 0,
+        category_id: int = 0,
         currency_amount: str = "",
         currency_name: str = "",
         direction: str = "withdrawal",
@@ -245,8 +254,8 @@ def register_transactions_tools(mcp: Any) -> None:
     @mcp.tool()
     async def update_transaction(
         transaction_id: int,
-        user_account_id: int | None = None,
-        category_id: int | None = None,
+        user_account_id: int = 0,
+        category_id: int = 0,
         currency_amount: str = "",
         currency_name: str = "",
         direction: str = "",

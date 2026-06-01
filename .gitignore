@@ -6,6 +6,7 @@ __pycache__/
 venv/
 .envrc
 *.egg-info/
+*.egg
 dist/
 build/
 .coverage*
@@ -13,3 +14,4 @@ build/
 .ruff_cache/
 .mypy_cache/
 *.log
+.DS_Store

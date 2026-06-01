@@ -3,6 +3,7 @@
 Tool wrappers capture `mcp` from closure, so mock_mcp.get_context() must work.
 Tests verify the full pipeline: registration → invocation → response format.
 """
+
 from __future__ import annotations
 
 import json
@@ -12,6 +13,7 @@ import pytest
 
 from kontomierz_mcp.tools.accounts import register_accounts_tools
 from kontomierz_mcp.tools.budgets import register_budgets_tools
+from kontomierz_mcp.tools.capabilities import register_capability_tools
 from kontomierz_mcp.tools.charts_wealth import register_charts_wealth_tools
 from kontomierz_mcp.tools.reference import register_reference_tools
 from kontomierz_mcp.tools.schedules import register_schedules_tools
@@ -20,7 +22,14 @@ from kontomierz_mcp.tools.transactions import register_transactions_tools
 # Anonymized real-world data fixtures
 REAL_ACCOUNTS = [
     {"id": 101, "display_name": "Konto główne", "bank_name": "Bank A", "currency_name": "PLN", "currency_balance": "12500.50"},
-    {"id": 102, "display_name": "Portfel", "bank_name": "Wallets", "currency_name": "PLN", "currency_balance": "350.00", "is_default_wallet": True},
+    {
+        "id": 102,
+        "display_name": "Portfel",
+        "bank_name": "Wallets",
+        "currency_name": "PLN",
+        "currency_balance": "350.00",
+        "is_default_wallet": True,
+    },
 ]
 REAL_TRANSACTIONS = [
     {"id": 1001, "description": "Biedronka", "currency_amount": "-145.90", "currency_name": "PLN"},
@@ -55,6 +64,7 @@ def _build_mock_mcp(client: MagicMock) -> MagicMock:
             tool_name = kwargs.get("name", func.__name__)
             mcp._tools[tool_name] = func
             return func
+
         if len(args) == 1 and callable(args[0]) and not kwargs:
             mcp._tools[args[0].__name__] = args[0]
             return args[0]
@@ -74,6 +84,7 @@ async def _invoke(fn, **kwargs):
 # ---------------------------------------------------------------------------
 # Read-Only Tools
 # ---------------------------------------------------------------------------
+
 
 class TestReadOnlyTools:
     @pytest.mark.asyncio
@@ -228,6 +239,7 @@ class TestReadOnlyTools:
 # Write Tools
 # ---------------------------------------------------------------------------
 
+
 class TestWriteTools:
     @pytest.mark.asyncio
     async def test_create_wallet(self) -> None:
@@ -258,6 +270,18 @@ class TestWriteTools:
 
         data = await _invoke(mcp.get_tool("copy_budgets_from_last_month"))
         assert data["success"] is True
+
+    @pytest.mark.asyncio
+    async def test_capabilities(self) -> None:
+        client = MagicMock()
+        mcp = _build_mock_mcp(client)
+        register_capability_tools(mcp)
+
+        data = await _invoke(mcp.get_tool("describe_kontomierz_capabilities"))
+        assert data["success"] is True
+        assert data["data"]["schema_version"] == "1.0.0"
+        assert "sse" in data["data"]["supported_transports"]
+        assert data["data"]["tool_count"] >= 27
 
     @pytest.mark.asyncio
     async def test_destroy_wallet(self) -> None:

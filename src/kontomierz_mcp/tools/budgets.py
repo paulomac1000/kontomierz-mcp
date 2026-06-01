@@ -10,8 +10,8 @@ from ..response import error_dict, invoke_tool
 from ..validators import check_write_enabled, validate_required
 
 
-def _do_list_budgets(client: KontomierzClient, month_on: str | None = None) -> dict[str, Any]:
-    result = client.get_budgets(month_on)
+def _do_list_budgets(client: KontomierzClient, month_on: str = "") -> dict[str, Any]:
+    result = client.get_budgets(month_on or None)
     if result is None:
         return {"success": False, "error": error_dict("API_ERROR", "Failed to fetch budgets.", retryable=True)}
     budgets = result if isinstance(result, list) else []
@@ -28,13 +28,13 @@ def _do_list_budgets(client: KontomierzClient, month_on: str | None = None) -> d
 def _do_create_budget(
     client: KontomierzClient,
     limit: str,
-    category_id: int | None = None,
-    category_group_id: int | None = None,
+    category_id: int = 0,
+    category_group_id: int = 0,
     month_on: str = "",
 ) -> dict[str, Any]:
     check_write_enabled()
     validate_required(limit, "limit")
-    result = client.create_budget(limit, category_id, category_group_id, month_on)
+    result = client.create_budget(limit, category_id or None, category_group_id or None, month_on)
     if result is None:
         return {
             "success": False,
@@ -73,7 +73,7 @@ def _do_copy_budgets(client: KontomierzClient) -> dict[str, Any]:
 def register_budgets_tools(mcp: Any) -> None:
 
     @mcp.tool()
-    async def list_budgets(month_on: str | None = None) -> str:
+    async def list_budgets(month_on: str = "") -> str:
         """[READ] List budgets for a given month.
 
         Args:
@@ -88,8 +88,8 @@ def register_budgets_tools(mcp: Any) -> None:
     @mcp.tool()
     async def create_budget(
         limit: str,
-        category_id: int | None = None,
-        category_group_id: int | None = None,
+        category_id: int = 0,
+        category_group_id: int = 0,
         month_on: str = "",
     ) -> str:
         """[WRITE] Create a budget for a category or category group.

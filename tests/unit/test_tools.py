@@ -1,4 +1,5 @@
 """Unit tests for tool internal functions — zero I/O, direct calls."""
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock
@@ -49,12 +50,11 @@ from kontomierz_mcp.validators import ValidationError
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(autouse=True)
 def _enable_writes(monkeypatch: pytest.MonkeyPatch) -> None:
     """Enable write operations for all tests."""
-    monkeypatch.setattr(
-        "kontomierz_mcp.tools.constants.ENABLE_WRITE_OPERATIONS", True
-    )
+    monkeypatch.setattr("kontomierz_mcp.tools.constants.ENABLE_WRITE_OPERATIONS", True)
 
 
 def _assert_success(result: dict) -> None:
@@ -69,6 +69,7 @@ def _assert_error(result: dict) -> None:
 # ---------------------------------------------------------------------------
 # Accounts
 # ---------------------------------------------------------------------------
+
 
 class TestAccounts:
     def test_list_accounts_success(self, mock_client: MagicMock) -> None:
@@ -112,6 +113,7 @@ class TestAccounts:
 # ---------------------------------------------------------------------------
 # Transactions
 # ---------------------------------------------------------------------------
+
 
 class TestTransactions:
     def test_list_success(self, mock_client: MagicMock) -> None:
@@ -164,6 +166,7 @@ class TestTransactions:
 # Categories / Tags / Currencies
 # ---------------------------------------------------------------------------
 
+
 class TestReference:
     def test_categories_success(self, mock_client: MagicMock) -> None:
         mock_client.get_categories.return_value = [{"name": "Zakupy"}]
@@ -198,6 +201,7 @@ class TestReference:
 # ---------------------------------------------------------------------------
 # Budgets
 # ---------------------------------------------------------------------------
+
 
 class TestBudgets:
     def test_list_success(self, mock_client: MagicMock) -> None:
@@ -248,6 +252,7 @@ class TestBudgets:
 # Schedules
 # ---------------------------------------------------------------------------
 
+
 class TestSchedules:
     def test_list_success(self, mock_client: MagicMock) -> None:
         mock_client.get_scheduled_transactions.return_value = [{"schedule_id": 1}]
@@ -270,8 +275,14 @@ class TestSchedules:
     def test_create_success(self, mock_client: MagicMock) -> None:
         mock_client.create_schedule.return_value = {"id": 10}
         result = _do_create_schedule(
-            mock_client, "withdrawal", "15-06-2026", "1",
-            "Netflix", "49.99", "PLN", "2",
+            mock_client,
+            "withdrawal",
+            "15-06-2026",
+            "1",
+            "Netflix",
+            "49.99",
+            "PLN",
+            "2",
         )
         _assert_success(result)
 
@@ -320,6 +331,7 @@ class TestSchedules:
 # Charts / Wealth
 # ---------------------------------------------------------------------------
 
+
 class TestChartsWealth:
     def test_pie_chart_success(self, mock_client: MagicMock) -> None:
         mock_client.get_pie_chart.return_value = {"type": "spendings", "data": []}
@@ -343,6 +355,7 @@ class TestChartsWealth:
 # ---------------------------------------------------------------------------
 # Write guard — disabled writes
 # ---------------------------------------------------------------------------
+
 
 class TestWriteGuard:
     def test_create_wallet_disabled(self, mock_client: MagicMock, monkeypatch: pytest.MonkeyPatch) -> None:

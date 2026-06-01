@@ -1,4 +1,5 @@
 """Unit tests for KontomierzClient — all 26 API endpoints, zero I/O."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -9,23 +10,13 @@ import requests
 
 from kontomierz_mcp.client import KontomierzClient
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
 
 @pytest.fixture
 def client() -> KontomierzClient:
-    """Client with fake credentials (no real I/O)."""
-    return KontomierzClient(
-        api_key="test_key_12345",
-        username="test@example.com",
-        password="secret123",
-        timeout=10,
-    )
+    return KontomierzClient(api_key="test_key_12345", timeout=10)
 
 
 def _mock_response(json_data: Any, status_code: int = 200) -> MagicMock:
-    """Build a requests.Response mock with .json() and .raise_for_status()."""
     resp = MagicMock()
     resp.json.return_value = json_data
     resp.status_code = status_code
@@ -36,16 +27,14 @@ def _mock_response(json_data: Any, status_code: int = 200) -> MagicMock:
     return resp
 
 
-def _assert_auth(kwargs: dict) -> None:
-    """Verify that BasicAuth and api_key are present in request kwargs."""
-    assert kwargs["auth"].username == "test@example.com"
-    assert kwargs["auth"].password == "secret123"
+def _assert_api_key(kwargs: dict) -> None:
     assert kwargs["params"]["api_key"] == "test_key_12345"
 
 
 # ---------------------------------------------------------------------------
 # get_user_accounts
 # ---------------------------------------------------------------------------
+
 
 class TestGetUserAccounts:
     def test_success(self, client: KontomierzClient) -> None:
@@ -60,7 +49,7 @@ class TestGetUserAccounts:
         assert len(result) == 2
         assert result[0]["display_name"] == "Konto A"
         assert result[1]["display_name"] == "Portfel B"
-        _assert_auth(mock_get.call_args.kwargs)
+        _assert_api_key(mock_get.call_args.kwargs)
 
     def test_api_error_returns_none(self, client: KontomierzClient) -> None:
         with patch("kontomierz_mcp.client.requests.get", side_effect=requests.exceptions.ConnectionError("no net")):
@@ -70,6 +59,7 @@ class TestGetUserAccounts:
 # ---------------------------------------------------------------------------
 # create_wallet
 # ---------------------------------------------------------------------------
+
 
 class TestCreateWallet:
     def test_success(self, client: KontomierzClient) -> None:
@@ -92,6 +82,7 @@ class TestCreateWallet:
 # update_wallet
 # ---------------------------------------------------------------------------
 
+
 class TestUpdateWallet:
     def test_success(self, client: KontomierzClient) -> None:
         payload = {"user_account": {"id": 10, "display_name": "Updated"}}
@@ -110,6 +101,7 @@ class TestUpdateWallet:
 # destroy_wallet
 # ---------------------------------------------------------------------------
 
+
 class TestDestroyWallet:
     def test_success(self, client: KontomierzClient) -> None:
         with patch("kontomierz_mcp.client.requests.delete", return_value=_mock_response({})):
@@ -123,6 +115,7 @@ class TestDestroyWallet:
 # ---------------------------------------------------------------------------
 # get_money_transactions
 # ---------------------------------------------------------------------------
+
 
 class TestGetMoneyTransactions:
     RESPONSE = [
@@ -142,9 +135,13 @@ class TestGetMoneyTransactions:
     def test_with_filters(self, client: KontomierzClient) -> None:
         with patch("kontomierz_mcp.client.requests.get", return_value=_mock_response({"money_transactions": []})) as mock_get:
             client.get_money_transactions(
-                start_on="01-01-2024", end_on="31-01-2024",
-                direction="withdrawals", tag_name="jedzenie", category_group_id=5,
-                q="mleko", show_hidden_transactions="true",
+                start_on="01-01-2024",
+                end_on="31-01-2024",
+                direction="withdrawals",
+                tag_name="jedzenie",
+                category_group_id=5,
+                q="mleko",
+                show_hidden_transactions="true",
             )
 
         params = mock_get.call_args.kwargs["params"]
@@ -160,6 +157,7 @@ class TestGetMoneyTransactions:
 # ---------------------------------------------------------------------------
 # get_money_transaction (singular)
 # ---------------------------------------------------------------------------
+
 
 class TestGetMoneyTransaction:
     def test_success(self, client: KontomierzClient) -> None:
@@ -178,6 +176,7 @@ class TestGetMoneyTransaction:
 # ---------------------------------------------------------------------------
 # create_money_transaction
 # ---------------------------------------------------------------------------
+
 
 class TestCreateMoneyTransaction:
     def test_success(self, client: KontomierzClient) -> None:
@@ -206,6 +205,7 @@ class TestCreateMoneyTransaction:
 # update_money_transaction
 # ---------------------------------------------------------------------------
 
+
 class TestUpdateMoneyTransaction:
     def test_success(self, client: KontomierzClient) -> None:
         payload = {"money_transaction": {"id": 5, "description": "Updated"}}
@@ -224,6 +224,7 @@ class TestUpdateMoneyTransaction:
 # delete_money_transaction
 # ---------------------------------------------------------------------------
 
+
 class TestDeleteMoneyTransaction:
     def test_success(self, client: KontomierzClient) -> None:
         with patch("kontomierz_mcp.client.requests.delete", return_value=_mock_response({})):
@@ -238,9 +239,10 @@ class TestDeleteMoneyTransaction:
 # get_categories
 # ---------------------------------------------------------------------------
 
+
 class TestGetCategories:
     def test_success_withdrawal(self, client: KontomierzClient) -> None:
-        payload = {"categories": [{"id": 1, "name": "Zakupy", "children": []}]}
+        payload = {"category_groups": [{"id": 1, "name": "Zakupy", "children": []}]}
         with patch("kontomierz_mcp.client.requests.get", return_value=_mock_response(payload)):
             result = client.get_categories("withdrawal")
 
@@ -249,7 +251,7 @@ class TestGetCategories:
         assert result[0]["name"] == "Zakupy"
 
     def test_success_deposit(self, client: KontomierzClient) -> None:
-        payload = {"categories": [{"id": 2, "name": "Wyplata"}]}
+        payload = {"category_groups": [{"id": 2, "name": "Wyplata"}]}
         with patch("kontomierz_mcp.client.requests.get", return_value=_mock_response(payload)):
             result = client.get_categories("deposit")
         assert result is not None
@@ -263,6 +265,7 @@ class TestGetCategories:
 # ---------------------------------------------------------------------------
 # get_tags
 # ---------------------------------------------------------------------------
+
 
 class TestGetTags:
     def test_success(self, client: KontomierzClient) -> None:
@@ -281,6 +284,7 @@ class TestGetTags:
 # ---------------------------------------------------------------------------
 # get_budgets
 # ---------------------------------------------------------------------------
+
 
 class TestGetBudgets:
     def test_success(self, client: KontomierzClient) -> None:
@@ -308,6 +312,7 @@ class TestGetBudgets:
 # create_budget
 # ---------------------------------------------------------------------------
 
+
 class TestCreateBudget:
     def test_success(self, client: KontomierzClient) -> None:
         payload = {"budget": {"id": 10, "limit": "300.00"}}
@@ -328,6 +333,7 @@ class TestCreateBudget:
 # update_budget
 # ---------------------------------------------------------------------------
 
+
 class TestUpdateBudget:
     def test_success(self, client: KontomierzClient) -> None:
         payload = {"budget": {"id": 5, "limit": "700.00"}}
@@ -346,6 +352,7 @@ class TestUpdateBudget:
 # delete_budget
 # ---------------------------------------------------------------------------
 
+
 class TestDeleteBudget:
     def test_success(self, client: KontomierzClient) -> None:
         with patch("kontomierz_mcp.client.requests.delete", return_value=_mock_response({})):
@@ -359,6 +366,7 @@ class TestDeleteBudget:
 # ---------------------------------------------------------------------------
 # copy_budgets_from_last_month
 # ---------------------------------------------------------------------------
+
 
 class TestCopyBudgets:
     def test_success(self, client: KontomierzClient) -> None:
@@ -374,11 +382,10 @@ class TestCopyBudgets:
 # get_scheduled_transactions
 # ---------------------------------------------------------------------------
 
+
 class TestGetScheduledTransactions:
     def test_success_unpaid(self, client: KontomierzClient) -> None:
-        payload = {"scheduled_transactions": [
-            {"schedule_id": 1, "description": "Czynsz", "currency_amount": "-1200.00"}
-        ]}
+        payload = {"scheduled_transactions": [{"schedule_id": 1, "description": "Czynsz", "currency_amount": "-1200.00"}]}
         with patch("kontomierz_mcp.client.requests.get", return_value=_mock_response(payload)):
             result = client.get_scheduled_transactions("unpaid")
 
@@ -401,6 +408,7 @@ class TestGetScheduledTransactions:
 # get_schedule (singular)
 # ---------------------------------------------------------------------------
 
+
 class TestGetSchedule:
     def test_success(self, client: KontomierzClient) -> None:
         payload = {"schedule": {"id": 1, "description": "Czynsz", "next-deadline-on": "10-06-2026"}}
@@ -419,14 +427,19 @@ class TestGetSchedule:
 # create_schedule
 # ---------------------------------------------------------------------------
 
+
 class TestCreateSchedule:
     def test_success(self, client: KontomierzClient) -> None:
         payload = {"schedule": {"id": 10, "description": "Abonament Netflix"}}
         with patch("kontomierz_mcp.client.requests.post", return_value=_mock_response(payload)) as mock_post:
             result = client.create_schedule(
-                direction="withdrawal", deadline_on="15-06-2026", holidays="1",
-                description="Abonament Netflix", currency_amount="49.99",
-                currency_name="PLN", repeat="2",
+                direction="withdrawal",
+                deadline_on="15-06-2026",
+                holidays="1",
+                description="Abonament Netflix",
+                currency_amount="49.99",
+                currency_name="PLN",
+                repeat="2",
             )
 
         assert result is not None
@@ -442,6 +455,7 @@ class TestCreateSchedule:
 # ---------------------------------------------------------------------------
 # update_schedule
 # ---------------------------------------------------------------------------
+
 
 class TestUpdateSchedule:
     def test_success(self, client: KontomierzClient) -> None:
@@ -461,6 +475,7 @@ class TestUpdateSchedule:
 # delete_schedule
 # ---------------------------------------------------------------------------
 
+
 class TestDeleteSchedule:
     def test_success(self, client: KontomierzClient) -> None:
         with patch("kontomierz_mcp.client.requests.delete", return_value=_mock_response({})):
@@ -474,6 +489,7 @@ class TestDeleteSchedule:
 # ---------------------------------------------------------------------------
 # mark_schedule_paid / unpaid
 # ---------------------------------------------------------------------------
+
 
 class TestMarkSchedulePaid:
     def test_success(self, client: KontomierzClient) -> None:
@@ -499,11 +515,14 @@ class TestMarkScheduleUnpaid:
 # get_wealth_points
 # ---------------------------------------------------------------------------
 
+
 class TestGetWealthPoints:
     def test_success(self, client: KontomierzClient) -> None:
-        payload = {"wealth_points": [
-            {"id": 1, "date-on": "01-06-2026", "amount": "50000.00"},
-        ]}
+        payload = {
+            "wealth_points": [
+                {"id": 1, "date-on": "01-06-2026", "amount": "50000.00"},
+            ]
+        }
         with patch("kontomierz_mcp.client.requests.get", return_value=_mock_response(payload)):
             result = client.get_wealth_points("01-01-2024", "31-12-2024")
 
@@ -519,6 +538,7 @@ class TestGetWealthPoints:
 # ---------------------------------------------------------------------------
 # get_pie_chart
 # ---------------------------------------------------------------------------
+
 
 class TestGetPieChart:
     def test_success(self, client: KontomierzClient) -> None:
@@ -542,12 +562,15 @@ class TestGetPieChart:
 # get_currencies
 # ---------------------------------------------------------------------------
 
+
 class TestGetCurrencies:
     def test_success(self, client: KontomierzClient) -> None:
-        payload = {"currencies": [
-            {"id": 1, "name": "PLN", "importance": "major"},
-            {"id": 2, "name": "EUR", "importance": "major"},
-        ]}
+        payload = {
+            "currencies": [
+                {"id": 1, "name": "PLN", "importance": "major"},
+                {"id": 2, "name": "EUR", "importance": "major"},
+            ]
+        }
         with patch("kontomierz_mcp.client.requests.get", return_value=_mock_response(payload)):
             result = client.get_currencies()
 
@@ -563,6 +586,7 @@ class TestGetCurrencies:
 # ---------------------------------------------------------------------------
 # Rate-limit / 401 / 422 error handling
 # ---------------------------------------------------------------------------
+
 
 class TestErrorHandling:
     def test_401_returns_none(self, client: KontomierzClient) -> None:

@@ -1,4 +1,5 @@
 """E2E tests — full REST API pipeline for readonly tools. Skip if server not running."""
+
 from __future__ import annotations
 
 import socket
@@ -50,7 +51,9 @@ class TestE2EReadOnly:
         data = _post("list_transactions", page="1")
         assert "success" in data
         if data["success"] and data["data"]:
-            assert "description" in data["data"][0]
+            txs = data["data"].get("transactions", data["data"])
+            if txs:
+                assert "description" in txs[0]
 
     def test_list_categories_pipeline(self) -> None:
         for direction in ("withdrawal", "deposit"):
@@ -86,7 +89,9 @@ class TestE2EReadOnly:
         """Get transaction list, then fetch first transaction details."""
         txs = _post("list_transactions", page="1")
         if txs.get("success") and txs.get("data"):
-            tx_id = txs["data"][0].get("id")
+            tx_list = txs["data"].get("transactions", txs["data"])
+            if tx_list:
+                tx_id = tx_list[0].get("id")
             if tx_id:
                 detail = _post("get_transaction", transaction_id=str(tx_id))
                 assert "success" in detail

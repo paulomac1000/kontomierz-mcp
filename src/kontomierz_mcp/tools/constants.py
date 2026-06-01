@@ -1,10 +1,9 @@
 """SSOT constants + Tool Manifests with factory functions (Template 5c)."""
 
 import os
+from typing import Any
 
 KONTOMIERZ_API_KEY = os.getenv("KONTOMIERZ_API_KEY", "")
-KONTOMIERZ_USERNAME = os.getenv("KONTOMIERZ_USERNAME", "")
-KONTOMIERZ_PASSWORD = os.getenv("KONTOMIERZ_PASSWORD", "")
 
 API_BASE_URL = "https://secure.kontomierz.pl/k4"
 API_TIMEOUT = int(os.getenv("KONTOMIERZ_API_TIMEOUT", "30"))
@@ -35,7 +34,7 @@ HEADERS = {
 KNOWN_RISK_PREFIXES = frozenset({"[READ]", "[WRITE]", "[DANGEROUS]", "[DESTRUCTIVE]", "[SENSITIVE]"})
 
 
-def _make_read_manifest(name: str, timeout_ms: int = 15000, latency: str = "moderate") -> dict:
+def _make_read_manifest(name: str, timeout_ms: int = 15000, latency: str = "moderate") -> dict[str, Any]:
     return {
         "name": name,
         "version": TOOLS_VERSION,
@@ -55,7 +54,7 @@ def _make_read_manifest(name: str, timeout_ms: int = 15000, latency: str = "mode
     }
 
 
-def _make_write_manifest(name: str, timeout_ms: int = 15000, latency: str = "moderate") -> dict:
+def _make_write_manifest(name: str, timeout_ms: int = 15000, latency: str = "moderate") -> dict[str, Any]:
     return {
         "name": name,
         "version": TOOLS_VERSION,
@@ -75,7 +74,7 @@ def _make_write_manifest(name: str, timeout_ms: int = 15000, latency: str = "mod
     }
 
 
-def _make_destructive_manifest(name: str, timeout_ms: int = 30000, latency: str = "slow") -> dict:
+def _make_destructive_manifest(name: str, timeout_ms: int = 30000, latency: str = "slow") -> dict[str, Any]:
     """Manifest for irreversible operations: reboot, factory reset, delete."""
     return {
         "name": name,
@@ -96,7 +95,7 @@ def _make_destructive_manifest(name: str, timeout_ms: int = 30000, latency: str 
     }
 
 
-TOOL_MANIFESTS: dict[str, dict] = {
+TOOL_MANIFESTS: dict[str, dict[str, Any]] = {
     # Accounts
     "list_accounts": _make_read_manifest("list_accounts"),
     "create_wallet": _make_write_manifest("create_wallet"),
@@ -129,4 +128,6 @@ TOOL_MANIFESTS: dict[str, dict] = {
     # Charts / Wealth
     "get_pie_chart": _make_read_manifest("get_pie_chart"),
     "list_wealth_points": _make_read_manifest("list_wealth_points"),
+    # Capabilities
+    "describe_kontomierz_capabilities": _make_read_manifest("describe_kontomierz_capabilities", latency="instant"),
 }

@@ -11,6 +11,7 @@ from collections import defaultdict
 from typing import Any
 
 from .tools.constants import TOOLS_VERSION
+from .validators import ValidationError
 
 _request_id: contextvars.ContextVar[str] = contextvars.ContextVar("request_id", default="-")
 
@@ -157,8 +158,7 @@ async def invoke_tool(
             if client is None:
                 return error_extended("INTERNAL_ERROR", "Client not initialized in lifespan context.", retryable=False)
 
-        loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(None, do_fn, client, *args, **kwargs)
+        result = await asyncio.to_thread(do_fn, client, *args, **kwargs)
         meta = build_meta(tool_name, t0)
 
         if result["success"]:
@@ -172,5 +172,15 @@ async def invoke_tool(
             return _json.dumps(response)
         return error_extended("INTERNAL_ERROR", str(err), retryable=False)
 
+    except ValidationError as exc:
+        msg = str(exc)
+        if "Write operations are disabled" in msg:
+            return error_extended(
+                "AUTH_FAILED",
+                msg,
+                retryable=False,
+                suggestion="Set ENABLE_WRITE_OPERATIONS=1 to enable write operations.",
+            )
+        return error_extended("INVALID_PARAM", msg, retryable=False)
     except Exception as exc:
         return error_extended("INTERNAL_ERROR", str(exc), retryable=False)

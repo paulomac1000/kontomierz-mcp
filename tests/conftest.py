@@ -47,6 +47,7 @@ def mock_mcp() -> MagicMock:
             tool_name = kwargs.get("name", func.__name__)
             mcp._tools[tool_name] = func
             return func
+
         if len(args) == 1 and callable(args[0]) and not kwargs:
             mcp._tools[args[0].__name__] = args[0]
             return args[0]

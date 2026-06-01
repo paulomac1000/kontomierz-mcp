@@ -8,6 +8,7 @@ import logging
 import sys
 import time
 from contextlib import asynccontextmanager
+from typing import Any
 
 from fastmcp import FastMCP
 
@@ -20,13 +21,12 @@ from .response import (
 )
 from .tools.accounts import register_accounts_tools
 from .tools.budgets import register_budgets_tools
+from .tools.capabilities import register_capability_tools
 from .tools.charts_wealth import register_charts_wealth_tools
 from .tools.constants import (
     HEALTH_PORT,
     KNOWN_RISK_PREFIXES,
     KONTOMIERZ_API_KEY,
-    KONTOMIERZ_PASSWORD,
-    KONTOMIERZ_USERNAME,
     LOG_LEVEL,
     MCP_PORT,
     REST_API_PORT,
@@ -55,18 +55,14 @@ _logger = logging.getLogger(__name__)
 
 mcp = FastMCP("kontomierz-mcp")
 
-_TOOL_REGISTRY: dict = {}
+_TOOL_REGISTRY: dict[str, Any] = {}
 _CLIENT: KontomierzClient | None = None
 
 
 def _get_or_create_client() -> KontomierzClient:
     global _CLIENT
     if _CLIENT is None:
-        _CLIENT = KontomierzClient(
-            api_key=KONTOMIERZ_API_KEY,
-            username=KONTOMIERZ_USERNAME,
-            password=KONTOMIERZ_PASSWORD,
-        )
+        _CLIENT = KontomierzClient(api_key=KONTOMIERZ_API_KEY)
         if KONTOMIERZ_API_KEY:
             try:
                 accounts = _CLIENT.get_user_accounts()
@@ -88,25 +84,25 @@ def _resolve_bind_host() -> str:
     unsafe = _os.getenv("MCP_UNSAFE_PUBLIC_ACCESS_CONFIRMED", "").strip() == "1"
     if unsafe:
         _logger.critical(
-            "UNSAFE: Binding to 0.0.0.0 — tools exposed to all network interfaces. "
+            "UNSAFE: Binding to 0.0.0.0 — tools exposed to all network interfaces. "  # nosec B104
             "MCP_UNSAFE_PUBLIC_ACCESS_CONFIRMED=1 acknowledged."
         )
         return "0.0.0.0"
     return "127.0.0.1"
 
 
-@asynccontextmanager
-async def lifespan(server: FastMCP):
+@asynccontextmanager  # type: ignore[misc]
+async def lifespan(server: FastMCP):  # type: ignore[no-untyped-def]
     client = _get_or_create_client()
-    server._lifespan_data = {"client": client}
+    server._lifespan_data = {"client": client}  # type: ignore[attr-defined]
     _logger.info("Kontomierz client initialized")
     try:
-        yield server._lifespan_data
+        yield server._lifespan_data  # type: ignore[attr-defined]
     finally:
         _logger.info("Shutting down")
 
 
-mcp.lifespan = lifespan
+mcp.lifespan = lifespan  # type: ignore[attr-defined]
 
 register_accounts_tools(mcp)
 register_transactions_tools(mcp)
@@ -114,6 +110,7 @@ register_budgets_tools(mcp)
 register_schedules_tools(mcp)
 register_reference_tools(mcp)
 register_charts_wealth_tools(mcp)
+register_capability_tools(mcp)
 
 
 def _populate_tool_registry() -> None:
@@ -172,7 +169,7 @@ def _start_health_server() -> None:
     from http.server import BaseHTTPRequestHandler, HTTPServer
 
     class HealthHandler(BaseHTTPRequestHandler):
-        def log_message(self, format, *args):
+        def log_message(self, format, *args):  # nosec B110
             pass
 
         def do_GET(self):
@@ -268,12 +265,26 @@ def _start_rest_bridge() -> None:
             pass
         return JSONResponse({"success": True, "data": str(result), "_meta": {"duration_ms": elapsed}})
 
+    async def manifest(request):
+        tool_name = request.path_params["name"]
+        manifest = TOOL_MANIFESTS.get(tool_name)
+        if manifest is None:
+            return JSONResponse(
+                {
+                    "success": False,
+                    "error": {"code": "UNKNOWN_TOOL", "message": f"No manifest for: {tool_name}", "retryable": False},
+                },
+                status_code=404,
+            )
+        return JSONResponse(manifest)
+
     app = Starlette(
         routes=[
             Route("/health", health, methods=["GET"]),
             Route("/api/health", health, methods=["GET"]),
             Route("/api/tools", list_tools, methods=["GET"]),
             Route("/api/tools/{name}", call_tool, methods=["POST"]),
+            Route("/api/tools/{name}/manifest", manifest, methods=["GET"]),
         ]
     )
 
@@ -286,11 +297,29 @@ def _start_rest_bridge() -> None:
     threading.Thread(target=_run, daemon=True).start()
 
 
+def _load_dotenv() -> None:
+    """Load .env file into os.environ before any os.getenv() calls."""
+    import os as _os
+    from pathlib import Path as _Path
+
+    for _env_path in (_Path(".env"), _Path("/app/.env")):
+        if not _env_path.exists():
+            continue
+        with open(_env_path) as _f:
+            for _line in _f:
+                _line = _line.strip()
+                if _line and not _line.startswith("#") and "=" in _line:
+                    _key, _value = _line.split("=", 1)
+                    _os.environ.setdefault(_key.strip(), _value.strip().strip('"').strip("'"))
+        return  # stop after first found
+
+
 def main() -> None:
+    _load_dotenv()
     _populate_tool_registry()
     _inject_risk_prefixes()
-    _get_or_create_client()  # pre-initialize for REST bridge
     _start_health_server()
+    _get_or_create_client()
     _start_rest_bridge()
     bind_host = _resolve_bind_host()
     _logger.info("Starting Kontomierz MCP server (SSE on %s:%d, %d tools)", bind_host, MCP_PORT, len(_TOOL_REGISTRY))

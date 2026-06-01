@@ -4,6 +4,12 @@ version = "1.0.0"
 description = "MCP server for Kontomierz.pl personal finance API"
 requires-python = ">=3.11"
 license = {text = "MIT"}
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+]
 dependencies = [
     "requests>=2.31.0",
     "fastmcp>=2.0.0",
@@ -19,6 +25,7 @@ dev = [
     "ruff>=0.6.0",
     "mypy>=1.11.0",
     "bandit>=1.8.0",
+    "types-requests",
 ]
 
 [project.scripts]
@@ -33,7 +40,7 @@ where = ["src"]
 
 [tool.ruff]
 line-length = 130
-extend-exclude = ["tests/"]
+target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W", "UP"]
@@ -46,11 +53,28 @@ known-first-party = ["kontomierz_mcp"]
 
 [tool.mypy]
 strict = true
-python_version = "3.11"
-exclude = ["tests/"]
+python_version = "3.14"
+warn_unused_ignores = true
+disallow_untyped_decorators = false
+follow_untyped_imports = false
+warn_return_any = false
+exclude = ["tests/", "src/kontomierz_mcp/server\\.py"]
 
-[tool.bandit]
-exclude_dirs = ["tests", ".venv"]
+[tool.coverage.run]
+source = ["src/kontomierz_mcp"]
+omit = [
+    "tests/*",
+    "src/kontomierz_mcp/server.py",
+    "src/kontomierz_mcp/__main__.py",
+]
+
+[tool.coverage.report]
+fail_under = 80
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+    "raise NotImplementedError",
+]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
@@ -62,14 +86,5 @@ markers = [
     "e2e: End-to-end tests (full pipeline)",
 ]
 
-[tool.coverage.run]
-source = ["src/kontomierz_mcp"]
-omit = ["tests/*"]
-
-[tool.coverage.report]
-fail_under = 80
-exclude_lines = [
-    "pragma: no cover",
-    "if __name__ == .__main__.:",
-    "raise NotImplementedError",
-]
+[tool.bandit]
+exclude_dirs = ["tests", ".venv", "docs"]

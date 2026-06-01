@@ -7,25 +7,33 @@ from typing import Any
 
 from ..client import KontomierzClient
 from ..response import error_dict, invoke_tool
-from ..validators import check_write_enabled
+from ..validators import (
+    check_write_enabled,
+    validate_currency_name,
+    validate_date,
+    validate_direction,
+    validate_holidays,
+    validate_repeat,
+    validate_required,
+)
 
 
 def _do_list_scheduled_transactions(
     client: KontomierzClient,
     schedule_group_name: str,
     page: int = 1,
-    per_page: int | None = None,
-    start_on: str | None = None,
-    end_on: str | None = None,
-    direction: str | None = None,
+    per_page: int = 0,
+    start_on: str = "",
+    end_on: str = "",
+    direction: str = "",
 ) -> dict[str, Any]:
     result = client.get_scheduled_transactions(
         schedule_group_name=schedule_group_name,
         page=page,
-        per_page=per_page,
-        start_on=start_on,
-        end_on=end_on,
-        direction=direction,
+        per_page=per_page or None,
+        start_on=start_on or None,
+        end_on=end_on or None,
+        direction=direction or None,
     )
     if result is None:
         return {"success": False, "error": error_dict("API_ERROR", "Failed to fetch scheduled transactions.", retryable=True)}
@@ -35,8 +43,10 @@ def _do_list_scheduled_transactions(
         "data": {
             "scheduled_transactions": transactions,
             "page": page,
+            "limit": per_page,
             "has_more": len(transactions) == (per_page or 0) or len(transactions) > 0,
-            "total_count": len(transactions),
+            "next_offset": page + 1 if (len(transactions) == (per_page or 0) or len(transactions) > 0) else None,
+            "total": len(transactions),
         },
     }
 
@@ -62,6 +72,12 @@ def _do_create_schedule(
     repeat: str,
 ) -> dict[str, Any]:
     check_write_enabled()
+    validate_direction(direction)
+    validate_date(deadline_on, "deadline_on")
+    validate_holidays(holidays)
+    validate_required(description, "description")
+    validate_currency_name(currency_name)
+    validate_repeat(repeat)
     result = client.create_schedule(direction, deadline_on, holidays, description, currency_amount, currency_name, repeat)
     if result is None:
         return {"success": False, "error": error_dict("API_ERROR", "Failed to create schedule.", retryable=True)}
@@ -121,10 +137,10 @@ def register_schedules_tools(mcp: Any) -> None:
     async def list_scheduled_transactions(
         schedule_group_name: str = "unpaid",
         page: int = 1,
-        per_page: int | None = None,
-        start_on: str | None = None,
-        end_on: str | None = None,
-        direction: str | None = None,
+        per_page: int = 0,
+        start_on: str = "",
+        end_on: str = "",
+        direction: str = "",
     ) -> str:
         """[READ] List scheduled payments.
 
