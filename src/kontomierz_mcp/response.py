@@ -156,6 +156,12 @@ async def invoke_tool(
             lifespan = getattr(mcp, "_lifespan_data", None) or {}
             client = lifespan.get("client")
             if client is None:
+                try:
+                    from .server import _get_or_create_client
+                    client = _get_or_create_client()
+                except Exception:
+                    pass
+            if client is None:
                 return error_extended("INTERNAL_ERROR", "Client not initialized in lifespan context.", retryable=False)
 
         result = await asyncio.to_thread(do_fn, client, *args, **kwargs)
