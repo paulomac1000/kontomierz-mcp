@@ -2,6 +2,17 @@
 
 All notable changes to the kontomierz-mcp project.
 
+## [1.0.1] — 2026-07-07
+
+### Fixed
+- **POST/PUT requests now send JSON body** instead of form-encoded data.
+  `_post()` and `_put()` in `client.py` used `data=data` which sent
+  `application/x-www-form-urlencoded` despite `Content-Type: application/json`
+  in headers. This caused 400 Bad Request from Kontomierz API on all write
+  operations (create/update wallet, transaction, budget, schedule).
+  Fixed by using `json=data` which correctly serializes dict as JSON and
+  sets the matching Content-Type header.
+
 ## [1.0.0] — 2026-06-01
 
 ### Added

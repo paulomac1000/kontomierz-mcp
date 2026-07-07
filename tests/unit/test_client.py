@@ -69,9 +69,9 @@ class TestCreateWallet:
 
         assert result is not None
         assert result["id"] == 99
-        data = mock_post.call_args.kwargs["data"]
-        assert data["user_account[currency_balance]"] == "100.00"
-        assert data["user_account[currency_name]"] == "PLN"
+        body = mock_post.call_args.kwargs["json"]
+        assert body["user_account[currency_balance]"] == "100.00"
+        assert body["user_account[currency_name]"] == "PLN"
 
     def test_api_error(self, client: KontomierzClient) -> None:
         with patch("kontomierz_mcp.client.requests.post", side_effect=requests.exceptions.ConnectionError("no net")):
@@ -193,8 +193,8 @@ class TestCreateMoneyTransaction:
 
         assert result is not None
         assert result["id"] == 100
-        data = mock_post.call_args.kwargs["data"]
-        assert data["money_transaction[client_assigned_id]"] == "ts_123"
+        body = mock_post.call_args.kwargs["json"]
+        assert body["money_transaction[client_assigned_id]"] == "ts_123"
 
     def test_api_error(self, client: KontomierzClient) -> None:
         with patch("kontomierz_mcp.client.requests.post", side_effect=requests.exceptions.ConnectionError("no net")):
@@ -321,8 +321,8 @@ class TestCreateBudget:
 
         assert result is not None
         assert result["id"] == 10
-        data = mock_post.call_args.kwargs["data"]
-        assert data["budget[limit]"] == "300.00"
+        body = mock_post.call_args.kwargs["json"]
+        assert body["budget[limit]"] == "300.00"
 
     def test_api_error(self, client: KontomierzClient) -> None:
         with patch("kontomierz_mcp.client.requests.post", side_effect=requests.exceptions.ConnectionError("no net")):
@@ -444,8 +444,8 @@ class TestCreateSchedule:
 
         assert result is not None
         assert result["description"] == "Abonament Netflix"
-        data = mock_post.call_args.kwargs["data"]
-        assert data["schedule[repeat]"] == "2"
+        body = mock_post.call_args.kwargs["json"]
+        assert body["schedule[repeat]"] == "2"
 
     def test_api_error(self, client: KontomierzClient) -> None:
         with patch("kontomierz_mcp.client.requests.post", side_effect=requests.exceptions.ConnectionError("no net")):
@@ -556,6 +556,89 @@ class TestGetPieChart:
     def test_api_error(self, client: KontomierzClient) -> None:
         with patch("kontomierz_mcp.client.requests.get", side_effect=requests.exceptions.ConnectionError("no net")):
             assert client.get_pie_chart() is None
+
+
+# ---------------------------------------------------------------------------
+# Bug regression: POST must send JSON body, not form-encoded
+# ---------------------------------------------------------------------------
+
+
+class TestPostSendsJson:
+    """Verify that _post uses json= parameter, not data= (form-encoded).
+
+    The Kontomierz API expects JSON request bodies. Using data= sends
+    form-encoded data which causes 400 Bad Request on all POST writes.
+    """
+
+    def test_create_schedule_sends_json(self, client: KontomierzClient) -> None:
+        payload = {"schedule": {"id": 10, "description": "Abonament Netflix"}}
+        with patch("kontomierz_mcp.client.requests.post", return_value=_mock_response(payload)) as mock_post:
+            client.create_schedule(
+                direction="withdrawal",
+                deadline_on="15-06-2026",
+                holidays="1",
+                description="Abonament Netflix",
+                currency_amount="49.99",
+                currency_name="PLN",
+                repeat="2",
+            )
+
+        kwargs = mock_post.call_args.kwargs
+        # The body MUST be sent via json= (not data=) so Content-Type matches
+        assert "json" in kwargs, "POST must use json= parameter to send JSON body"
+        assert kwargs["json"]["schedule[direction]"] == "withdrawal"
+        # If data= is present, it should be None (not used for body)
+        data_param = kwargs.get("data")
+        assert data_param is None, f"POST should not use data= for body, got: {data_param}"
+
+    def test_create_wallet_sends_json(self, client: KontomierzClient) -> None:
+        payload = {"user_account": {"id": 99, "display_name": "My Wallet"}}
+        with patch("kontomierz_mcp.client.requests.post", return_value=_mock_response(payload)) as mock_post:
+            client.create_wallet("100.00", "PLN", user_name="My Wallet")
+
+        kwargs = mock_post.call_args.kwargs
+        assert "json" in kwargs, "POST must use json= parameter"
+        assert kwargs["json"]["user_account[currency_balance]"] == "100.00"
+        data_param = kwargs.get("data")
+        assert data_param is None, f"POST should not use data= for body, got: {data_param}"
+
+    def test_create_transaction_sends_json(self, client: KontomierzClient) -> None:
+        payload = {"money_transaction": {"id": 100, "description": "Nowy wydatek"}}
+        with patch("kontomierz_mcp.client.requests.post", return_value=_mock_response(payload)) as mock_post:
+            client.create_money_transaction(
+                client_assigned_id="ts_123",
+                currency_amount="99.99",
+                currency_name="PLN",
+                direction="withdrawal",
+                name="Nowy wydatek",
+                transaction_on="15-06-2026",
+            )
+
+        kwargs = mock_post.call_args.kwargs
+        assert "json" in kwargs, "POST must use json= parameter"
+        assert kwargs["json"]["money_transaction[client_assigned_id]"] == "ts_123"
+        data_param = kwargs.get("data")
+        assert data_param is None, f"POST should not use data= for body, got: {data_param}"
+
+    def test_create_budget_sends_json(self, client: KontomierzClient) -> None:
+        payload = {"budget": {"id": 10, "limit": "300.00"}}
+        with patch("kontomierz_mcp.client.requests.post", return_value=_mock_response(payload)) as mock_post:
+            client.create_budget("300.00", category_id=5)
+
+        kwargs = mock_post.call_args.kwargs
+        assert "json" in kwargs, "POST must use json= parameter"
+        assert kwargs["json"]["budget[limit]"] == "300.00"
+        data_param = kwargs.get("data")
+        assert data_param is None, f"POST should not use data= for body, got: {data_param}"
+
+    def test_copy_budgets_no_body_still_works(self, client: KontomierzClient) -> None:
+        """Bodiless POST (copy_budgets) must still work with json=None."""
+        with patch("kontomierz_mcp.client.requests.post", return_value=_mock_response({"status": "ok"})) as mock_post:
+            client.copy_budgets_from_last_month()
+
+        kwargs = mock_post.call_args.kwargs
+        # Should not crash — json=None or absent is acceptable
+        assert kwargs.get("json") is None or "json" not in kwargs
 
 
 # ---------------------------------------------------------------------------

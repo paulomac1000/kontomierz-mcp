@@ -1,6 +1,6 @@
 [project]
 name = "kontomierz-mcp"
-version = "1.0.0"
+version = "1.0.1"
 description = "MCP server for Kontomierz.pl personal finance API"
 requires-python = ">=3.11"
 license = {text = "MIT"}
