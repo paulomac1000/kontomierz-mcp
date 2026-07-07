@@ -40,7 +40,10 @@ class KontomierzClient:
     def _post(self, path: str, data: dict[str, Any] | None = None) -> Any:
         url = f"{API_BASE_URL}/{path}"
         try:
-            resp = requests.post(url, headers=HEADERS, params={"api_key": self._api_key}, data=data, timeout=self._timeout)
+            if data is not None:
+                resp = requests.post(url, headers=HEADERS, params={"api_key": self._api_key}, json=data, timeout=self._timeout)
+            else:
+                resp = requests.post(url, headers=HEADERS, params={"api_key": self._api_key}, timeout=self._timeout)
             resp.raise_for_status()
             return resp.json()
         except requests.exceptions.RequestException:
@@ -50,7 +53,10 @@ class KontomierzClient:
     def _put(self, path: str, data: dict[str, Any] | None = None) -> bool:
         url = f"{API_BASE_URL}/{path}"
         try:
-            resp = requests.put(url, headers=HEADERS, params=self._params(), data=data, timeout=self._timeout)
+            if data is not None:
+                resp = requests.put(url, headers=HEADERS, params=self._params(), json=data, timeout=self._timeout)
+            else:
+                resp = requests.put(url, headers=HEADERS, params=self._params(), timeout=self._timeout)
             resp.raise_for_status()
             return True
         except requests.exceptions.RequestException:
