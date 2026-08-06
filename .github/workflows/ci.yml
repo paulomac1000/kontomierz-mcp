@@ -31,6 +31,8 @@ jobs:
           cache-dependency-path: pyproject.toml
       - name: Install project quality environment
         run: python -m pip install -e ".[dev]"
+      - name: Verify installed dependency graph
+        run: python -m pip check
       - name: Verify checkout identity
         env:
           EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -61,6 +63,41 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+
+  standards:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Checkout trusted ai-skills validators
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          repository: paulomac1000/ai-skills
+          ref: 661ff01a5e70d58d6c94a12545b24647e52063ed
+          path: .trusted/ai-skills
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v6
+        with:
+          python-version: "3.12"
+      - name: Install trusted validator lock
+        run: >-
+          python -m pip install --require-hashes
+          -r .trusted/ai-skills/requirements-dev-linux-x64-py312.lock
+      - name: Validate governed documents with trusted AFDS validator
+        run: >-
+          python .trusted/ai-skills/skills/afds-doc-writer/validate.py
+          AGENTS.md docs
+      - name: Audit AGENTS instructions from trusted revision
+        run: >-
+          python .trusted/ai-skills/skills/agents-md-architect/tools/audit_agents_md.py
+          . --profile mcp-server --layout single --language en --strict
+      - name: Audit workflows from trusted revision
+        run: >-
+          python .trusted/ai-skills/skills/ci-cd-architect/tools/check_github_actions_policy.py .
+
   compatibility:
     strategy:
       fail-fast: false
@@ -79,10 +116,11 @@ jobs:
           cache: pip
           cache-dependency-path: pyproject.toml
       - run: python -m pip install -e ".[dev]"
+      - run: python -m pip check
       - run: python -m pytest -m "not external" -q
 
   exact-artifact:
-    needs: [quality, compatibility]
+    needs: [quality, compatibility, standards]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
@@ -111,6 +149,7 @@ jobs:
           /tmp/wheel-venv/bin/python -m pip install --no-index \
             --find-links=dist/wheelhouse dist/kontomierz_mcp-*.whl
           /tmp/wheel-venv/bin/python -m pip install pytest pytest-asyncio pytest-cov
+          /tmp/wheel-venv/bin/python -m pip check
           rm -rf /tmp/exact-wheel-test
           mkdir -p /tmp/exact-wheel-test
           cp -R tests scripts pyproject.toml /tmp/exact-wheel-test/
@@ -127,17 +166,73 @@ jobs:
           assert "/tmp/wheel-venv/" in str(source), source
           print(source)
           PY
-      - name: Build, smoke, and preserve the exact image
+      - name: Hash the exact wheel bundle
+        run: |
+          set -euo pipefail
+          find dist -type f -name '*.whl' -print0 \
+            | sort -z | xargs -0 sha256sum > dist/SHA256SUMS
+          sha256sum --check dist/SHA256SUMS
+      - name: Build and smoke a candidate image
+        if: github.event_name != 'push'
         run: |
           set -euo pipefail
           docker build -t "kontomierz-mcp:$SOURCE_SHA" .
           docker run --rm --entrypoint python "kontomierz-mcp:$SOURCE_SHA" -c \
             "from kontomierz_mcp.config import Settings; print(Settings(api_key='', mock_data=True))"
-          docker save "kontomierz-mcp:$SOURCE_SHA" | gzip -9 > dist/kontomierz-mcp-image.tar.gz
-          find dist -type f \( -name '*.whl' -o -name '*.tar.gz' \) -print0 \
-            | sort -z | xargs -0 sha256sum > dist/SHA256SUMS
+      - name: Upload exact wheel bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: wheel-bundle-${{ env.SOURCE_SHA }}
+          path: |
+            dist/*.whl
+            dist/wheelhouse/*.whl
+            dist/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 30
+
+  release-artifact:
+    needs: [exact-artifact]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+      attestations: write
+    env:
+      SOURCE_SHA: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          ref: ${{ env.SOURCE_SHA }}
+          persist-credentials: false
+      - name: Download exact tested wheel bundle
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: wheel-bundle-${{ env.SOURCE_SHA }}
+          path: dist
+      - name: Verify wheel bundle and build image once
+        run: |
+          set -euo pipefail
           sha256sum --check dist/SHA256SUMS
-      - name: Upload release bundle
+          docker build -t "kontomierz-mcp:$SOURCE_SHA" .
+          docker run --rm --entrypoint python "kontomierz-mcp:$SOURCE_SHA" -c \
+            "from kontomierz_mcp.config import Settings; print(Settings(api_key='', mock_data=True))"
+          docker save "kontomierz-mcp:$SOURCE_SHA" | gzip -9 > dist/kontomierz-mcp-image.tar.gz
+          sha256sum dist/kontomierz-mcp-image.tar.gz >> dist/SHA256SUMS
+          sha256sum --check dist/SHA256SUMS
+      - name: Attest the built image archive
+        id: build-attestation
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-path: dist/kontomierz-mcp-image.tar.gz
+          create-storage-record: false
+      - name: Preserve build attestation bundle
+        env:
+          BUNDLE_PATH: ${{ steps.build-attestation.outputs.bundle-path }}
+        run: cp "$BUNDLE_PATH" dist/build-provenance.jsonl
+      - name: Upload attested release bundle
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: release-bundle-${{ env.SOURCE_SHA }}
@@ -146,5 +241,6 @@ jobs:
             dist/wheelhouse/*.whl
             dist/kontomierz-mcp-image.tar.gz
             dist/SHA256SUMS
+            dist/build-provenance.jsonl
           if-no-files-found: error
           retention-days: 30

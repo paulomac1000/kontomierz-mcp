@@ -12,6 +12,8 @@ from contextlib import closing
 from pathlib import Path
 from urllib.request import urlopen
 
+from kontomierz_mcp.manifests import TOOL_DEFINITIONS
+
 
 def _free_port() -> int:
     with closing(socket.socket()) as listener:
@@ -19,11 +21,33 @@ def _free_port() -> int:
         return int(listener.getsockname()[1])
 
 
+def _input_schema(tool) -> dict[str, object]:
+    schema = getattr(tool, "inputSchema", None)
+    if schema is None:
+        schema = getattr(tool, "input_schema")
+    return schema
+
+
 async def _assert_contract(client) -> None:
     listing = await client.list_tools()
-    names = {tool.name for tool in listing.tools}
-    assert len(names) == 27
-    assert "list_accounts" in names
+    discovered = {tool.name: tool for tool in listing.tools}
+    assert set(discovered) == set(TOOL_DEFINITIONS)
+    for name, definition in TOOL_DEFINITIONS.items():
+        tool = discovered[name]
+        assert tool.description == definition.description
+        schema = _input_schema(tool)
+        assert set(schema.get("properties", {})) == {parameter.name for parameter in definition.parameters}
+        assert tuple(schema.get("required", ())) == definition.required_parameters
+        for parameter in definition.parameters:
+            assert schema["properties"][parameter.name]["description"] == parameter.description
+
+    capabilities = await client.call_tool("describe_kontomierz_capabilities", {})
+    assert capabilities.is_error is False
+    document = capabilities.structured_content["data"]
+    assert document["schema_version"] == "3.0.0"
+    assert set(document["tools"]) == set(TOOL_DEFINITIONS)
+    assert document["tools"]["create_wallet"]["manifest"]["active_state"] == "disabled"
+
     result = await client.call_tool("list_accounts", {})
     assert result.is_error is False
     denied = await client.call_tool(
@@ -31,6 +55,7 @@ async def _assert_contract(client) -> None:
         {"currency_balance": "1.00", "currency_name": "PLN"},
     )
     assert denied.is_error is True
+    assert denied.structured_content["error"]["code"] == "AUTHORIZATION_FAILED"
 
 
 async def smoke_stdio(executable: Path) -> None:

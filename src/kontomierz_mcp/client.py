@@ -29,7 +29,7 @@ class KontomierzClient:
         self._timeout = timeout_seconds
         self._body_mode = body_mode
         self._client = client or httpx.AsyncClient(
-            headers={"Accept": "application/json", "User-Agent": "kontomierz-mcp/1"},
+            headers={"Accept": "application/json", "User-Agent": "kontomierz-mcp/2"},
             timeout=httpx.Timeout(timeout_seconds),
         )
         self._owns_client = client is None
@@ -170,17 +170,18 @@ class KontomierzClient:
         }
         if user_name is not None:
             body["user_account[user_name]"] = user_name
-        return self._expect_dict(
-            self._unwrap(await self._request("POST", "user_accounts/create_wallet.json", body=body), "user_account")
+        return self._response_object(
+            await self._request("POST", "user_accounts/create_wallet.json", body=body),
+            "user_account",
+            write=True,
         )
 
     async def update_wallet(self, wallet_id: int, **fields: Any) -> dict[str, Any]:
         body = {f"user_account[{key}]": value for key, value in fields.items() if value is not None}
-        return self._expect_dict(
-            self._unwrap(
-                await self._request("PUT", f"user_accounts/{wallet_id}/update_wallet.json", body=body),
-                "user_account",
-            )
+        return self._response_object(
+            await self._request("PUT", f"user_accounts/{wallet_id}/update_wallet.json", body=body),
+            "user_account",
+            write=True,
         )
 
     async def destroy_wallet(self, wallet_id: int) -> bool:
@@ -195,23 +196,26 @@ class KontomierzClient:
         )
 
     async def get_money_transaction(self, transaction_id: int) -> dict[str, Any]:
-        return self._expect_dict(
-            self._unwrap(await self._request("GET", f"money_transactions/{transaction_id}.json"), "money_transaction")
+        return self._response_object(
+            await self._request("GET", f"money_transactions/{transaction_id}.json"),
+            "money_transaction",
+            write=False,
         )
 
     async def create_money_transaction(self, **fields: Any) -> dict[str, Any]:
         body = {f"money_transaction[{key}]": value for key, value in fields.items() if value is not None}
-        return self._expect_dict(
-            self._unwrap(await self._request("POST", "money_transactions.json", body=body), "money_transaction")
+        return self._response_object(
+            await self._request("POST", "money_transactions.json", body=body),
+            "money_transaction",
+            write=True,
         )
 
     async def update_money_transaction(self, transaction_id: int, **fields: Any) -> dict[str, Any]:
         body = {f"money_transaction[{key}]": value for key, value in fields.items() if value is not None}
-        return self._expect_dict(
-            self._unwrap(
-                await self._request("PUT", f"money_transactions/{transaction_id}.json", body=body),
-                "money_transaction",
-            )
+        return self._response_object(
+            await self._request("PUT", f"money_transactions/{transaction_id}.json", body=body),
+            "money_transaction",
+            write=True,
         )
 
     async def delete_money_transaction(self, transaction_id: int) -> bool:
@@ -267,7 +271,7 @@ class KontomierzClient:
             body["budget[category_group_id]"] = category_group_id
         if month_on:
             body["budget[month_on]"] = month_on
-        return self._expect_dict(self._unwrap(await self._request(method, path, body=body), "budget"))
+        return self._response_object(await self._request(method, path, body=body), "budget", write=True)
 
     async def delete_budget(self, budget_id: int) -> bool:
         return bool(await self._request("DELETE", f"budgets/{budget_id}.json", expect_json=False))
@@ -284,7 +288,11 @@ class KontomierzClient:
         )
 
     async def get_schedule(self, schedule_id: int) -> dict[str, Any]:
-        return self._expect_dict(self._unwrap(await self._request("GET", f"schedules/{schedule_id}.json"), "schedule"))
+        return self._response_object(
+            await self._request("GET", f"schedules/{schedule_id}.json"),
+            "schedule",
+            write=False,
+        )
 
     async def create_schedule(self, **fields: Any) -> dict[str, Any]:
         return await self._schedule_write("POST", "schedules.json", fields)
@@ -294,7 +302,7 @@ class KontomierzClient:
 
     async def _schedule_write(self, method: str, path: str, fields: Mapping[str, Any]) -> dict[str, Any]:
         body = {f"schedule[{key}]": value for key, value in fields.items() if value is not None}
-        return self._expect_dict(self._unwrap(await self._request(method, path, body=body), "schedule"))
+        return self._response_object(await self._request(method, path, body=body), "schedule", write=True)
 
     async def delete_schedule(self, schedule_id: int) -> bool:
         return bool(await self._request("DELETE", f"schedules/{schedule_id}.json", expect_json=False))
@@ -323,13 +331,31 @@ class KontomierzClient:
         return self._expect_dict(await self._request("GET", "charts/money_transactions.json", query=filters))
 
     @staticmethod
-    def _expect_dict(value: Any) -> dict[str, Any]:
+    def _response_object(payload: Json | bool, key: str, *, write: bool) -> dict[str, Any]:
+        if not isinstance(payload, dict) or key not in payload:
+            raise UpstreamError(
+                ErrorCode.UPSTREAM_FAILURE,
+                f"Kontomierz response is missing the {key} object",
+                write_outcome_ambiguous=write,
+            )
+        return KontomierzClient._expect_dict(payload[key], write=write)
+
+    @staticmethod
+    def _expect_dict(value: Any, *, write: bool = False) -> dict[str, Any]:
         if not isinstance(value, dict):
-            raise UpstreamError(ErrorCode.UPSTREAM_FAILURE, "Unexpected object response from Kontomierz")
+            raise UpstreamError(
+                ErrorCode.UPSTREAM_FAILURE,
+                "Unexpected object response from Kontomierz",
+                write_outcome_ambiguous=write,
+            )
         return value
 
     @staticmethod
-    def _expect_list(value: Any) -> list[dict[str, Any]]:
+    def _expect_list(value: Any, *, write: bool = False) -> list[dict[str, Any]]:
         if not isinstance(value, list) or not all(isinstance(item, dict) for item in value):
-            raise UpstreamError(ErrorCode.UPSTREAM_FAILURE, "Unexpected list response from Kontomierz")
+            raise UpstreamError(
+                ErrorCode.UPSTREAM_FAILURE,
+                "Unexpected list response from Kontomierz",
+                write_outcome_ambiguous=write,
+            )
         return value

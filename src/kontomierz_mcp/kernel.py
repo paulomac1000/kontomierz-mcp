@@ -9,15 +9,17 @@ import time
 import uuid
 from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
+from importlib.metadata import PackageNotFoundError, version as package_version
 from typing import Any, AsyncIterator
 
 from . import __version__
 from .config import Settings
 from .errors import ApplicationError, ErrorCode, UpstreamError
-from .manifests import TOOL_MANIFESTS, ToolManifest
+from .manifests import TOOL_DEFINITIONS, TOOL_MANIFESTS, ToolManifest, project_manifest
 
 Operation = Callable[..., Any | Awaitable[Any]]
 _logger = logging.getLogger(__name__)
+_CAPABILITY_TOOL = "describe_kontomierz_capabilities"
 
 
 class InvocationKernel:
@@ -32,13 +34,19 @@ class InvocationKernel:
         self._admitted_invocations = 0
         self._target_locks: dict[str, asyncio.Lock] = {}
         self._readiness_lock = asyncio.Lock()
-        self._readiness_value = False
-        self._readiness_checked_at = 0.0
+        self._readiness_value = settings.mock_data
+        self._readiness_checked_at = time.monotonic() if settings.mock_data else 0.0
         self._closed = False
 
     @property
     def structurally_ready(self) -> bool:
         return not self._closed and set(self._operations) == set(TOOL_MANIFESTS)
+
+    @property
+    def cached_dependency_ready(self) -> bool | None:
+        if self._readiness_checked_at == 0:
+            return None
+        return self._readiness_value
 
     async def readiness(self) -> bool:
         """Return cached readiness that includes the mandatory dependency."""
@@ -120,7 +128,7 @@ class InvocationKernel:
                 retryable=False,
                 suggestion="Reconcile resource state before any retry.",
             )
-        if manifest.side_effects in {"write", "destructive"} and error.retryable:
+        if error.retryable and not manifest.retryable:
             return ApplicationError(
                 error.code,
                 error.message,
@@ -130,6 +138,67 @@ class InvocationKernel:
             )
         return error
 
+    @staticmethod
+    def _sdk_identity() -> tuple[str, list[str]]:
+        try:
+            sdk_version = package_version("mcp")
+        except PackageNotFoundError:
+            sdk_version = "unavailable"
+        try:
+            from mcp.shared.version import SUPPORTED_PROTOCOL_VERSIONS
+
+            protocol_versions = [str(item) for item in SUPPORTED_PROTOCOL_VERSIONS]
+        except ImportError:
+            protocol_versions = []
+        return sdk_version, protocol_versions
+
+    def capability_document(self) -> dict[str, Any]:
+        """Return zero-I/O supported and active catalogs from the governed definitions."""
+        dependency_ready = self.cached_dependency_ready
+        projected = {
+            name: project_manifest(
+                definition.manifest,
+                writes_enabled=self._settings.enable_write_operations,
+                dependency_ready=dependency_ready,
+            )
+            for name, definition in TOOL_DEFINITIONS.items()
+        }
+        tools = {
+            name: TOOL_DEFINITIONS[name].as_dict(manifest=projected[name])
+            for name in TOOL_DEFINITIONS
+        }
+        active_tools = {
+            name: contract
+            for name, contract in tools.items()
+            if projected[name].active_state == "active"
+        }
+        sdk_version, protocol_versions = self._sdk_identity()
+        dependency_state = (
+            "unknown"
+            if dependency_ready is None
+            else ("ready" if dependency_ready else "unavailable")
+        )
+        return {
+            "schema_version": "3.0.0",
+            "server_version": __version__,
+            "sdk_family": "mcp-python",
+            "sdk_version": sdk_version,
+            "protocol_versions": protocol_versions,
+            "supported_transports": ["stdio", "streamable-http"],
+            "active_transport": (
+                "streamable-http"
+                if self._settings.transport in {"http", "streamable-http"}
+                else "stdio"
+            ),
+            "profile": "local-trusted-user",
+            "dependency_state": dependency_state,
+            "write_operations_enabled": self._settings.enable_write_operations,
+            "supported_component_count": len(tools),
+            "active_component_count": len(active_tools),
+            "tools": tools,
+            "active_tools": active_tools,
+        }
+
     async def invoke(self, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         if self._closed:
             raise ApplicationError(ErrorCode.DEPENDENCY_UNAVAILABLE, "Server is shutting down", retryable=True)
@@ -137,6 +206,17 @@ class InvocationKernel:
         operation = self._operations.get(tool_name)
         if manifest is None or operation is None:
             raise ApplicationError(ErrorCode.RESOURCE_NOT_FOUND, f"Unknown tool: {tool_name}")
+        projected = project_manifest(
+            manifest,
+            writes_enabled=self._settings.enable_write_operations,
+            dependency_ready=self.cached_dependency_ready,
+        )
+        if projected.active_state == "unavailable":
+            raise ApplicationError(
+                ErrorCode.DEPENDENCY_UNAVAILABLE,
+                "The configured Kontomierz dependency is not ready",
+                retryable=manifest.retryable,
+            )
         if manifest.requires_operator_write_gate and not self._settings.enable_write_operations:
             raise ApplicationError(
                 ErrorCode.AUTHORIZATION_FAILED,
@@ -155,7 +235,11 @@ class InvocationKernel:
                 async with asyncio.timeout(manifest.timeout_seconds):
                     async with self._execution_slot(manifest):
                         operation_started = True
-                        data = await self._run(operation, arguments)
+                        data = (
+                            self.capability_document()
+                            if tool_name == _CAPABILITY_TOOL
+                            else await self._run(operation, arguments)
+                        )
             except TimeoutError as exc:
                 if operation_started and manifest.side_effects in {"write", "destructive"}:
                     raise ApplicationError(
@@ -167,12 +251,20 @@ class InvocationKernel:
                 raise ApplicationError(
                     ErrorCode.TIMEOUT,
                     "The operation exceeded its deadline",
-                    retryable=False,
+                    retryable=manifest.retryable,
+                    suggestion=(
+                        "Retry only within the manifest attempt and deadline bounds."
+                        if manifest.retryable
+                        else None
+                    ),
                 ) from exc
             except asyncio.CancelledError:
                 raise
             except ApplicationError as exc:
-                raise self._normalize_error(manifest, exc) from exc
+                normalized = self._normalize_error(manifest, exc)
+                if normalized is exc:
+                    raise
+                raise normalized from exc
             except Exception as exc:
                 _logger.exception("Unhandled operation failure request_id=%s tool=%s", request_id, tool_name)
                 raise ApplicationError(ErrorCode.INTERNAL_ERROR, "The operation failed unexpectedly") from exc
@@ -183,7 +275,7 @@ class InvocationKernel:
                 "request_id": request_id,
                 "tool_name": tool_name,
                 "duration_ms": int((time.monotonic() - started_at) * 1000),
-                "tool_version": __version__,
+                "tool_version": manifest.version,
                 "target": manifest.target_scope,
             },
         }

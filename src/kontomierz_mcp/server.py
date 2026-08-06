@@ -6,84 +6,20 @@ import json
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Annotated, Any
 
+from pydantic import Field
+
+from . import __version__
 from .client import KontomierzClient
 from .config import Settings
 from .errors import ApplicationError
 from .kernel import InvocationKernel
+from .manifests import TOOL_DEFINITIONS
 from .mock_backend import MockKontomierzClient
 from .operations import build_operations
 
 _logger = logging.getLogger(__name__)
-
-_TOOL_SIGNATURES: dict[str, str] = {
-    "list_accounts": "",
-    "create_wallet": (
-        "currency_balance: str, currency_name: str, user_name: str | None = None, "
-        "liquid: str = '1'"
-    ),
-    "update_wallet": (
-        "wallet_id: int, currency_balance: str | None = None, currency_name: str | None = None, "
-        "user_name: str | None = None, liquid: str | None = None"
-    ),
-    "destroy_wallet": "wallet_id: int",
-    "list_transactions": (
-        "page: int = 1, per_page: int = 0, user_account_id: int | None = None, q: str = '', "
-        "start_on: str = '', end_on: str = '', direction: str = 'all', tag_name: str = '', "
-        "category_group_id: int | None = None, category_id: int | None = None, "
-        "show_hidden_transactions: bool = False"
-    ),
-    "get_transaction": "transaction_id: int",
-    "create_transaction": (
-        "client_assigned_id: str, user_account_id: int | None = None, category_id: int | None = None, "
-        "currency_amount: str = '', currency_name: str = '', direction: str = 'withdrawal', "
-        "tag_string: str = '', name: str = '', transaction_on: str = ''"
-    ),
-    "update_transaction": (
-        "transaction_id: int, user_account_id: int | None = None, category_id: int | None = None, "
-        "currency_amount: str | None = None, currency_name: str | None = None, "
-        "direction: str | None = None, tag_string: str | None = None, name: str | None = None, "
-        "transaction_on: str | None = None"
-    ),
-    "delete_transaction": "transaction_id: int",
-    "list_categories": "direction: str = 'withdrawal'",
-    "list_tags": "",
-    "list_currencies": "",
-    "list_budgets": "month: str = ''",
-    "create_budget": (
-        "limit: str, category_id: int | None = None, category_group_id: int | None = None, "
-        "month: str = ''"
-    ),
-    "update_budget": "budget_id: int, limit: str",
-    "delete_budget": "budget_id: int",
-    "copy_budgets_from_last_month": "",
-    "list_scheduled_transactions": (
-        "schedule_group_name: str = 'unpaid', page: int = 1, per_page: int = 0, "
-        "start_on: str = '', end_on: str = '', direction: str = 'all'"
-    ),
-    "get_schedule": "schedule_id: int",
-    "create_schedule": (
-        "direction: str, deadline_on: str, holidays: int, description: str, "
-        "currency_amount: str, currency_name: str, repeat: int"
-    ),
-    "update_schedule": (
-        "schedule_id: int, direction: str | None = None, deadline_on: str | None = None, "
-        "holidays: int | None = None, description: str | None = None, "
-        "currency_amount: str | None = None, currency_name: str | None = None, "
-        "repeat: int | None = None"
-    ),
-    "delete_schedule": "schedule_id: int",
-    "mark_schedule_paid": "schedule_id: int, payment_date: str",
-    "mark_schedule_unpaid": "schedule_id: int, payment_date: str",
-    "get_pie_chart": (
-        "chart_kind: str = 'pie', start_on: str = '', end_on: str = '', direction: str = 'all', "
-        "category_group_id: int | None = None, category_id: int | None = None, "
-        "user_account_id: int | None = None, q: str = '', tag_name: str = ''"
-    ),
-    "list_wealth_points": "start_on: str = '', end_on: str = ''",
-    "describe_kontomierz_capabilities": "",
-}
 
 
 def build_kernel(settings: Settings, dependency: Any | None = None) -> InvocationKernel:
@@ -106,7 +42,7 @@ def _error_document(error: ApplicationError) -> dict[str, Any]:
 
 
 def build_server(settings: Settings, kernel: InvocationKernel | None = None) -> Any:
-    """Build one official MCP SDK v2 server with one invocation kernel."""
+    """Build one official MCP SDK v2 server from the governed tool catalog."""
     try:
         from mcp.server import MCPServer
         from mcp.types import CallToolResult, TextContent
@@ -124,9 +60,11 @@ def build_server(settings: Settings, kernel: InvocationKernel | None = None) -> 
 
     mcp = MCPServer(
         "kontomierz-mcp",
+        version=__version__,
         instructions=(
-            "Use list tools to discover stable IDs. Financial data is confidential. "
-            "Writes require the operator gate. Reconcile any ambiguous write before retrying."
+            "Use capability discovery before planning a workflow and list tools before detail or mutation calls. "
+            "Financial data is confidential. Writes require the trusted operator gate and consumer confirmation. "
+            "Never retry an ambiguous write before reconciling the exact target state."
         ),
         lifespan=lifespan,
     )
@@ -147,14 +85,19 @@ def build_server(settings: Settings, kernel: InvocationKernel | None = None) -> 
                 is_error=True,
             )
 
-    for name, signature in _TOOL_SIGNATURES.items():
-        namespace: dict[str, Any] = {"_dispatch": dispatch}
-        exec(  # nosec B102 - signatures are immutable repository constants, never runtime input
-            f"async def {name}({signature}):\n    return await _dispatch('{name}', locals())",
+    for definition in TOOL_DEFINITIONS.values():
+        namespace: dict[str, Any] = {"_dispatch": dispatch, "Annotated": Annotated, "Field": Field}
+        exec(  # nosec B102 - signatures and names are immutable repository-owned catalog values
+            (
+                f"async def {definition.name}({definition.signature}):\n"
+                f"    return await _dispatch({definition.name!r}, locals())"
+            ),
             namespace,
         )
-        function = namespace[name]
-        function.__doc__ = f"Kontomierz tool: {name}."
+        function = namespace[definition.name]
+        function.__doc__ = definition.description
+        function.__module__ = __name__
+        function.__kontomierz_definition__ = definition
         mcp.tool()(function)
 
     return mcp

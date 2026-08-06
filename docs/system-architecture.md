@@ -24,7 +24,7 @@ No transport invokes an operation or dependency directly.
 
 ## Component ownership
 
-`Settings` is created before dependencies. `InvocationKernel` owns bounded admission, running concurrency, per-target serialization, deadlines, readiness state, and dependency lifetime. `KontomierzClient` owns one cancellation-aware `httpx.AsyncClient`. The SDK server owns protocol registration and lifecycle entry.
+`Settings` is created before dependencies. `InvocationKernel` owns bounded admission, running concurrency, per-target serialization, deadlines, readiness state, and dependency lifetime. `KontomierzClient` owns one cancellation-aware `httpx.AsyncClient`. The governed catalog owns every public signature, description, manifest, version, and discovery expectation. The SDK server projects that catalog into protocol registration and owns lifecycle entry.
 
 ## Security boundary
 

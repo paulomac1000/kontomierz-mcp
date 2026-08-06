@@ -1,8 +1,15 @@
-"""Public governed tool catalog assembled from small reviewable modules."""
+"""Compatibility facade for governed manifest types and construction policy."""
 
-from __future__ import annotations
-
-from .manifest_core import (
+from .manifest_policy import (
+    _LOCAL_RETRY,
+    _LOCAL_TARGET,
+    manifest,
+    p,
+    project_manifest,
+    read_manifest,
+    write_manifest,
+)
+from .manifest_types import (
     ActiveState,
     ClaimEvidence,
     Confidentiality,
@@ -18,13 +25,7 @@ from .manifest_core import (
     ToolDefinition,
     ToolManifest,
     ToolParameter,
-    project_manifest,
 )
-from .tool_definitions import TOOL_DEFINITIONS
-
-TOOL_MANIFESTS: dict[str, ToolManifest] = {
-    name: definition.manifest for name, definition in TOOL_DEFINITIONS.items()
-}
 
 __all__ = [
     "ActiveState",
@@ -39,10 +40,14 @@ __all__ = [
     "Risk",
     "SideEffects",
     "TargetBinding",
-    "TOOL_DEFINITIONS",
-    "TOOL_MANIFESTS",
     "ToolDefinition",
     "ToolManifest",
     "ToolParameter",
+    "_LOCAL_RETRY",
+    "_LOCAL_TARGET",
+    "manifest",
+    "p",
     "project_manifest",
+    "read_manifest",
+    "write_manifest",
 ]

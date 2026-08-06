@@ -2,30 +2,32 @@
 
 All notable changes to kontomierz-mcp are recorded here.
 
-## 1.1.0 — Unreleased
+## 2.0.0 — Unreleased
 
-### Changed
+### Breaking changes
 
 - Replaced legacy HTTP+SSE and the unauthenticated REST bridge with stdio and loopback-only Streamable HTTP.
-- Added immutable startup configuration, one invocation kernel, explicit per-tool safety manifests, typed upstream failures, bounded deadlines, and conservative retry semantics.
-- Changed public dates to ISO `YYYY-MM-DD` while keeping legacy conversion inside the upstream adapter.
-- Corrected update operations to use the documented HTTP `PUT` method.
-- Reworked pagination so a non-empty page no longer automatically claims that another page exists.
-- Replaced global clients, private FastMCP internals, daemon listener threads, and raw-function fallbacks.
+- Changed public dates to ISO `YYYY-MM-DD` while retaining upstream conversion internally.
+- Replaced pagination certainty fields with `may_have_more` and `next_page_hint` because the upstream continuation contract is unverified.
+- Replaced SDK-generated exception text with explicit structured MCP error results.
+- Changed update inputs so `None` means omission and an empty string can intentionally clear supported text fields.
+- Replaced the synchronous dependency adapter with native asynchronous I/O.
 
 ### Added
 
-- Deterministic in-memory backend and all-tool mock smoke.
-- Official MCP SDK in-memory, stdio, and Streamable HTTP contract tests.
-- Exact-wheel and same-wheelhouse container promotion workflow.
-- AFDS architecture, tool contract, upstream contract, and standards gap documents.
-- Root `AGENTS.md` with safe operating modes and completion gates.
+- One governed catalog for tool signatures, descriptions, schemas, versions, manifests, active state, and registration.
+- Complete multi-axis capability manifests and supported-versus-active capability discovery.
+- Bounded admission, running concurrency, per-target write serialization, dependency-aware readiness, and conservative ambiguous-write handling.
+- Deterministic mock backend, all-tool smoke, official-client test scaffolding, and explicit real-system TODOs.
+- Exact-wheel and exact-image CI promotion, protected release environment, registry digest comparison, and promotion attestation.
+- AFDS architecture, contract, upstream, migration, and standards-gap documentation plus root `AGENTS.md`.
 
 ### Security
 
-- Public network binding now fails closed instead of treating an acknowledgement variable as authentication.
+- Public network binding fails closed until principal authentication and resource authorization exist.
 - Financial reads are classified as confidential; every mutation requires the trusted operator write gate.
-- Write timeouts return an ambiguous outcome and are not automatically retryable.
+- Any uninterpretable successful response to a mutation is treated as a potentially completed write.
+- No mutation is declared replay-safe or automatically retryable without real-system evidence.
 
 ## 1.0.1 — 2026-07-07
 

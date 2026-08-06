@@ -1,14 +1,19 @@
 from __future__ import annotations
 
+import inspect
 import json
 import sys
 from contextlib import asynccontextmanager
 from types import ModuleType, SimpleNamespace
-from typing import Any
+from typing import Any, get_type_hints
+
+from pydantic import create_model
 
 import pytest
 
 from kontomierz_mcp.config import Settings
+from kontomierz_mcp import __version__
+from kontomierz_mcp.manifests import TOOL_DEFINITIONS
 from kontomierz_mcp.mock_backend import MockKontomierzClient
 from kontomierz_mcp.server import build_kernel, build_server, create_http_app
 from kontomierz_mcp.mock_samples import SMOKE_SAMPLES
@@ -47,8 +52,9 @@ class FakeSessionManager:
 
 
 class FakeMCPServer:
-    def __init__(self, name: str, *, instructions: str, lifespan: Any) -> None:
+    def __init__(self, name: str, *, version: str, instructions: str, lifespan: Any) -> None:
         self.name = name
+        self.version = version
         self.instructions = instructions
         self.lifespan = lifespan
         self.tools: dict[str, Any] = {}
@@ -143,3 +149,44 @@ async def test_http_health_routes_include_dependency_readiness(monkeypatch: pyte
     async with app.router.lifespan_context(app):
         assert routes[""].app is not None
     assert dependency.closed is True
+
+
+def test_registration_uses_governed_names_descriptions_and_signatures(monkeypatch: pytest.MonkeyPatch) -> None:
+    install_fake_sdk(monkeypatch)
+    settings = Settings(api_key="", mock_data=True)
+    kernel = build_kernel(settings, MockKontomierzClient())
+    server = build_server(settings, kernel)
+
+    assert server.version == __version__
+    assert set(server.tools) == set(TOOL_DEFINITIONS)
+    for name, function in server.tools.items():
+        definition = TOOL_DEFINITIONS[name]
+        assert function.__doc__ == definition.description
+        signature = inspect.signature(function)
+        assert tuple(signature.parameters) == tuple(parameter.name for parameter in definition.parameters)
+        assert tuple(
+            item for item, parameter in signature.parameters.items()
+            if parameter.default is inspect.Parameter.empty
+        ) == definition.required_parameters
+
+
+def test_generated_annotations_preserve_parameter_descriptions(monkeypatch: pytest.MonkeyPatch) -> None:
+    install_fake_sdk(monkeypatch)
+    settings = Settings(api_key="", mock_data=True)
+    kernel = build_kernel(settings, MockKontomierzClient())
+    server = build_server(settings, kernel)
+
+    for name, function in server.tools.items():
+        definition = TOOL_DEFINITIONS[name]
+        signature = inspect.signature(function)
+        hints = get_type_hints(function, include_extras=True)
+        model_fields = {}
+        for parameter in definition.parameters:
+            default = signature.parameters[parameter.name].default
+            if default is inspect.Parameter.empty:
+                default = ...
+            model_fields[parameter.name] = (hints[parameter.name], default)
+        model = create_model(f"{name.title()}Input", **model_fields)
+        schema = model.model_json_schema()
+        for parameter in definition.parameters:
+            assert schema["properties"][parameter.name]["description"] == parameter.description

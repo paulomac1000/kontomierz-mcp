@@ -124,7 +124,7 @@ async def test_started_write_deadline_is_ambiguous(monkeypatch: pytest.MonkeyPat
         started.set()
         await asyncio.sleep(10)
 
-    monkeypatch.setitem(TOOL_MANIFESTS, "create_wallet", replace(TOOL_MANIFESTS["create_wallet"], timeout_seconds=0.02))
+    monkeypatch.setitem(TOOL_MANIFESTS, "create_wallet", replace(TOOL_MANIFESTS["create_wallet"], timeout_ms=20))
     kernel = InvocationKernel(settings=settings(), operations={"create_wallet": write}, dependency=Dependency())
     with pytest.raises(ApplicationError) as captured:
         await kernel.invoke("create_wallet", {})
@@ -196,9 +196,30 @@ async def test_deadline_cancels_async_dependency_operation(monkeypatch: pytest.M
         finally:
             cancelled.set()
 
-    monkeypatch.setitem(TOOL_MANIFESTS, "list_accounts", replace(TOOL_MANIFESTS["list_accounts"], timeout_seconds=0.02))
+    monkeypatch.setitem(TOOL_MANIFESTS, "list_accounts", replace(TOOL_MANIFESTS["list_accounts"], timeout_ms=20))
     kernel = InvocationKernel(settings=settings(), operations={"list_accounts": read}, dependency=Dependency())
     with pytest.raises(ApplicationError) as captured:
         await kernel.invoke("list_accounts", {})
     assert captured.value.code is ErrorCode.TIMEOUT
     assert cancelled.is_set()
+
+
+@pytest.mark.asyncio
+async def test_cached_unavailable_dependency_blocks_io() -> None:
+    called = False
+
+    async def read() -> None:
+        nonlocal called
+        called = True
+
+    kernel = InvocationKernel(
+        settings=settings(mock_data=False),
+        operations={"list_accounts": read},
+        dependency=Dependency(),
+    )
+    kernel._readiness_value = False
+    kernel._readiness_checked_at = 1.0
+    with pytest.raises(ApplicationError) as captured:
+        await kernel.invoke("list_accounts", {})
+    assert captured.value.code is ErrorCode.DEPENDENCY_UNAVAILABLE
+    assert called is False

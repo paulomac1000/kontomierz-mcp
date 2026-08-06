@@ -11,7 +11,7 @@ verification: Run the manifest, operation, kernel, client, and MCP SDK contract 
 
 ## Inputs
 
-Stable positive numeric IDs returned by list tools are accepted by detail and mutation tools. Money is a finite decimal string plus a three-letter currency. Wallet balances may be zero or negative because the upstream contract has not established a positive-only restriction. Public dates use `YYYY-MM-DD`; months use `YYYY-MM`.
+Stable positive numeric IDs returned by list tools are accepted by detail and mutation tools. Money is a finite decimal string plus a three-letter currency. The server preserves the caller's finite decimal value without rounding or imposing a fixed scale; the upstream remains responsible for any accepted precision limit. Wallet balances may be zero or negative because the upstream contract has not established a positive-only restriction. Public dates use `YYYY-MM-DD`; months use `YYYY-MM`.
 
 For update tools, `None` means not provided. An empty string is an explicit request to clear a text field where the upstream accepts it.
 
@@ -25,7 +25,7 @@ Tool failures return an explicit MCP `CallToolResult` with `is_error=true`, cont
 
 ## Safety and retry
 
-Each tool has an explicit manifest. Mutations require the operator gate. `concurrent_safe=false` is enforced per target. `automatic_retry=false` for every tool because the runtime has no retry loop.
+Each tool has one complete governed manifest containing risk, side effects, confidentiality, idempotency mechanism, retry conditions, concurrency scope, confirmation hint, determinism, latency, cost, impact, reversibility, target binding, and active state. Mutations require the operator gate. `concurrent_safe=false` is enforced per target. `automatic_retry=false` for every tool because the runtime has no retry loop.
 
 A transient read error may be marked retryable for a caller-controlled retry. A write rejected before admission has not started. A started write with an ambiguous dependency outcome returns `AMBIGUOUS_OUTCOME`, `retryable=false`, and a reconciliation suggestion.
 
@@ -33,6 +33,6 @@ A transient read error may be marked retryable for a caller-controlled retry. A 
 
 The upstream has not provided a reliable total or continuation token. Results expose `items_in_page`, `may_have_more`, and `next_page_hint`. A full page is only a hint and never a claim that a next page exists.
 
-## Compatibility changes
+## Versioning and compatibility
 
-This revision removes legacy SSE and the REST bridge, uses ISO public dates, switches the HTTP adapter to native async I/O, and makes clearing versus omission explicit.
+These changes are released as `2.0.0` because this revision removes legacy SSE and the REST bridge, uses ISO public dates, switches the HTTP adapter to native async I/O, and makes clearing versus omission explicit.

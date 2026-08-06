@@ -21,6 +21,7 @@ jobs:
   promote:
     if: github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-24.04
+    environment: release
     timeout-minutes: 20
     env:
       HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
@@ -39,6 +40,14 @@ jobs:
           mkdir -p dist
           gh run download "$RUN_ID" --name "release-bundle-$HEAD_SHA" --dir dist
           sha256sum --check dist/SHA256SUMS
+      - name: Verify build provenance for the image archive
+        run: |
+          set -euo pipefail
+          gh attestation verify dist/kontomierz-mcp-image.tar.gz \
+            --repo "$GITHUB_REPOSITORY" \
+            --bundle dist/build-provenance.jsonl \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/ci.yml" \
+            --source-digest "$HEAD_SHA"
       - name: Load and smoke the exact tested image
         run: |
           set -euo pipefail
@@ -67,12 +76,21 @@ jobs:
           test "$SHA_DIGEST" = "$LATEST_DIGEST"
           echo "digest=$SHA_DIGEST" >> "$GITHUB_OUTPUT"
           printf '%s\n' "$IMAGE@$SHA_DIGEST" | tee IMAGE_DIGEST
-      - name: Attest promoted image provenance
+      - name: Attest promotion of the CI-tested image
         id: attest
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
         with:
           subject-name: ${{ env.IMAGE }}
           subject-digest: ${{ steps.digest.outputs.digest }}
+          predicate-type: https://kontomierz-mcp.dev/attestations/image-promotion/v1
+          predicate: |
+            {
+              "source_repository": "${{ github.repository }}",
+              "source_revision": "${{ env.HEAD_SHA }}",
+              "source_workflow_run_id": "${{ github.event.workflow_run.id }}",
+              "promotion_environment": "release",
+              "statement": "Promoted unchanged from the exact CI-tested image archive"
+            }
           push-to-registry: true
           create-storage-record: false
       - name: Upload promotion evidence

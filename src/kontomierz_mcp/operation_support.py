@@ -6,7 +6,7 @@ import inspect
 import re
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
-from typing import Any
+from typing import Any, Literal, NoReturn, overload
 
 from .errors import ApplicationError, ErrorCode
 
@@ -15,7 +15,7 @@ async def resolve(value: Any) -> Any:
     return await value if inspect.isawaitable(value) else value
 
 
-def fail(message: str) -> None:
+def fail(message: str) -> NoReturn:
     raise ApplicationError(ErrorCode.INVALID_PARAMETER, message)
 
 
@@ -24,6 +24,14 @@ def text(value: Any, name: str) -> str:
     if not result:
         fail(f"{name} is required")
     return result
+
+
+@overload
+def identifier(value: Any, name: str, *, optional: Literal[False] = False) -> int: ...
+
+
+@overload
+def identifier(value: Any, name: str, *, optional: Literal[True]) -> int | None: ...
 
 
 def identifier(value: Any, name: str, *, optional: bool = False) -> int | None:
@@ -103,7 +111,7 @@ def month(value: Any) -> str:
 
 
 def page(value: Any) -> int:
-    return int(identifier(value, "page"))
+    return identifier(value, "page")
 
 
 def page_limit(value: Any) -> int | None:

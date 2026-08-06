@@ -15,7 +15,7 @@ The adapter uses `GET` for reads, `POST` for creates and copy operations, `PUT` 
 
 ## Failure classification
 
-Read timeout, transport loss, 429, and 5xx errors may be retry-eligible for the caller. The server itself does not retry. For a started write, timeout, transport loss, malformed response after success status, and ambiguous 5xx are marked as potentially completed and normalized by the kernel to `AMBIGUOUS_OUTCOME`. Explicit 4xx rejections are not ambiguous.
+Read timeout, transport loss, 429, and 5xx errors may be retry-eligible for the caller. The server itself does not retry. For a started write, timeout, transport loss, invalid JSON, a missing response wrapper, or a wrong response shape after success status, and ambiguous 5xx are marked as potentially completed and normalized by the kernel to `AMBIGUOUS_OUTCOME`. Explicit 4xx rejections are not ambiguous.
 
 ## Evidence status
 

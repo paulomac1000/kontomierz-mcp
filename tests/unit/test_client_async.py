@@ -99,3 +99,38 @@ async def test_put_uses_json_and_preserves_empty_clear_value() -> None:
 async def test_probe_returns_false_on_dependency_error() -> None:
     client = make_client(lambda _request: httpx.Response(503))
     assert await client.probe() is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {"unexpected": {"id": 1}},
+        {"user_account": []},
+        {"user_account": "wrong"},
+    ],
+)
+async def test_successful_write_with_unusable_response_is_ambiguous(payload: object) -> None:
+    client = make_client(lambda _request: httpx.Response(200, json=payload))
+    with pytest.raises(UpstreamError) as captured:
+        await client.create_wallet("0", "PLN")
+    assert captured.value.code is ErrorCode.UPSTREAM_FAILURE
+    assert captured.value.retryable is False
+    assert captured.value.write_outcome_ambiguous is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("operation", "wrapper"),
+    [
+        (lambda client: client.create_money_transaction(client_assigned_id="x"), "money_transaction"),
+        (lambda client: client.update_budget(1, "10"), "budget"),
+        (lambda client: client.create_schedule(description="x"), "schedule"),
+    ],
+)
+async def test_every_object_mutation_marks_wrong_wrapper_type_ambiguous(operation, wrapper: str) -> None:
+    client = make_client(lambda _request: httpx.Response(200, json={wrapper: []}))
+    with pytest.raises(UpstreamError) as captured:
+        await operation(client)
+    assert captured.value.write_outcome_ambiguous is True
