@@ -263,8 +263,16 @@ def build_operations(client: Any, settings: Settings) -> dict[str, Operation]:
         month: str = "",
     ) -> dict[str, Any]:
         if bool(category_id) == bool(category_group_id):
-            raise ApplicationError(ErrorCode.INVALID_PARAMETER, "provide exactly one of category_id or category_group_id")
-        return client.create_budget(_positive_decimal(limit, "limit"), category_id or None, category_group_id or None, _month(month))
+            raise ApplicationError(
+                ErrorCode.INVALID_PARAMETER,
+                "provide exactly one of category_id or category_group_id",
+            )
+        return client.create_budget(
+            _positive_decimal(limit, "limit"),
+            category_id or None,
+            category_group_id or None,
+            _month(month),
+        )
 
     def update_budget(budget_id: int, limit: str) -> dict[str, Any]:
         return client.update_budget(_positive_id(budget_id, "budget_id"), _positive_decimal(limit, "limit"))
@@ -332,7 +340,7 @@ def build_operations(client: Any, settings: Settings) -> dict[str, Operation]:
             currency_amount=_positive_decimal(currency_amount, "currency_amount"),
             currency_name=_currency(currency_name),
             repeat=str(repeat),
-         )
+        )
 
     def update_schedule(schedule_id: int, **fields: Any) -> dict[str, Any]:
         fields = _nonempty_update(fields)

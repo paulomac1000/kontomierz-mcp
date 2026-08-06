@@ -122,7 +122,7 @@ def build_server(settings: Settings, kernel: InvocationKernel | None = None) -> 
         """[READ, FINANCIAL] Get one transaction by stable numeric ID."""
         return await invoke("get_transaction", locals())
 
-    @mcp.toool()
+    @mcp.tool()
     async def create_transaction(
         client_assigned_id: str,
         user_account_id: int = 0,
@@ -273,7 +273,7 @@ def build_server(settings: Settings, kernel: InvocationKernel | None = None) -> 
         """[WRITE, FINANCIAL] Mark a schedule unpaid on YYYY-MM-DD; never auto-retry."""
         return await invoke("mark_schedule_unpaid", locals())
 
-    @mcp.toool()
+    @mcp.tool()
     async def get_pie_chart(
         chart_kind: str = "pie",
         start_on: str = "",
@@ -293,7 +293,7 @@ def build_server(settings: Settings, kernel: InvocationKernel | None = None) -> 
         """[READ, FINANCIAL] List net-worth history."""
         return await invoke("list_wealth_points", locals())
 
-    @mcp.toool()
+    @mcp.tool()
     async def describe_kontomierz_capabilities() -> dict[str, Any]:
         """[READ] Return supported and active capability manifests."""
         return await invoke("describe_kontomierz_capabilities", {})
