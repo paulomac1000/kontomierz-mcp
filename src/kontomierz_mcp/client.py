@@ -81,7 +81,12 @@ class KontomierzClient:
         if response.status_code == 429:
             retry_after = response.headers.get("Retry-After")
             details = {"retry_after": retry_after} if retry_after else None
-            raise UpstreamError(ErrorCode.RATE_LIMITED, "Kontomierz rate limit exceeded", retryable=True, details=details)
+            raise UpstreamError(
+                ErrorCode.RATE_LIMITED,
+                "Kontomierz rate limit exceeded",
+                retryable=True,
+                details=details,
+            )
         if response.status_code >= 500:
             raise UpstreamError(
                 ErrorCode.DEPENDENCY_UNAVAILABLE,
@@ -120,7 +125,13 @@ class KontomierzClient:
             raise UpstreamError(ErrorCode.UPSTREAM_FAILURE, "Unexpected accounts response")
         return [item.get("user_account", item) for item in payload if isinstance(item, dict)]
 
-    def create_wallet(self, currency_balance: str, currency_name: str, user_name: str = "", liquid: str = "1") -> dict[str, Any]:
+    def create_wallet(
+        self,
+        currency_balance: str,
+        currency_name: str,
+        user_name: str = "",
+        liquid: str = "1",
+    ) -> dict[str, Any]:
         body = {
             "user_account[currency_balance]": currency_balance,
             "user_account[currency_name]": currency_name,
@@ -128,11 +139,25 @@ class KontomierzClient:
         }
         if user_name:
             body["user_account[user_name]"] = user_name
-        return self._expect_dict(self._unwrap(self._request("POST", "user_accounts/create_wallet.json", body=body), "user_account"))
+        return self._expect_dict(
+            self._unwrap(
+                self._request("POST", "user_accounts/create_wallet.json", body=body),
+                "user_account",
+            )
+        )
 
     def update_wallet(self, wallet_id: int, **fields: Any) -> dict[str, Any]:
         body = {f"user_account[{key}]": value for key, value in fields.items() if value not in {None, ""}}
-        return self._expect_dict(self._unwrap(self._request("PUT", f"user_accounts/{wallet_id}/update_wallet.json", body=body), "user_account"))
+        return self._expect_dict(
+            self._unwrap(
+                self._request(
+                    "PUT",
+                    f"user_accounts/{wallet_id}/update_wallet.json",
+                    body=body,
+                ),
+                "user_account",
+            )
+        )
 
     def destroy_wallet(self, wallet_id: int) -> bool:
         return bool(self._request("DELETE", f"user_accounts/{wallet_id}/destroy_wallet.json", expect_json=False))
@@ -143,21 +168,49 @@ class KontomierzClient:
         return self._expect_list(value)
 
     def get_money_transaction(self, transaction_id: int) -> dict[str, Any]:
-        return self._expect_dict(self._unwrap(self._request("GET", f"money_transactions/{transaction_id}.json"), "money_transaction"))
+        return self._expect_dict(
+            self._unwrap(
+                self._request("GET", f"money_transactions/{transaction_id}.json"),
+                "money_transaction",
+            )
+        )
 
     def create_money_transaction(self, **fields: Any) -> dict[str, Any]:
         body = {f"money_transaction[{key}]": value for key, value in fields.items() if value not in {None, ""}}
-        return self._expect_dict(self._unwrap(self._request("POST", "money_transactions.json", body=body), "money_transaction"))
+        return self._expect_dict(
+            self._unwrap(
+                self._request("POST", "money_transactions.json", body=body),
+                "money_transaction",
+            )
+        )
 
     def update_money_transaction(self, transaction_id: int, **fields: Any) -> dict[str, Any]:
         body = {f"money_transaction[{key}]": value for key, value in fields.items() if value not in {None, ""}}
-        return self._expect_dict(self._unwrap(self._request("PUT", f"money_transactions/{transaction_id}.json", body=body), "money_transaction"))
+        return self._expect_dict(
+            self._unwrap(
+                self._request(
+                    "PUT",
+                    f"money_transactions/{transaction_id}.json",
+                    body=body,
+                ),
+                "money_transaction",
+            )
+        )
 
     def delete_money_transaction(self, transaction_id: int) -> bool:
         return bool(self._request("DELETE", f"money_transactions/{transaction_id}.json", expect_json=False))
 
     def get_categories(self, direction: str) -> list[dict[str, Any]]:
-        return self._expect_list(self._unwrap(self._request("GET", "categories.json", query={"direction": direction, "in_wallet": "true"}), "category_groups"))
+        return self._expect_list(
+            self._unwrap(
+                self._request(
+                    "GET",
+                    "categories.json",
+                    query={"direction": direction, "in_wallet": "true"},
+                ),
+                "category_groups",
+            )
+        )
 
     def get_tags(self) -> list[dict[str, Any]]:
         return self._expect_list(self._unwrap(self._request("GET", "tags.json"), "tags"))
@@ -166,15 +219,34 @@ class KontomierzClient:
         return self._expect_list(self._unwrap(self._request("GET", "currencies.json"), "currencies"))
 
     def get_budgets(self, month_on: str | None = None) -> list[dict[str, Any]]:
-        return self._expect_list(self._unwrap(self._request("GET", "budgets.json", query={"month_on": month_on}), "budgets"))
+        return self._expect_list(
+            self._unwrap(
+                self._request("GET", "budgets.json", query={"month_on": month_on}),
+                "budgets",
+            )
+        )
 
-    def create_budget(self, limit: str, category_id: int | None = None, category_group_id: int | None = None, month_on: str = "") -> dict[str, Any]:
+    def create_budget(
+        self,
+        limit: str,
+        category_id: int | None = None,
+        category_group_id: int | None = None,
+        month_on: str = "",
+    ) -> dict[str, Any]:
         return self._budget_write("POST", "budgets.json", limit, category_id, category_group_id, month_on)
 
     def update_budget(self, budget_id: int, limit: str) -> dict[str, Any]:
         return self._budget_write("PUT", f"budgets/{budget_id}.json", limit, None, None, "")
 
-    def _budget_write(self, method: str, path: str, limit: str, category_id: int | None, category_group_id: int | None, month_on: str) -> dict[str, Any]:
+    def _budget_write(
+        self,
+        method: str,
+        path: str,
+        limit: str,
+        category_id: int | None,
+        category_group_id: int | None,
+        month_on: str,
+    ) -> dict[str, Any]:
         body: dict[str, Any] = {"budget[limit]": limit}
         if category_id is not None:
             body["budget[category_id]"] = category_id
@@ -191,7 +263,12 @@ class KontomierzClient:
         return bool(self._request("POST", "budgets/copy_from_last_to_present_month.json", expect_json=False))
 
     def get_scheduled_transactions(self, **filters: Any) -> list[dict[str, Any]]:
-        return self._expect_list(self._unwrap(self._request("GET", "scheduled_transactions.json", query=filters), "scheduled_transactions"))
+        return self._expect_list(
+            self._unwrap(
+                self._request("GET", "scheduled_transactions.json", query=filters),
+                "scheduled_transactions",
+            )
+        )
 
     def get_schedule(self, schedule_id: int) -> dict[str, Any]:
         return self._expect_dict(self._unwrap(self._request("GET", f"schedules/{schedule_id}.json"), "schedule"))
@@ -216,7 +293,16 @@ class KontomierzClient:
         return bool(self._request("PUT", f"schedules/{schedule_id}/mark_as_unpayed/{date}.json", expect_json=False))
 
     def get_wealth_points(self, start_on: str | None = None, end_on: str | None = None) -> list[dict[str, Any]]:
-        return self._expect_list(self._unwrap(self._request("GET", "wealth_points.json", query={"start_on": start_on, "end_on": end_on}), "wealth_points"))
+        return self._expect_list(
+            self._unwrap(
+                self._request(
+                    "GET",
+                    "wealth_points.json",
+                    query={"start_on": start_on, "end_on": end_on},
+                ),
+                "wealth_points",
+            )
+        )
 
     def get_pie_chart(self, **filters: Any) -> dict[str, Any]:
         return self._expect_dict(self._request("GET", "charts/money_transactions.json", query=filters))

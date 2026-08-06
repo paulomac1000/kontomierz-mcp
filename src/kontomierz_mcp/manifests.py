@@ -10,6 +10,17 @@ from . import __version__
 SideEffects = Literal["none", "read", "write", "destructive"]
 Confidentiality = Literal["public", "internal", "personal", "financial", "credential"]
 Impact = Literal["none", "transient", "persistent", "financial"]
+ManifestRow = tuple[
+    str,
+    SideEffects,
+    Confidentiality,
+    Impact,
+    bool,
+    bool,
+    bool,
+    bool,
+    bool,
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,7 +43,7 @@ class ToolManifest:
 
 
 # Every positive retry/idempotency statement is operation-specific.
-_MANIFEST_ROWS = [
+_MANIFEST_ROWS: tuple[ManifestRow, ...] = (
     ("list_accounts", "read", "financial", "none", True, True, True, True, False),
     ("create_wallet", "write", "financial", "financial", False, False, False, False, True),
     ("update_wallet", "write", "financial", "financial", True, False, False, False, True),
@@ -60,9 +71,9 @@ _MANIFEST_ROWS = [
     ("get_pie_chart", "read", "financial", "none", True, True, True, True, False),
     ("list_wealth_points", "read", "financial", "none", True, True, True, True, False),
     ("describe_kontomierz_capabilities", "none", "public", "none", True, True, True, True, False),
-]
+)
 
 TOOL_MANIFESTS: dict[str, ToolManifest] = {
-    row[0]: ToolManifest(*row)  # type: ignore[arg-type]
+    row[0]: ToolManifest(*row)
     for row in _MANIFEST_ROWS
 }

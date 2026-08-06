@@ -58,7 +58,13 @@ class MockKontomierzClient:
     def get_user_accounts(self) -> list[dict[str, Any]]:
         return deepcopy(self.accounts)
 
-    def create_wallet(self, currency_balance: str, currency_name: str, user_name: str = "", liquid: str = "1") -> dict[str, Any]:
+    def create_wallet(
+        self,
+        currency_balance: str,
+        currency_name: str,
+        user_name: str = "",
+        liquid: str = "1",
+    ) -> dict[str, Any]:
         item = {
             "id": self._next_id(self.accounts),
             "display_name": user_name or "Mock wallet",
@@ -79,7 +85,12 @@ class MockKontomierzClient:
         self.accounts.remove(item)
         return True
 
-    def get_money_transactions(self, page: int = 1, per_page: int | None = None, **filters: Any) -> list[dict[str, Any]]:
+    def get_money_transactions(
+        self,
+        page: int = 1,
+        per_page: int | None = None,
+        **filters: Any,
+    ) -> list[dict[str, Any]]:
         values = self.transactions
         direction = filters.get("direction")
         if direction and direction != "all":
@@ -124,7 +135,13 @@ class MockKontomierzClient:
     def get_budgets(self, month_on: str | None = None) -> list[dict[str, Any]]:
         return deepcopy(self.budgets)
 
-    def create_budget(self, limit: str, category_id: int | None = None, category_group_id: int | None = None, month_on: str = "") -> dict[str, Any]:
+    def create_budget(
+        self,
+        limit: str,
+        category_id: int | None = None,
+        category_group_id: int | None = None,
+        month_on: str = "",
+    ) -> dict[str, Any]:
         item = {
             "id": self._next_id(self.budgets),
             "limit": limit,

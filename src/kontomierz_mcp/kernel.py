@@ -44,7 +44,10 @@ class InvocationKernel:
             raise ApplicationError(
                 ErrorCode.AUTHORIZATION_FAILED,
                 "Write operations are disabled by operator policy",
-                suggestion="Set ENABLE_WRITE_OPERATIONS=1 in the trusted server environment after reviewing the target and operation.",
+                suggestion=(
+                    "Set ENABLE_WRITE_OPERATIONS=1 in the trusted server environment "
+                    "after reviewing the target and operation."
+                ),
             )
 
         request_id = uuid.uuid4().hex
@@ -56,11 +59,21 @@ class InvocationKernel:
                 data = await asyncio.wait_for(future, timeout=manifest.timeout_seconds)
             except TimeoutError as exc:
                 future.cancel()
+                error_code = (
+                    ErrorCode.AMBIGUOUS_OUTCOME
+                    if manifest.side_effects in {"write", "destructive"}
+                    else ErrorCode.TIMEOUT
+                )
+                suggestion = (
+                    "Reconcile resource state before any retry."
+                    if manifest.side_effects in {"write", "destructive"}
+                    else None
+                )
                 raise ApplicationError(
-                    ErrorCode.AMBIGUOUS_OUTCOME if manifest.side_effects in {"write", "destructive"} else ErrorCode.TIMEOUT,
+                    error_code,
                     "The operation exceeded its deadline",
                     retryable=manifest.automatic_retry,
-                    suggestion="Reconcile resource state before any retry." if manifest.side_effects in {"write", "destructive"} else None,
+                    suggestion=suggestion,
                 ) from exc
             except asyncio.CancelledError:
                 future.cancel()

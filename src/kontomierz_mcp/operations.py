@@ -116,13 +116,34 @@ def build_operations(client: Any, settings: Settings) -> dict[str, Operation]:
     def list_accounts() -> list[dict[str, Any]]:
         return client.get_user_accounts()
 
-    def create_wallet(currency_balance: str, currency_name: str, user_name: str = "", liquid: str = "1") -> dict[str, Any]:
+    def create_wallet(
+        currency_balance: str,
+        currency_name: str,
+        user_name: str = "",
+        liquid: str = "1",
+    ) -> dict[str, Any]:
         if liquid not in {"0", "1"}:
             raise ApplicationError(ErrorCode.INVALID_PARAMETER, "liquid must be 0 or 1")
-        return client.create_wallet(_positive_decimal(currency_balance, "currency_balance"), _currency(currency_name), user_name.strip(), liquid)
+        return client.create_wallet(
+            _positive_decimal(currency_balance, "currency_balance"),
+            _currency(currency_name),
+            user_name.strip(),
+            liquid,
+        )
 
-    def update_wallet(wallet_id: int, currency_balance: str = "", currency_name: str = "", user_name: str = "", liquid: str = "") -> dict[str, Any]:
-        fields: dict[str, Any] = {"currency_balance": currency_balance, "currency_name": currency_name, "user_name": user_name, "liquid": liquid}
+    def update_wallet(
+        wallet_id: int,
+        currency_balance: str = "",
+        currency_name: str = "",
+        user_name: str = "",
+        liquid: str = "",
+    ) -> dict[str, Any]:
+        fields: dict[str, Any] = {
+            "currency_balance": currency_balance,
+            "currency_name": currency_name,
+            "user_name": user_name,
+            "liquid": liquid,
+        }
         fields = _nonempty_update(fields)
         if "currency_balance" in fields:
             fields["currency_balance"] = _positive_decimal(fields["currency_balance"], "currency_balance")
@@ -235,15 +256,15 @@ def build_operations(client: Any, settings: Settings) -> dict[str, Operation]:
         items = client.get_budgets(_month(month) or None)
         return {"items": items, "items_in_page": len(items), "month": month or None}
 
-    def create_budget(limit: str, category_id: int = 0, category_group_id: int = 0, month: str = "") -> dict[str, Any]:
+    def create_budget(
+        limit: str,
+        category_id: int = 0,
+        category_group_id: int = 0,
+        month: str = "",
+    ) -> dict[str, Any]:
         if bool(category_id) == bool(category_group_id):
             raise ApplicationError(ErrorCode.INVALID_PARAMETER, "provide exactly one of category_id or category_group_id")
-        return client.create_budget(
-            _positive_decimal(limit, "limit"),
-            category_id or None,
-            category_group_id or None,
-            _month(month),
-        )
+        return client.create_budget(_positive_decimal(limit, "limit"), category_id or None, category_group_id or None, _month(month))
 
     def update_budget(budget_id: int, limit: str) -> dict[str, Any]:
         return client.update_budget(_positive_id(budget_id, "budget_id"), _positive_decimal(limit, "limit"))
@@ -257,7 +278,14 @@ def build_operations(client: Any, settings: Settings) -> dict[str, Operation]:
         client.copy_budgets_from_last_month()
         return {"copied": True}
 
-    def list_scheduled_transactions(schedule_group_name: str = "unpaid", page: int = 1, per_page: int = 0, start_on: str = "", end_on: str = "", direction: str = "all") -> dict[str, Any]:
+    def list_scheduled_transactions(
+        schedule_group_name: str = "unpaid",
+        page: int = 1,
+        per_page: int = 0,
+        start_on: str = "",
+        end_on: str = "",
+        direction: str = "all",
+    ) -> dict[str, Any]:
         if schedule_group_name not in {"paid", "unpaid"}:
             raise ApplicationError(ErrorCode.INVALID_PARAMETER, "schedule_group_name must be paid or unpaid")
         page_value = _page(page)
@@ -271,12 +299,27 @@ def build_operations(client: Any, settings: Settings) -> dict[str, Operation]:
             direction=_direction(direction, allow_all=True, upstream_plural=True),
         )
         has_more = limit is not None and len(items) == limit
-        return {"items": items, "page": page_value, "page_size": limit, "items_in_page": len(items), "has_more": has_more, "next_page": page_value + 1 if has_more else None}
+        return {
+            "items": items,
+            "page": page_value,
+            "page_size": limit,
+            "items_in_page": len(items),
+            "has_more": has_more,
+            "next_page": page_value + 1 if has_more else None,
+        }
 
     def get_schedule(schedule_id: int) -> dict[str, Any]:
         return client.get_schedule(_positive_id(schedule_id, "schedule_id"))
 
-    def create_schedule(direction: str, deadline_on: str, holidays: int, description: str, currency_amount: str, currency_name: str, repeat: int) -> dict[str, Any]:
+    def create_schedule(
+        direction: str,
+        deadline_on: str,
+        holidays: int,
+        description: str,
+        currency_amount: str,
+        currency_name: str,
+        repeat: int,
+    ) -> dict[str, Any]:
         if holidays not in {0, 1, 2}:
             raise ApplicationError(ErrorCode.INVALID_PARAMETER, "holidays must be 0, 1, or 2")
         if repeat not in set(range(1, 10)):
@@ -289,7 +332,7 @@ def build_operations(client: Any, settings: Settings) -> dict[str, Operation]:
             currency_amount=_positive_decimal(currency_amount, "currency_amount"),
             currency_name=_currency(currency_name),
             repeat=str(repeat),
-        )
+         )
 
     def update_schedule(schedule_id: int, **fields: Any) -> dict[str, Any]:
         fields = _nonempty_update(fields)
@@ -330,7 +373,17 @@ def build_operations(client: Any, settings: Settings) -> dict[str, Operation]:
         client.mark_schedule_unpaid(identifier, normalized)
         return {"schedule_id": identifier, "payment_date": payment_date, "paid": False}
 
-    def get_pie_chart(chart_kind: str = "pie", start_on: str = "", end_on: str = "", direction: str = "all", category_group_id: int = 0, category_id: int = 0, user_account_id: int = 0, q: str = "", tag_name: str = "") -> dict[str, Any]:
+    def get_pie_chart(
+        chart_kind: str = "pie",
+        start_on: str = "",
+        end_on: str = "",
+        direction: str = "all",
+        category_group_id: int = 0,
+        category_id: int = 0,
+        user_account_id: int = 0,
+        q: str = "",
+        tag_name: str = "",
+    ) -> dict[str, Any]:
         if chart_kind != "pie":
             raise ApplicationError(ErrorCode.INVALID_PARAMETER, "chart_kind must be pie")
         return client.get_pie_chart(
@@ -346,13 +399,20 @@ def build_operations(client: Any, settings: Settings) -> dict[str, Operation]:
         )
 
     def list_wealth_points(start_on: str = "", end_on: str = "") -> list[dict[str, Any]]:
-        return client.get_wealth_points(_date(start_on, "start_on", optional=True) or None, _date(end_on, "end_on", optional=True) or None)
+        return client.get_wealth_points(
+            _date(start_on, "start_on", optional=True) or None,
+            _date(end_on, "end_on", optional=True) or None,
+        )
 
     def describe_kontomierz_capabilities() -> dict[str, Any]:
         return {
             "schema_version": "2.0.0",
             "supported_transports": ["stdio", "streamable-http"],
-            "active_transport": "streamable-http" if settings.transport in {"http", "streamable-http"} else "stdio",
+            "active_transport": (
+                "streamable-http"
+                if settings.transport in {"http", "streamable-http"}
+                else "stdio"
+            ),
             "write_operations_enabled": settings.enable_write_operations,
             "tools": {name: manifest.as_dict() for name, manifest in TOOL_MANIFESTS.items()},
         }
