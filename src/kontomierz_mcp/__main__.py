@@ -1,4 +1,4 @@
-"""python -m kontomierz_mcp entry point."""
+"""Run the Kontomierz MCP server."""
 
 from .server import main
 

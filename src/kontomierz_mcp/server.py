@@ -1,330 +1,261 @@
-"""MCP server entry point — FastMCP + health endpoint + REST bridge.
+"""Composition root and MCP transport adapters."""
 
-Three-port architecture (L2+): health(9100), SSE(9101), REST API(9102).
-"""
+from __future__ import annotations
 
-import json
 import logging
-import sys
-import time
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastmcp import FastMCP
-
 from .client import KontomierzClient
-from .response import (
-    RequestIdFilter,
-    SanitizingFormatter,
-    get_invocation_counts,
-    start_tool_context,
-)
-from .tools.accounts import register_accounts_tools
-from .tools.budgets import register_budgets_tools
-from .tools.capabilities import register_capability_tools
-from .tools.charts_wealth import register_charts_wealth_tools
-from .tools.constants import (
-    HEALTH_PORT,
-    KNOWN_RISK_PREFIXES,
-    KONTOMIERZ_API_KEY,
-    LOG_LEVEL,
-    MCP_PORT,
-    REST_API_PORT,
-    TOOL_MANIFESTS,
-    TOOLS_VERSION,
-)
-from .tools.reference import register_reference_tools
-from .tools.schedules import register_schedules_tools
-from .tools.transactions import register_transactions_tools
+from .config import Settings
+from .errors import ApplicationError
+from .kernel import InvocationKernel
+from .mock_backend import MockKontomierzClient
+from .operations import build_operations
 
-
-def _setup_logging() -> None:
-    handler = logging.StreamHandler(sys.stderr)
-    handler.setFormatter(SanitizingFormatter("%(asctime)s [%(levelname)s] [%(request_id)s] %(name)s: %(message)s"))
-    handler.addFilter(RequestIdFilter())
-    root = logging.getLogger()
-    root.addHandler(handler)
-    root.setLevel(getattr(logging, LOG_LEVEL.upper(), logging.INFO))
-    logging.getLogger("httpx").setLevel(logging.WARNING)
-    logging.getLogger("httpcore").setLevel(logging.WARNING)
-    logging.getLogger("uvicorn").setLevel(logging.WARNING)
-
-
-_setup_logging()
 _logger = logging.getLogger(__name__)
 
-mcp = FastMCP("kontomierz-mcp")
 
-_TOOL_REGISTRY: dict[str, Any] = {}
-_CLIENT: KontomierzClient | None = None
-
-
-def _get_or_create_client() -> KontomierzClient:
-    global _CLIENT
-    if _CLIENT is None:
-        _CLIENT = KontomierzClient(api_key=KONTOMIERZ_API_KEY)
-        if KONTOMIERZ_API_KEY:
-            try:
-                accounts = _CLIENT.get_user_accounts()
-                if accounts is not None:
-                    _logger.info("Kontomierz client connection validated (%d accounts)", len(accounts))
-                else:
-                    _logger.warning("Kontomierz client created but could not validate connection — API may be unreachable.")
-            except Exception as exc:
-                _logger.warning("Kontomierz client created but connection validation failed: %s", exc)
-        else:
-            _logger.warning("KONTOMIERZ_API_KEY not set — client will not authenticate.")
-    return _CLIENT
-
-
-def _resolve_bind_host() -> str:
-    """Determine the bind host based on MCP_UNSAFE_PUBLIC_ACCESS_CONFIRMED."""
-    import os as _os
-
-    unsafe = _os.getenv("MCP_UNSAFE_PUBLIC_ACCESS_CONFIRMED", "").strip() == "1"
-    if unsafe:
-        _logger.critical(
-            "UNSAFE: Binding to 0.0.0.0 — tools exposed to all network interfaces. "  # nosec B104
-            "MCP_UNSAFE_PUBLIC_ACCESS_CONFIRMED=1 acknowledged."
+def build_kernel(settings: Settings, dependency: Any | None = None) -> InvocationKernel:
+    if dependency is None:
+        dependency = (
+            MockKontomierzClient()
+            if settings.mock_data
+            else KontomierzClient(
+                api_key=settings.api_key,
+                base_url=settings.api_base_url,
+                timeout_seconds=settings.api_timeout_seconds,
+                body_mode=settings.body_mode,
+            )
         )
-        return "0.0.0.0"
-    return "127.0.0.1"
+    return InvocationKernel(settings=settings, operations=build_operations(dependency, settings), dependency=dependency)
 
 
-@asynccontextmanager  # type: ignore[misc]
-async def lifespan(server: FastMCP):  # type: ignore[no-untyped-def]
-    client = _get_or_create_client()
-    server._lifespan_data = {"client": client}  # type: ignore[attr-defined]
-    _logger.info("Kontomierz client initialized")
+def build_server(settings: Settings, kernel: InvocationKernel | None = None) -> Any:
+    """Build one official MCP SDK v2 server with one captured invocation kernel."""
     try:
-        yield server._lifespan_data  # type: ignore[attr-defined]
-    finally:
-        _logger.info("Shutting down")
+        from mcp.server import MCPServer
+    except ImportError as exc:  # pragma: no cover - dependency installation failure
+        raise RuntimeError("Install the project dependencies to run the MCP transport") from exc
 
+    owned_kernel = kernel or build_kernel(settings)
 
-mcp.lifespan = lifespan  # type: ignore[attr-defined]
-
-register_accounts_tools(mcp)
-register_transactions_tools(mcp)
-register_budgets_tools(mcp)
-register_schedules_tools(mcp)
-register_reference_tools(mcp)
-register_charts_wealth_tools(mcp)
-register_capability_tools(mcp)
-
-
-def _populate_tool_registry() -> None:
-    for loc_attr in ("_mcp_server", "_tool_manager", "_tools"):
-        loc = getattr(mcp, loc_attr, None)
-        if loc is None:
-            continue
-        for tools_attr in ("_tools", "_tool_cache"):
-            tools = getattr(loc, tools_attr, None)
-            if isinstance(tools, dict) and tools:
-                _TOOL_REGISTRY.update(tools)
-                return
-    if hasattr(mcp, "_tools") and isinstance(mcp._tools, dict) and mcp._tools:
-        _TOOL_REGISTRY.update(mcp._tools)
-        return
-    for name in sorted(TOOL_MANIFESTS.keys()):
-        _TOOL_REGISTRY[name] = name
-    _logger.info("Tool registry populated from manifests (%d tools)", len(_TOOL_REGISTRY))
-
-
-def _inject_risk_prefixes() -> None:
-    for name, fn in _TOOL_REGISTRY.items():
-        if not callable(fn):
-            continue
-        manifest = TOOL_MANIFESTS.get(name, {})
-        risk = manifest.get("risk", "READ")
-        raw_fn = fn
-        for attr in ("fn", "func", "_func", "function"):
-            if hasattr(fn, attr):
-                inner = getattr(fn, attr)
-                if callable(inner):
-                    raw_fn = inner
-                    break
-        doc = (raw_fn.__doc__ or "").strip()
-        for prefix in KNOWN_RISK_PREFIXES:
-            if doc.startswith(prefix):
-                doc = doc[len(prefix) :].lstrip()
-                break
-        raw_fn.__doc__ = f"[{risk}] {doc}"
-        if hasattr(fn, "description"):
-            fn.description = raw_fn.__doc__.split("\n")[0].rstrip(".")
-
-
-def _build_health_payload() -> dict:
-    return {
-        "status": "healthy",
-        "tool_count": len(_TOOL_REGISTRY),
-        "tools_version": TOOLS_VERSION,
-        "invocation_counts": get_invocation_counts(),
-    }
-
-
-def _start_health_server() -> None:
-    import socket
-    import threading
-    from http.server import BaseHTTPRequestHandler, HTTPServer
-
-    class HealthHandler(BaseHTTPRequestHandler):
-        def log_message(self, format, *args):  # nosec B110
-            pass
-
-        def do_GET(self):
-            body = json.dumps(_build_health_payload())
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body.encode())
-
-    class ReuseHTTPServer(HTTPServer):
-        allow_reuse_address = True
-
-        def server_bind(self):
-            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            HTTPServer.server_bind(self)
-
-    bind_host = _resolve_bind_host()
-    server = ReuseHTTPServer((bind_host, HEALTH_PORT), HealthHandler)
-    _logger.info("Health server on http://%s:%d/health", bind_host, HEALTH_PORT)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-
-
-def _start_rest_bridge() -> None:
-    import asyncio
-    import threading
-
-    try:
-        from starlette.applications import Starlette
-        from starlette.responses import JSONResponse
-        from starlette.routing import Route
-    except ImportError:
-        _logger.warning("Starlette not installed")
-        return
-
-    async def health(_r):
-        return JSONResponse(_build_health_payload())
-
-    async def list_tools(_r):
-        tools = sorted(_TOOL_REGISTRY.keys())
-        t = len(tools)
-        return JSONResponse({"total": t, "tool_count": t, "tools": tools})
-
-    async def call_tool(request):
-        tool_name = request.path_params["name"]
-        body = await request.json()
-        params = body.get("params", {})
-
-        client = _get_or_create_client()
-        if getattr(mcp, "_lifespan_data", None) is None:
-            mcp._lifespan_data = {"client": client}
-
-        start_tool_context()
-        t0 = time.monotonic()
-
+    @asynccontextmanager
+    async def lifespan(_server: Any) -> AsyncIterator[dict[str, InvocationKernel]]:
         try:
-            result = await mcp.call_tool(tool_name, params)
-        except (AttributeError, TypeError):
-            fn = _TOOL_REGISTRY.get(tool_name)
-            if fn is None or not callable(fn):
-                return JSONResponse(
-                    {
-                        "success": False,
-                        "error": {"code": "UNKNOWN_TOOL", "message": f"Unknown tool: {tool_name}", "retryable": False},
-                    },
-                    status_code=404,
-                )
-            try:
-                result_str = await fn(**params) if asyncio.iscoroutinefunction(fn) else fn(**params)
-                elapsed = int((time.monotonic() - t0) * 1000)
-                data = json.loads(result_str)
-                data.setdefault("_meta", {})["duration_ms"] = elapsed
-                return JSONResponse(data)
-            except Exception as exc:
-                return JSONResponse(
-                    {"success": False, "error": {"code": "INTERNAL_ERROR", "message": str(exc), "retryable": False}},
-                    status_code=500,
-                )
-        except Exception as exc:
-            _logger.error("call_tool error: %s", exc)
-            return JSONResponse(
-                {"success": False, "error": {"code": "INTERNAL_ERROR", "message": str(exc), "retryable": False}}, status_code=500
-            )
+            yield {"kernel": owned_kernel}
+        finally:
+            await owned_kernel.close()
 
-        elapsed = int((time.monotonic() - t0) * 1000)
-        try:
-            for block in result.content:
-                if hasattr(block, "text"):
-                    data = json.loads(block.text)
-                    data.setdefault("_meta", {})["duration_ms"] = elapsed
-                    return JSONResponse(data)
-        except Exception:
-            pass
-        return JSONResponse({"success": True, "data": str(result), "_meta": {"duration_ms": elapsed}})
-
-    async def manifest(request):
-        tool_name = request.path_params["name"]
-        manifest = TOOL_MANIFESTS.get(tool_name)
-        if manifest is None:
-            return JSONResponse(
-                {
-                    "success": False,
-                    "error": {"code": "UNKNOWN_TOOL", "message": f"No manifest for: {tool_name}", "retryable": False},
-                },
-                status_code=404,
-            )
-        return JSONResponse(manifest)
-
-    app = Starlette(
-        routes=[
-            Route("/health", health, methods=["GET"]),
-            Route("/api/health", health, methods=["GET"]),
-            Route("/api/tools", list_tools, methods=["GET"]),
-            Route("/api/tools/{name}", call_tool, methods=["POST"]),
-            Route("/api/tools/{name}/manifest", manifest, methods=["GET"]),
-        ]
+    mcp = MCPServer(
+        "kontomierz-mcp",
+        instructions=(
+            "Use list tools to discover stable numeric IDs before detail or mutation calls. "
+            "All financial data is confidential. Writes are disabled unless the operator enables them. "
+            "Never retry a write after timeout without reconciling resource state."
+        ),
+        lifespan=lifespan,
     )
 
-    import uvicorn
+    async def invoke(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        clean_arguments = {key: value for key, value in arguments.items() if key != "invoke"}
+        try:
+            return await owned_kernel.invoke(name, clean_arguments)
+        except ApplicationError as exc:
+            raise RuntimeError(str(exc)) from exc
 
-    def _run():
-        uvicorn.run(app, host=_resolve_bind_host(), port=REST_API_PORT, log_level="warning")
+    @mcp.tool()
+    async def list_accounts() -> dict[str, Any]:
+        """[READ, FINANCIAL] List accounts and wallets with balances."""
+        return await invoke("list_accounts", {})
 
-    _logger.info("REST bridge on http://%s:%d", _resolve_bind_host(), REST_API_PORT)
-    threading.Thread(target=_run, daemon=True).start()
+    @mcp.tool()
+    async def create_wallet(currency_balance: str, currency_name: str, user_name: str = "", liquid: str = "1") -> dict[str, Any]:
+        """[WRITE, FINANCIAL] Create a cash wallet. Operator write gate required."""
+        return await invoke("create_wallet", locals())
+
+    @mcp.tool()
+    async def update_wallet(wallet_id: int, currency_balance: str = "", currency_name: str = "", user_name: str = "", liquid: str = "") -> dict[str, Any]:
+        """[WRITE, FINANCIAL] Update provided wallet fields."""
+        return await invoke("update_wallet", locals())
+
+    @mcp.tool()
+    async def destroy_wallet(wallet_id: int) -> dict[str, Any]:
+        """[DESTRUCTIVE, FINANCIAL] Delete a wallet."""
+        return await invoke("destroy_wallet", locals())
+
+    @mcp.tool()
+    async def list_transactions(page: int = 1, per_page: int = 0, user_account_id: int = 0, q: str = "", start_on: str = "", end_on: str = "", direction: str = "all", tag_name: str = "", category_group_id: int = 0, category_id: int = 0, show_hidden_transactions: bool = False) -> dict[str, Any]:
+        """[READ, FINANCIAL] List transactions. Dates use YYYY-MM-DD."""
+        return await invoke("list_transactions", locals())
+
+    @mcp.tool()
+    async def get_transaction(transaction_id: int) -> dict[str, Any]:
+        """[READ, FINANCIAL] Get one transaction by stable numeric ID."""
+        return await invoke("get_transaction", locals())
+
+    @mcp.tool()
+    async def create_transaction(client_assigned_id: str, user_account_id: int = 0, category_id: int = 0, currency_amount: str = "", currency_name: str = "", direction: str = "withdrawal", tag_string: str = "", name: str = "", transaction_on: str = "") -> dict[str, Any]:
+        """[WRITE, FINANCIAL] Create a transaction using a caller idempotency key."""
+        return await invoke("create_transaction", locals())
+
+    @mcp.tool()
+    async def update_transaction(transaction_id: int, user_account_id: int = 0, category_id: int = 0, currency_amount: str = "", currency_name: str = "", direction: str = "", tag_string: str = "", name: str = "", transaction_on: str = "") -> dict[str, Any]:
+        """[WRITE, FINANCIAL] Update provided transaction fields."""
+        arguments = locals()
+        arguments.update({"user_account_id": user_account_id or "", "category_id": category_id or ""})
+        return await invoke("update_transaction", arguments)
+
+    @mcp.tool()
+    async def delete_transaction(transaction_id: int) -> dict[str, Any]:
+        """[DESTRUCTIVE, FINANCIAL] Delete a transaction."""
+        return await invoke("delete_transaction", locals())
+
+    @mcp.tool()
+    async def list_categories(direction: str = "withdrawal") -> dict[str, Any]:
+        """[READ, PERSONAL] List category hierarchy for withdrawal or deposit."""
+        return await invoke("list_categories", locals())
+
+    @mcp.tool()
+    async def list_tags() -> dict[str, Any]:
+        """[READ, PERSONAL] List account tags."""
+        return await invoke("list_tags", {})
+
+    @mcp.tool()
+    async def list_currencies() -> dict[str, Any]:
+        """[READ] List supported currencies."""
+        return await invoke("list_currencies", {})
+
+    @mcp.tool()
+    async def list_budgets(month: str = "") -> dict[str, Any]:
+        """[READ, FINANCIAL] List budgets. Month uses YYYY-MM."""
+        return await invoke("list_budgets", locals())
+
+    @mcp.tool()
+    async def create_budget(limit: str, category_id: int = 0, category_group_id: int = 0, month: str = "") -> dict[str, Any]:
+        """[WRITE, FINANCIAL] Create a category or category-group budget."""
+        return await invoke("create_budget", locals())
+
+    @mcp.tool()
+    async def update_budget(budget_id: int, limit: str) -> dict[str, Any]:
+        """[WRITE, FINANCIAL] Update a budget limit."""
+        return await invoke("update_budget", locals())
+
+    @mcp.tool()
+    async def delete_budget(budget_id: int) -> dict[str, Any]:
+        """[DESTRUCTIVE, FINANCIAL] Delete a budget."""
+        return await invoke("delete_budget", locals())
+
+    @mcp.tool()
+    async def copy_budgets_from_last_month() -> dict[str, Any]:
+        """[WRITE, FINANCIAL] Copy last month's budgets; never auto-retry."""
+        return await invoke("copy_budgets_from_last_month", {})
+
+    @mcp.tool()
+    async def list_scheduled_transactions(schedule_group_name: str = "unpaid", page: int = 1, per_page: int = 0, start_on: str = "", end_on: str = "", direction: str = "all") -> dict[str, Any]:
+        """[READ, FINANCIAL] List paid or unpaid scheduled transactions."""
+        return await invoke("list_scheduled_transactions", locals())
+
+    @mcp.tool()
+    async def get_schedule(schedule_id: int) -> dict[str, Any]:
+        """[READ, FINANCIAL] Get one payment schedule."""
+        return await invoke("get_schedule", locals())
+
+    @mcp.tool()
+    async def create_schedule(direction: str, deadline_on: str, holidays: int, description: str, currency_amount: str, currency_name: str, repeat: int) -> dict[str, Any]:
+        """[WRITE, FINANCIAL] Create a payment schedule. Date uses YYYY-MM-DD."""
+        return await invoke("create_schedule", locals())
+
+    @mcp.tool()
+    async def update_schedule(schedule_id: int, direction: str = "", deadline_on: str = "", holidays: int = -1, description: str = "", currency_amount: str = "", currency_name: str = "", repeat: int = 0) -> dict[str, Any]:
+        """[WRITE, FINANCIAL] Update provided schedule fields."""
+        arguments = locals()
+        if holidays == -1:
+            arguments["holidays"] = ""
+        if repeat == 0:
+            arguments["repeat"] = ""
+        return await invoke("update_schedule", arguments)
+
+    @mcp.tool()
+    async def delete_schedule(schedule_id: int) -> dict[str, Any]:
+        """[DESTRUCTIVE, FINANCIAL] Delete a payment schedule."""
+        return await invoke("delete_schedule", locals())
+
+    @mcp.tool()
+    async def mark_schedule_paid(schedule_id: int, payment_date: str) -> dict[str, Any]:
+        """[WRITE, FINANCIAL] Mark a schedule paid on YYYY-MM-DD; never auto-retry."""
+        return await invoke("mark_schedule_paid", locals())
+
+    @mcp.tool()
+    async def mark_schedule_unpaid(schedule_id: int, payment_date: str) -> dict[str, Any]:
+        """[WRITE, FINANCIAL] Mark a schedule unpaid on YYYY-MM-DD; never auto-retry."""
+        return await invoke("mark_schedule_unpaid", locals())
+
+    @mcp.tool()
+    async def get_pie_chart(chart_kind: str = "pie", start_on: str = "", end_on: str = "", direction: str = "all", category_group_id: int = 0, category_id: int = 0, user_account_id: int = 0, q: str = "", tag_name: str = "") -> dict[str, Any]:
+        """[READ, FINANCIAL] Get transaction chart data."""
+        return await invoke("get_pie_chart", locals())
+
+    @mcp.tool()
+    async def list_wealth_points(start_on: str = "", end_on: str = "") -> dict[str, Any]:
+        """[READ, FINANCIAL] List net-worth history."""
+        return await invoke("list_wealth_points", locals())
+
+    @mcp.tool()
+    async def describe_kontomierz_capabilities() -> dict[str, Any]:
+        """[READ] Return supported and active capability manifests."""
+        return await invoke("describe_kontomierz_capabilities", {})
+
+    return mcp
 
 
-def _load_dotenv() -> None:
-    """Load .env file into os.environ before any os.getenv() calls."""
-    import os as _os
-    from pathlib import Path as _Path
+def create_http_app(settings: Settings, kernel: InvocationKernel | None = None) -> Any:
+    """Create loopback-only Streamable HTTP plus liveness/readiness endpoints."""
+    from starlette.applications import Starlette
+    from starlette.responses import JSONResponse
+    from starlette.routing import Mount, Route
 
-    for _env_path in (_Path(".env"), _Path("/app/.env")):
-        if not _env_path.exists():
-            continue
-        with open(_env_path) as _f:
-            for _line in _f:
-                _line = _line.strip()
-                if _line and not _line.startswith("#") and "=" in _line:
-                    _key, _value = _line.split("=", 1)
-                    _os.environ.setdefault(_key.strip(), _value.strip().strip('"').strip("'"))
-        return  # stop after first found
+    owned_kernel = kernel or build_kernel(settings)
+    mcp = build_server(settings, owned_kernel)
+    mcp_app = mcp.streamable_http_app(stateless_http=True, json_response=True)
+
+    @asynccontextmanager
+    async def lifespan(_app: Starlette) -> AsyncIterator[None]:
+        async with mcp.session_manager.run():
+            yield
+
+    async def live(_request: Any) -> JSONResponse:
+        return JSONResponse({"status": "alive"})
+
+    async def ready(_request: Any) -> JSONResponse:
+        status = 200 if owned_kernel.ready else 503
+        return JSONResponse({"status": "ready" if status == 200 else "not-ready"}, status_code=status)
+
+    return Starlette(
+        routes=[
+            Route("/health/live", live, methods=["GET"]),
+            Route("/health/ready", ready, methods=["GET"]),
+            Mount("/", app=mcp_app),
+        ],
+        lifespan=lifespan,
+    )
 
 
 def main() -> None:
-    _load_dotenv()
-    _populate_tool_registry()
-    _inject_risk_prefixes()
-    _start_health_server()
-    _get_or_create_client()
-    _start_rest_bridge()
-    bind_host = _resolve_bind_host()
-    _logger.info("Starting Kontomierz MCP server (SSE on %s:%d, %d tools)", bind_host, MCP_PORT, len(_TOOL_REGISTRY))
-    mcp.run(transport="sse", host=bind_host, port=MCP_PORT)
+    settings = Settings.from_env()
+    logging.basicConfig(
+        level=getattr(logging, settings.log_level),
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    )
+    kernel = build_kernel(settings)
+    if settings.transport == "stdio":
+        mcp = build_server(settings, kernel)
+        mcp.run("stdio")
+        return
 
+    import uvicorn
 
-if __name__ == "__main__":
-    main()
+    app = create_http_app(settings, kernel)
+    _logger.info("Starting loopback Streamable HTTP on http://%s:%d/mcp", settings.host, settings.port)
+    uvicorn.run(app, host=settings.host, port=settings.port, log_level=settings.log_level.lower())

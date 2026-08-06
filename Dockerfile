@@ -1,17 +1,20 @@
-FROM python:3.11-slim
+FROM python:3.12-slim
 
+RUN groupadd --system app && useradd --system --gid app --home-dir /app app
 WORKDIR /app
 
-COPY pyproject.toml .
-COPY src/ src/
+# CI resolves one wheelhouse, tests the application wheel against it, and
+# publishes the same files. Runtime installation never contacts an index.
+COPY dist/ /tmp/dist/
+RUN python -m pip install --no-cache-dir --no-index \
+      --find-links=/tmp/dist/wheelhouse \
+      /tmp/dist/kontomierz_mcp-*.whl \
+    && rm -rf /tmp/dist \
+    && chown -R app:app /app
 
-RUN pip install --no-cache-dir -e .
+USER app
+ENV MCP_TRANSPORT=stdio \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
 
-EXPOSE 9100 9101 9102
-
-ENV MCP_PORT=9101
-ENV REST_API_PORT=9102
-ENV HEALTH_PORT=9100
-ENV MCP_UNSAFE_PUBLIC_ACCESS_CONFIRMED=1
-
-CMD ["kontomierz-mcp"]
+ENTRYPOINT ["kontomierz-mcp"]
