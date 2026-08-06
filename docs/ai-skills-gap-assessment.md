@@ -1,38 +1,40 @@
 ---
-description: Assesses this revision against the pinned ai-skills MCP, AFDS, AGENTS, and CI/CD standards without claiming formal approval.
+description: Assesses this revision against the pinned ai-skills standards without claiming formal approval.
 doc_id: decision.ai-skills-gap-assessment
 type: decision
 status: evolving
 rigor: operational
 owners: [repository-maintainers]
-verification: Compare the exact branch SHA with ai-skills revision `661ff01a5e70d58d6c94a12545b24647e52063ed`, run hosted CI, and complete provider-backed adoption evidence.
+verification: Compare the exact SHA with ai-skills revision `661ff01a5e70d58d6c94a12545b24647e52063ed`, run hosted CI, and complete provider-backed evidence.
 ---
 # AI Skills gap assessment
 
 ## Decision
 
-Target technical alignment with `ai-skills` 1.2.0 while withholding the formal L2+ claim. The assessed standard revision is `661ff01a5e70d58d6c94a12545b24647e52063ed`.
+Target technical alignment with `ai-skills` 1.2.0 while withholding a formal L2+ claim.
 
 ## Closed gaps
 
 - Configuration precedes dependency creation.
-- One kernel owns validation, policy, deadline, execution, error mapping, and metadata.
-- Legacy HTTP+SSE and the raw REST fallback are removed.
-- Streamable HTTP fails closed outside loopback.
-- Tool manifests use independent safety axes and classify financial reads correctly.
-- Mutation retries are conservative and write timeouts are ambiguous outcomes.
-- Mock data, domain tests, HTTP contract fakes, and official-client test scaffolding are separated.
-- CI is designed to test and publish the same wheel.
-- Root AGENTS instructions and governed AFDS documents have canonical ownership.
+- One kernel owns policy, bounded admission, concurrency, deadlines, readiness, error mapping, and metadata.
+- The dependency adapter is natively asynchronous; cancellation no longer leaves executor workers running.
+- Unsafe writes are serialized per target scope.
+- Started write timeout, connection loss, response loss, and ambiguous 5xx become non-retryable ambiguous outcomes.
+- Runtime manifests no longer claim automatic retry that is not implemented.
+- MCP errors are explicit stable `CallToolResult` documents.
+- Readiness includes a bounded cached dependency probe.
+- Optional IDs, date ranges, update omission/clearing, schedule integers, wallet balances, and pagination hints have explicit tests.
 
 ## Deferred gaps
 
-- Provider-backed exact-SHA evidence and independent approval require the hosted run after this branch is pushed.
-- Official MCP SDK tests could not execute locally because the environment's package mirror did not provide `mcp` v2.
-- Real upstream write contracts require a disposable account.
-- Public remote hosting remains unsupported rather than weakly authenticated.
-- Forced cancellation cannot terminate an already-running synchronous socket call; both kernel and socket deadlines bound the impact.
+- Hosted exact-SHA evidence and independent approval have not been produced for connector-authored commits.
+- The local mirror does not provide MCP SDK v2 or the full quality toolchain; the SDK test is mandatory rather than skipped.
+- Real upstream write, pagination, and reconciliation contracts require a disposable account.
+- A reviewed hash-locked dependency graph has not been generated because the authoritative resolver and MCP package were unavailable locally.
+- External trusted `ai-skills` AFDS, AGENTS, and workflow-policy validators are not yet wired into hosted CI.
+- The release workflow now promotes the exact CI-tested image tarball, compares registry tag digests, and requests a provenance attestation; hosted evidence for those steps is still missing.
+- Public remote hosting remains unsupported.
 
 ## Approval condition
 
-Do not mark the project L2+ until the official-client suite passes against the exact wheel and container, the real upstream contract TODOs are completed, all applicable catalog rules are recorded, and an independent reviewer approves the immutable revision.
+Keep the PR draft until the official-client suite passes against the exact wheel and transport, hosted quality and container jobs pass on the exact SHA, real-system TODOs are completed, dependency locks and release evidence are reviewed, and an independent reviewer approves the immutable revision.

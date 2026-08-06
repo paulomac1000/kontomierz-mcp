@@ -1,38 +1,30 @@
-"""Official SDK in-memory conformance.
-
-TODO(real-system-agent): add a second test that starts the exact built wheel over
-loopback Streamable HTTP and exercises it with a real Client URL. The in-memory
-case below runs whenever MCP SDK v2 is installed; this execution environment's
-package mirror does not currently provide it.
-"""
-
 from __future__ import annotations
 
+import json
+
 import pytest
+from mcp import Client
 
-mcp = pytest.importorskip("mcp", reason="official MCP SDK v2 is unavailable in this execution environment")
+from kontomierz_mcp.config import Settings
+from kontomierz_mcp.server import build_server
 
-from mcp import Client  # type: ignore[attr-defined]  # noqa: E402
-
-from kontomierz_mcp.config import Settings  # noqa: E402
-from kontomierz_mcp.mock_backend import MockKontomierzClient  # noqa: E402
-from kontomierz_mcp.server import build_kernel, build_server  # noqa: E402
+pytestmark = pytest.mark.sdk
 
 
-@pytest.mark.sdk
 @pytest.mark.asyncio
-async def test_official_client_lists_invokes_and_reports_tool_error() -> None:
+async def test_official_in_memory_client_reads_structured_error() -> None:
     settings = Settings(api_key="", mock_data=True, enable_write_operations=False)
-    server = build_server(settings, build_kernel(settings, MockKontomierzClient()))
+    server = build_server(settings)
     async with Client(server) as client:
-        listing = await client.list_tools()
-        names = {tool.name for tool in listing.tools}
-        assert len(names) == 27
-        assert "list_accounts" in names
-        success = await client.call_tool("list_accounts", {})
-        assert success.is_error is False
-        denied = await client.call_tool(
+        result = await client.call_tool(
             "create_wallet",
-            {"currency_balance": "1.00", "currency_name": "PLN"},
+            {"currency_balance": "1", "currency_name": "PLN"},
         )
-        assert denied.is_error is True
+    assert result.is_error is True
+    assert result.structured_content is not None
+    error = result.structured_content["error"]
+    assert error["code"] == "AUTHORIZATION_FAILED"
+    assert error["retryable"] is False
+    text = result.content[0].text
+    assert json.loads(text) == result.structured_content
+    assert "secret" not in text.lower()

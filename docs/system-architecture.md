@@ -5,57 +5,48 @@ type: system
 status: evolving
 rigor: normative
 owners: [repository-maintainers]
-verification: Run `.venv/bin/python -m pytest tests/unit tests/integration -m "not external"` and the exact-wheel CI job.
+verification: Run `.venv/bin/python -m pytest -m "not external"` and the exact-wheel CI job.
 ---
 # Kontomierz MCP system architecture
 
 ## Operational answer
-
-Every tool invocation follows one path:
 
 ```text
 stdio or loopback Streamable HTTP
   -> official MCP SDK registration
   -> InvocationKernel
   -> domain validation and policy
-  -> KontomierzPort
+  -> asynchronous KontomierzPort
   -> HTTP adapter or deterministic mock backend
 ```
 
-No transport may invoke an operation or HTTP client directly.
+No transport invokes an operation or dependency directly.
 
 ## Component ownership
 
-`Settings` is created once before dependencies. `InvocationKernel` owns the bounded worker pool and dependency lifetime. The official MCP SDK server owns protocol registration and enters the kernel lifecycle once. The HTTP adapter owns its `requests.Session`. Shutdown closes the worker pool and session exactly once.
+`Settings` is created before dependencies. `InvocationKernel` owns bounded admission, running concurrency, per-target serialization, deadlines, readiness state, and dependency lifetime. `KontomierzClient` owns one cancellation-aware `httpx.AsyncClient`. The SDK server owns protocol registration and lifecycle entry.
 
 ## Security boundary
 
-The current supported deployment boundary is one trusted local user. Stdio is the default. Streamable HTTP is limited to loopback and relies on the official SDK's Host/Origin protection. Public or LAN binding is rejected during configuration because the project does not yet authenticate a principal or authorize resources.
+The current deployment boundary is one trusted local user. Stdio is the default. Streamable HTTP is loopback-only. Public or LAN binding is rejected because principal authentication and resource authorization are not implemented. The API key enters only the HTTP adapter and is never returned in errors.
 
-The API key is a process secret. It enters only the HTTP adapter and query parameters sent to the configured HTTPS origin. Errors expose a bounded application code and message, never raw bodies or credentials.
+## Deadlines, cancellation, and concurrency
 
-## Configuration and identity
+There is no worker pool or executor queue. The kernel limits total admitted invocations and separately limits operations actively running against the dependency. Calls above the admission bound fail before execution. `concurrent_safe=false` operations are serialized by `target_scope`, currently `kontomierz-account`.
 
-`.env` is loaded before the immutable settings snapshot. Explicit process environment values override the file. The target is one configured Kontomierz account; operations never substitute another account after failure.
-
-## Deadlines and concurrency
-
-The kernel applies a per-manifest deadline and a bounded executor/semaphore. Read timeouts are retryable only where the manifest says so. A timeout during a write or destructive operation becomes `AMBIGUOUS_OUTCOME`; callers must reconcile resource state before any retry.
-
-Python threads cannot forcibly terminate a running `requests` call. The adapter therefore also supplies an upstream socket timeout. The remaining residual risk is documented in the gap assessment.
+Cancellation propagates through the async operation into `httpx`. If a write has started, a kernel deadline, transport loss, timeout, response loss, or ambiguous 5xx becomes `AMBIGUOUS_OUTCOME` with `retryable=false`. Callers reconcile state before any retry. The runtime performs no automatic retries.
 
 ## Health behavior
 
-Liveness proves that the ASGI process responds. Readiness proves that configuration, registry, kernel, and dependency object are initialized. It does not claim that the remote Kontomierz service is currently healthy; dependency failures are reported by tool calls with typed errors.
+Liveness proves the ASGI process responds. Readiness requires the full operation catalog and a bounded, cached probe of the mandatory Kontomierz dependency. Failed credentials, an unavailable backend, a probe timeout, shutdown, or an incomplete registry returns not-ready.
 
 ## Failure modes
 
-- Invalid input stops before dependency I/O.
-- Disabled writes stop before dependency I/O.
+- Invalid input, disabled writes, and admission rejection stop before dependency I/O.
 - Authentication, not-found, conflict, rate-limit, timeout, dependency, and malformed-response failures retain distinct codes.
-- Unexpected exceptions are logged with a request identifier and returned as a sanitized internal error.
-- Partial or ambiguous writes are never automatically retried.
+- Tool errors are explicit MCP `CallToolResult` documents with stable structured JSON.
+- Unexpected exceptions are logged with a request ID and exposed only as sanitized internal errors.
 
 ## Non-goals
 
-This revision does not provide public multi-tenant hosting, OAuth, per-resource caller authorization, durable background tasks, or a compatibility REST API.
+This revision does not provide public multi-tenant hosting, OAuth, per-resource caller authorization, durable background work, or a compatibility REST API.

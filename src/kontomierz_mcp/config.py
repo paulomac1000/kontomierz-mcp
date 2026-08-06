@@ -65,6 +65,9 @@ class Settings:
     enable_write_operations: bool = False
     mock_data: bool = False
     max_concurrency: int = 8
+    max_pending_invocations: int = 16
+    readiness_timeout_seconds: int = 5
+    readiness_cache_seconds: int = 10
 
     @classmethod
     def from_env(
@@ -95,6 +98,9 @@ class Settings:
             enable_write_operations=_bool(env, "ENABLE_WRITE_OPERATIONS"),
             mock_data=_bool(env, "KONTOMIERZ_MOCK_DATA"),
             max_concurrency=_positive_int(env, "MCP_MAX_CONCURRENCY", 8),
+            max_pending_invocations=_positive_int(env, "MCP_MAX_PENDING_INVOCATIONS", 16),
+            readiness_timeout_seconds=_positive_int(env, "MCP_READINESS_TIMEOUT", 5),
+            readiness_cache_seconds=_positive_int(env, "MCP_READINESS_CACHE_SECONDS", 10),
         )
         settings.validate()
         return settings
@@ -109,6 +115,8 @@ class Settings:
                 "Remote HTTP is disabled until authenticated principal and authorization policy are configured; "
                 "use a loopback MCP_HOST"
             )
+        if self.max_pending_invocations < self.max_concurrency:
+            raise ConfigurationError("MCP_MAX_PENDING_INVOCATIONS must be at least MCP_MAX_CONCURRENCY")
         if self.body_mode not in {"json", "form"}:
             raise ConfigurationError("KONTOMIERZ_BODY_MODE must be json or form")
         if self.log_level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:

@@ -49,5 +49,8 @@ class ApplicationError(Exception):
         return json.dumps(self.as_dict(), ensure_ascii=False, separators=(",", ":"))
 
 
+@dataclass(slots=True)
 class UpstreamError(ApplicationError):
-    """The Kontomierz dependency rejected or could not complete a request."""
+    """A dependency failure with an explicit write-outcome classification."""
+
+    write_outcome_ambiguous: bool = False

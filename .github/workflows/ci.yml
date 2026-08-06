@@ -84,11 +84,13 @@ jobs:
   exact-artifact:
     needs: [quality, compatibility]
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 30
+    env:
+      SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ env.SOURCE_SHA }}
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v6
         with:
@@ -102,14 +104,17 @@ jobs:
           python -m build --wheel
           mkdir -p dist/wheelhouse
           python -m pip download --dest dist/wheelhouse dist/kontomierz_mcp-*.whl
-          find dist -type f -name '*.whl' -print0 | sort -z | xargs -0 sha256sum | tee dist/SHA256SUMS
-      - name: Test the exact wheel in isolation
+      - name: Test the exact wheel outside the source tree
         run: |
           set -euo pipefail
           python -m venv /tmp/wheel-venv
           /tmp/wheel-venv/bin/python -m pip install --no-index \
             --find-links=dist/wheelhouse dist/kontomierz_mcp-*.whl
           /tmp/wheel-venv/bin/python -m pip install pytest pytest-asyncio pytest-cov
+          rm -rf /tmp/exact-wheel-test
+          mkdir -p /tmp/exact-wheel-test
+          cp -R tests scripts pyproject.toml /tmp/exact-wheel-test/
+          cd /tmp/exact-wheel-test
           /tmp/wheel-venv/bin/python -m pytest -m "not external" -q
           /tmp/wheel-venv/bin/python scripts/transport_smoke.py stdio \
             --executable /tmp/wheel-venv/bin/kontomierz-mcp
@@ -122,18 +127,24 @@ jobs:
           assert "/tmp/wheel-venv/" in str(source), source
           print(source)
           PY
-      - name: Build and smoke image from the same wheel
+      - name: Build, smoke, and preserve the exact image
         run: |
-          docker build -t kontomierz-mcp:${{ github.sha }} .
-          docker run --rm --entrypoint python kontomierz-mcp:${{ github.sha }} -c \
+          set -euo pipefail
+          docker build -t "kontomierz-mcp:$SOURCE_SHA" .
+          docker run --rm --entrypoint python "kontomierz-mcp:$SOURCE_SHA" -c \
             "from kontomierz_mcp.config import Settings; print(Settings(api_key='', mock_data=True))"
+          docker save "kontomierz-mcp:$SOURCE_SHA" | gzip -9 > dist/kontomierz-mcp-image.tar.gz
+          find dist -type f \( -name '*.whl' -o -name '*.tar.gz' \) -print0 \
+            | sort -z | xargs -0 sha256sum > dist/SHA256SUMS
+          sha256sum --check dist/SHA256SUMS
       - name: Upload release bundle
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: release-bundle-${{ github.event.pull_request.head.sha || github.sha }}
+          name: release-bundle-${{ env.SOURCE_SHA }}
           path: |
             dist/*.whl
             dist/wheelhouse/*.whl
+            dist/kontomierz-mcp-image.tar.gz
             dist/SHA256SUMS
           if-no-files-found: error
           retention-days: 30

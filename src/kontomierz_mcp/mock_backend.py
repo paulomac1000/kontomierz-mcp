@@ -10,7 +10,7 @@ from .errors import ApplicationError, ErrorCode
 
 
 class MockKontomierzClient:
-    """Implements the HTTP adapter surface without network or real financial data."""
+    """Implements the dependency surface without network or real financial data."""
 
     def __init__(self) -> None:
         self.accounts = [
@@ -40,9 +40,13 @@ class MockKontomierzClient:
         self.budgets = [{"id": 201, "limit": "600.00", "name": "Mock groceries", "category_id": 1}]
         self.schedules = [{"id": 301, "description": "Mock rent", "currency_amount": "1200.00", "paid": False}]
         self.closed = False
+        self.available = True
 
-    def close(self) -> None:
+    async def close(self) -> None:
         self.closed = True
+
+    async def probe(self) -> bool:
+        return self.available and not self.closed
 
     @staticmethod
     def _next_id(values: list[dict[str, Any]]) -> int:
@@ -62,12 +66,12 @@ class MockKontomierzClient:
         self,
         currency_balance: str,
         currency_name: str,
-        user_name: str = "",
+        user_name: str | None = None,
         liquid: str = "1",
     ) -> dict[str, Any]:
         item = {
             "id": self._next_id(self.accounts),
-            "display_name": user_name or "Mock wallet",
+            "display_name": "Mock wallet" if user_name is None else user_name,
             "currency_balance": currency_balance,
             "currency_name": currency_name,
             "liquid": liquid,
@@ -77,7 +81,7 @@ class MockKontomierzClient:
 
     def update_wallet(self, wallet_id: int, **fields: Any) -> dict[str, Any]:
         item = self._find(self.accounts, wallet_id)
-        item.update({key: value for key, value in fields.items() if value not in {None, ""}})
+        item.update({key: value for key, value in fields.items() if value is not None})
         return deepcopy(item)
 
     def destroy_wallet(self, wallet_id: int) -> bool:
@@ -115,7 +119,7 @@ class MockKontomierzClient:
 
     def update_money_transaction(self, transaction_id: int, **fields: Any) -> dict[str, Any]:
         item = self._find(self.transactions, transaction_id)
-        item.update({key: value for key, value in fields.items() if value not in {None, ""}})
+        item.update({key: value for key, value in fields.items() if value is not None})
         return deepcopy(item)
 
     def delete_money_transaction(self, transaction_id: int) -> bool:
@@ -167,7 +171,13 @@ class MockKontomierzClient:
 
     def get_scheduled_transactions(self, **filters: Any) -> list[dict[str, Any]]:
         paid = filters.get("schedule_group_name") == "paid"
-        return [deepcopy(item) for item in self.schedules if bool(item.get("paid")) is paid]
+        values = [deepcopy(item) for item in self.schedules if bool(item.get("paid")) is paid]
+        page = int(filters.get("page", 1))
+        per_page = filters.get("per_page")
+        if per_page:
+            start = (page - 1) * int(per_page)
+            values = values[start : start + int(per_page)]
+        return values
 
     def get_schedule(self, schedule_id: int) -> dict[str, Any]:
         return deepcopy(self._find(self.schedules, schedule_id))
@@ -179,7 +189,7 @@ class MockKontomierzClient:
 
     def update_schedule(self, schedule_id: int, **fields: Any) -> dict[str, Any]:
         item = self._find(self.schedules, schedule_id)
-        item.update({key: value for key, value in fields.items() if value not in {None, ""}})
+        item.update({key: value for key, value in fields.items() if value is not None})
         return deepcopy(item)
 
     def delete_schedule(self, schedule_id: int) -> bool:

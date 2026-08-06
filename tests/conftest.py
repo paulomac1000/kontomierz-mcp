@@ -1,10 +1,18 @@
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
 import pytest
 
 from kontomierz_mcp.config import Settings
 from kontomierz_mcp.mock_backend import MockKontomierzClient
 from kontomierz_mcp.server import build_kernel
+
+ROOT = Path(__file__).resolve().parents[1]
+SRC = ROOT / "src"
+if str(SRC) not in sys.path:
+    sys.path.insert(0, str(SRC))
 
 
 @pytest.fixture

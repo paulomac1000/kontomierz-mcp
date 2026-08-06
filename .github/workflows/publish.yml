@@ -10,6 +10,8 @@ permissions:
   contents: read
   actions: read
   packages: write
+  id-token: write
+  attestations: write
 
 concurrency:
   group: publish-${{ github.event.workflow_run.head_sha }}
@@ -20,38 +22,65 @@ jobs:
     if: github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    env:
+      HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+      IMAGE: ghcr.io/${{ github.repository }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ env.HEAD_SHA }}
           persist-credentials: false
-      - name: Download exact tested wheel
+      - name: Download exact tested release bundle
         env:
           GH_TOKEN: ${{ github.token }}
           RUN_ID: ${{ github.event.workflow_run.id }}
-          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           set -euo pipefail
           mkdir -p dist
           gh run download "$RUN_ID" --name "release-bundle-$HEAD_SHA" --dir dist
           sha256sum --check dist/SHA256SUMS
-      - name: Build and smoke local image
-        env:
-          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
-          IMAGE: ghcr.io/${{ github.repository }}
+      - name: Load and smoke the exact tested image
         run: |
           set -euo pipefail
-          SHORT="${HEAD_SHA:0:12}"
-          docker build -t "$IMAGE:sha-$SHORT" -t "$IMAGE:latest" .
-          docker run --rm --entrypoint python "$IMAGE:sha-$SHORT" -c "import kontomierz_mcp; print(kontomierz_mcp.__version__)"
-      - name: Push the same local image
+          gzip -dc dist/kontomierz-mcp-image.tar.gz | docker load
+          docker run --rm --entrypoint python "kontomierz-mcp:$HEAD_SHA" -c \
+            "import kontomierz_mcp; print(kontomierz_mcp.__version__)"
+      - name: Push two tags for the same loaded image
         env:
-          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
-          IMAGE: ghcr.io/${{ github.repository }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           SHORT="${HEAD_SHA:0:12}"
           echo "$GH_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          docker tag "kontomierz-mcp:$HEAD_SHA" "$IMAGE:sha-$SHORT"
+          docker tag "kontomierz-mcp:$HEAD_SHA" "$IMAGE:latest"
           docker push "$IMAGE:sha-$SHORT"
           docker push "$IMAGE:latest"
+      - name: Verify registry digests
+        id: digest
+        run: |
+          set -euo pipefail
+          SHORT="${HEAD_SHA:0:12}"
+          SHA_DIGEST="$(docker buildx imagetools inspect "$IMAGE:sha-$SHORT" | awk '$1 == "Digest:" {print $2; exit}')"
+          LATEST_DIGEST="$(docker buildx imagetools inspect "$IMAGE:latest" | awk '$1 == "Digest:" {print $2; exit}')"
+          test -n "$SHA_DIGEST"
+          test "$SHA_DIGEST" = "$LATEST_DIGEST"
+          echo "digest=$SHA_DIGEST" >> "$GITHUB_OUTPUT"
+          printf '%s\n' "$IMAGE@$SHA_DIGEST" | tee IMAGE_DIGEST
+      - name: Attest promoted image provenance
+        id: attest
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.digest.outputs.digest }}
+          push-to-registry: true
+          create-storage-record: false
+      - name: Upload promotion evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: promotion-evidence-${{ env.HEAD_SHA }}
+          path: |
+            IMAGE_DIGEST
+            ${{ steps.attest.outputs.bundle-path }}
+          if-no-files-found: error
+          retention-days: 90

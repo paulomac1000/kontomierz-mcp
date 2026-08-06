@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -15,6 +16,74 @@ from .mock_backend import MockKontomierzClient
 from .operations import build_operations
 
 _logger = logging.getLogger(__name__)
+
+_TOOL_SIGNATURES: dict[str, str] = {
+    "list_accounts": "",
+    "create_wallet": (
+        "currency_balance: str, currency_name: str, user_name: str | None = None, "
+        "liquid: str = '1'"
+    ),
+    "update_wallet": (
+        "wallet_id: int, currency_balance: str | None = None, currency_name: str | None = None, "
+        "user_name: str | None = None, liquid: str | None = None"
+    ),
+    "destroy_wallet": "wallet_id: int",
+    "list_transactions": (
+        "page: int = 1, per_page: int = 0, user_account_id: int | None = None, q: str = '', "
+        "start_on: str = '', end_on: str = '', direction: str = 'all', tag_name: str = '', "
+        "category_group_id: int | None = None, category_id: int | None = None, "
+        "show_hidden_transactions: bool = False"
+    ),
+    "get_transaction": "transaction_id: int",
+    "create_transaction": (
+        "client_assigned_id: str, user_account_id: int | None = None, category_id: int | None = None, "
+        "currency_amount: str = '', currency_name: str = '', direction: str = 'withdrawal', "
+        "tag_string: str = '', name: str = '', transaction_on: str = ''"
+    ),
+    "update_transaction": (
+        "transaction_id: int, user_account_id: int | None = None, category_id: int | None = None, "
+        "currency_amount: str | None = None, currency_name: str | None = None, "
+        "direction: str | None = None, tag_string: str | None = None, name: str | None = None, "
+        "transaction_on: str | None = None"
+    ),
+    "delete_transaction": "transaction_id: int",
+    "list_categories": "direction: str = 'withdrawal'",
+    "list_tags": "",
+    "list_currencies": "",
+    "list_budgets": "month: str = ''",
+    "create_budget": (
+        "limit: str, category_id: int | None = None, category_group_id: int | None = None, "
+        "month: str = ''"
+    ),
+    "update_budget": "budget_id: int, limit: str",
+    "delete_budget": "budget_id: int",
+    "copy_budgets_from_last_month": "",
+    "list_scheduled_transactions": (
+        "schedule_group_name: str = 'unpaid', page: int = 1, per_page: int = 0, "
+        "start_on: str = '', end_on: str = '', direction: str = 'all'"
+    ),
+    "get_schedule": "schedule_id: int",
+    "create_schedule": (
+        "direction: str, deadline_on: str, holidays: int, description: str, "
+        "currency_amount: str, currency_name: str, repeat: int"
+    ),
+    "update_schedule": (
+        "schedule_id: int, direction: str | None = None, deadline_on: str | None = None, "
+        "holidays: int | None = None, description: str | None = None, "
+        "currency_amount: str | None = None, currency_name: str | None = None, "
+        "repeat: int | None = None"
+    ),
+    "delete_schedule": "schedule_id: int",
+    "mark_schedule_paid": "schedule_id: int, payment_date: str",
+    "mark_schedule_unpaid": "schedule_id: int, payment_date: str",
+    "get_pie_chart": (
+        "chart_kind: str = 'pie', start_on: str = '', end_on: str = '', direction: str = 'all', "
+        "category_group_id: int | None = None, category_id: int | None = None, "
+        "user_account_id: int | None = None, q: str = '', tag_name: str = ''"
+    ),
+    "list_wealth_points": "start_on: str = '', end_on: str = ''",
+    "describe_kontomierz_capabilities": "",
+}
 
 
 def build_kernel(settings: Settings, dependency: Any | None = None) -> InvocationKernel:
@@ -32,10 +101,15 @@ def build_kernel(settings: Settings, dependency: Any | None = None) -> Invocatio
     return InvocationKernel(settings=settings, operations=build_operations(dependency, settings), dependency=dependency)
 
 
+def _error_document(error: ApplicationError) -> dict[str, Any]:
+    return {"error": error.as_dict()}
+
+
 def build_server(settings: Settings, kernel: InvocationKernel | None = None) -> Any:
-    """Build one official MCP SDK v2 server with one captured invocation kernel."""
+    """Build one official MCP SDK v2 server with one invocation kernel."""
     try:
         from mcp.server import MCPServer
+        from mcp.types import CallToolResult, TextContent
     except ImportError as exc:  # pragma: no cover - dependency installation failure
         raise RuntimeError("Install the project dependencies to run the MCP transport") from exc
 
@@ -51,258 +125,43 @@ def build_server(settings: Settings, kernel: InvocationKernel | None = None) -> 
     mcp = MCPServer(
         "kontomierz-mcp",
         instructions=(
-            "Use list tools to discover stable numeric IDs before detail or mutation calls. "
-            "All financial data is confidential. Writes are disabled unless the operator enables them. "
-            "Never retry a write after timeout without reconciling resource state."
+            "Use list tools to discover stable IDs. Financial data is confidential. "
+            "Writes require the operator gate. Reconcile any ambiguous write before retrying."
         ),
         lifespan=lifespan,
     )
 
-    async def invoke(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-        # ``locals()`` inside nested tool wrappers contains referenced closure
-        # variables. Never expose adapter implementation details as tool input.
-        clean_arguments = {key: value for key, value in arguments.items() if key != "invoke"}
+    async def dispatch(name: str, arguments: dict[str, Any]) -> Any:
         try:
-            return await owned_kernel.invoke(name, clean_arguments)
+            result = await owned_kernel.invoke(name, arguments)
+            return CallToolResult(
+                content=[TextContent(type="text", text=json.dumps(result["data"], ensure_ascii=False))],
+                structured_content=result,
+                is_error=False,
+            )
         except ApplicationError as exc:
-            # MCP SDK v2 converts an ordinary tool exception into a protocol-native
-            # CallToolResult(is_error=True). The string is an application-owned JSON error.
-            raise RuntimeError(str(exc)) from exc
+            document = _error_document(exc)
+            return CallToolResult(
+                content=[TextContent(type="text", text=json.dumps(document, ensure_ascii=False))],
+                structured_content=document,
+                is_error=True,
+            )
 
-    @mcp.tool()
-    async def list_accounts() -> dict[str, Any]:
-        """[READ, FINANCIAL] List accounts and wallets with balances."""
-        return await invoke("list_accounts", {})
-
-    @mcp.tool()
-    async def create_wallet(
-        currency_balance: str,
-        currency_name: str,
-        user_name: str = "",
-        liquid: str = "1",
-    ) -> dict[str, Any]:
-        """[WRITE, FINANCIAL] Create a cash wallet. Operator write gate required."""
-        return await invoke("create_wallet", locals())
-
-    @mcp.tool()
-    async def update_wallet(
-        wallet_id: int,
-        currency_balance: str = "",
-        currency_name: str = "",
-        user_name: str = "",
-        liquid: str = "",
-    ) -> dict[str, Any]:
-        """[WRITE, FINANCIAL] Update provided wallet fields."""
-        return await invoke("update_wallet", locals())
-
-    @mcp.tool()
-    async def destroy_wallet(wallet_id: int) -> dict[str, Any]:
-        """[DESTRUCTIVE, FINANCIAL] Delete a wallet."""
-        return await invoke("destroy_wallet", locals())
-
-    @mcp.tool()
-    async def list_transactions(
-        page: int = 1,
-        per_page: int = 0,
-        user_account_id: int = 0,
-        q: str = "",
-        start_on: str = "",
-        end_on: str = "",
-        direction: str = "all",
-        tag_name: str = "",
-        category_group_id: int = 0,
-        category_id: int = 0,
-        show_hidden_transactions: bool = False,
-    ) -> dict[str, Any]:
-        """[READ, FINANCIAL] List transactions. Dates use YYYY-MM-DD."""
-        return await invoke("list_transactions", locals())
-
-    @mcp.tool()
-    async def get_transaction(transaction_id: int) -> dict[str, Any]:
-        """[READ, FINANCIAL] Get one transaction by stable numeric ID."""
-        return await invoke("get_transaction", locals())
-
-    @mcp.tool()
-    async def create_transaction(
-        client_assigned_id: str,
-        user_account_id: int = 0,
-        category_id: int = 0,
-        currency_amount: str = "",
-        currency_name: str = "",
-        direction: str = "withdrawal",
-        tag_string: str = "",
-        name: str = "",
-        transaction_on: str = "",
-    ) -> dict[str, Any]:
-        """[WRITE, FINANCIAL] Create a transaction using a caller idempotency key."""
-        return await invoke("create_transaction", locals())
-
-    @mcp.tool()
-    async def update_transaction(
-        transaction_id: int,
-        user_account_id: int = 0,
-        category_id: int = 0,
-        currency_amount: str = "",
-        currency_name: str = "",
-        direction: str = "",
-        tag_string: str = "",
-        name: str = "",
-        transaction_on: str = "",
-    ) -> dict[str, Any]:
-        """[WRITE, FINANCIAL] Update provided transaction fields."""
-        arguments = locals()
-        arguments.update(
-            {
-                "user_account_id": user_account_id or "",
-                "category_id": category_id or "",
-            }
+    for name, signature in _TOOL_SIGNATURES.items():
+        namespace: dict[str, Any] = {"_dispatch": dispatch}
+        exec(  # nosec B102 - signatures are immutable repository constants, never runtime input
+            f"async def {name}({signature}):\n    return await _dispatch('{name}', locals())",
+            namespace,
         )
-        return await invoke("update_transaction", arguments)
-
-    @mcp.tool()
-    async def delete_transaction(transaction_id: int) -> dict[str, Any]:
-        """[DESTRUCTIVE, FINANCIAL] Delete a transaction."""
-        return await invoke("delete_transaction", locals())
-
-    @mcp.tool()
-    async def list_categories(direction: str = "withdrawal") -> dict[str, Any]:
-        """[READ, PERSONAL] List category hierarchy for withdrawal or deposit."""
-        return await invoke("list_categories", locals())
-
-    @mcp.tool()
-    async def list_tags() -> dict[str, Any]:
-        """[READ, PERSONAL] List account tags."""
-        return await invoke("list_tags", {})
-
-    @mcp.tool()
-    async def list_currencies() -> dict[str, Any]:
-        """[READ] List supported currencies."""
-        return await invoke("list_currencies", {})
-
-    @mcp.tool()
-    async def list_budgets(month: str = "") -> dict[str, Any]:
-        """[READ, FINANCIAL] List budgets. Month uses YYYY-MM."""
-        return await invoke("list_budgets", locals())
-
-    @mcp.tool()
-    async def create_budget(
-        limit: str,
-        category_id: int = 0,
-        category_group_id: int = 0,
-        month: str = "",
-    ) -> dict[str, Any]:
-        """[WRITE, FINANCIAL] Create a category or category-group budget."""
-        return await invoke("create_budget", locals())
-
-    @mcp.tool()
-    async def update_budget(budget_id: int, limit: str) -> dict[str, Any]:
-        """[WRITE, FINANCIAL] Update a budget limit."""
-        return await invoke("update_budget", locals())
-
-    @mcp.tool()
-    async def delete_budget(budget_id: int) -> dict[str, Any]:
-        """[DESTRUCTIVE, FINANCIAL] Delete a budget."""
-        return await invoke("delete_budget", locals())
-
-    @mcp.tool()
-    async def copy_budgets_from_last_month() -> dict[str, Any]:
-        """[WRITE, FINANCIAL] Copy last month's budgets; never auto-retry."""
-        return await invoke("copy_budgets_from_last_month", {})
-
-    @mcp.tool()
-    async def list_scheduled_transactions(
-        schedule_group_name: str = "unpaid",
-        page: int = 1,
-        per_page: int = 0,
-        start_on: str = "",
-        end_on: str = "",
-        direction: str = "all",
-    ) -> dict[str, Any]:
-        """[READ, FINANCIAL] List paid or unpaid scheduled transactions."""
-        return await invoke("list_scheduled_transactions", locals())
-
-    @mcp.tool()
-    async def get_schedule(schedule_id: int) -> dict[str, Any]:
-        """[READ, FINANCIAL] Get one payment schedule."""
-        return await invoke("get_schedule", locals())
-
-    @mcp.tool()
-    async def create_schedule(
-        direction: str,
-        deadline_on: str,
-        holidays: int,
-        description: str,
-        currency_amount: str,
-        currency_name: str,
-        repeat: int,
-    ) -> dict[str, Any]:
-        """[WRITE, FINANCIAL] Create a payment schedule. Date uses YYYY-MM-DD."""
-        return await invoke("create_schedule", locals())
-
-    @mcp.tool()
-    async def update_schedule(
-        schedule_id: int,
-        direction: str = "",
-        deadline_on: str = "",
-        holidays: int = -1,
-        description: str = "",
-        currency_amount: str = "",
-        currency_name: str = "",
-        repeat: int = 0,
-    ) -> dict[str, Any]:
-        """[WRITE, FINANCIAL] Update provided schedule fields."""
-        arguments = locals()
-        if holidays == -1:
-            arguments["holidays"] = ""
-        if repeat == 0:
-            arguments["repeat"] = ""
-        return await invoke("update_schedule", arguments)
-
-    @mcp.tool()
-    async def delete_schedule(schedule_id: int) -> dict[str, Any]:
-        """[DESTRUCTIVE, FINANCIAL] Delete a payment schedule."""
-        return await invoke("delete_schedule", locals())
-
-    @mcp.tool()
-    async def mark_schedule_paid(schedule_id: int, payment_date: str) -> dict[str, Any]:
-        """[WRITE, FINANCIAL] Mark a schedule paid on YYYY-MM-DD; never auto-retry."""
-        return await invoke("mark_schedule_paid", locals())
-
-    @mcp.tool()
-    async def mark_schedule_unpaid(schedule_id: int, payment_date: str) -> dict[str, Any]:
-        """[WRITE, FINANCIAL] Mark a schedule unpaid on YYYY-MM-DD; never auto-retry."""
-        return await invoke("mark_schedule_unpaid", locals())
-
-    @mcp.tool()
-    async def get_pie_chart(
-        chart_kind: str = "pie",
-        start_on: str = "",
-        end_on: str = "",
-        direction: str = "all",
-        category_group_id: int = 0,
-        category_id: int = 0,
-        user_account_id: int = 0,
-        q: str = "",
-        tag_name: str = "",
-    ) -> dict[str, Any]:
-        """[READ, FINANCIAL] Get transaction chart data."""
-        return await invoke("get_pie_chart", locals())
-
-    @mcp.tool()
-    async def list_wealth_points(start_on: str = "", end_on: str = "") -> dict[str, Any]:
-        """[READ, FINANCIAL] List net-worth history."""
-        return await invoke("list_wealth_points", locals())
-
-    @mcp.tool()
-    async def describe_kontomierz_capabilities() -> dict[str, Any]:
-        """[READ] Return supported and active capability manifests."""
-        return await invoke("describe_kontomierz_capabilities", {})
+        function = namespace[name]
+        function.__doc__ = f"Kontomierz tool: {name}."
+        mcp.tool()(function)
 
     return mcp
 
 
 def create_http_app(settings: Settings, kernel: InvocationKernel | None = None) -> Any:
-    """Create loopback-only Streamable HTTP plus liveness/readiness endpoints."""
+    """Create loopback-only Streamable HTTP plus health endpoints."""
     from starlette.applications import Starlette
     from starlette.responses import JSONResponse
     from starlette.routing import Mount, Route
@@ -313,9 +172,6 @@ def create_http_app(settings: Settings, kernel: InvocationKernel | None = None) 
 
     @asynccontextmanager
     async def lifespan(_app: Starlette) -> AsyncIterator[None]:
-        # A mounted sub-application's lifespan is not executed by Starlette.
-        # The host therefore owns the SDK session manager explicitly. The
-        # MCPServer lifespan closes the invocation kernel and dependency.
         async with mcp.session_manager.run():
             try:
                 yield
@@ -326,8 +182,11 @@ def create_http_app(settings: Settings, kernel: InvocationKernel | None = None) 
         return JSONResponse({"status": "alive"})
 
     async def ready(_request: Any) -> JSONResponse:
-        status = 200 if owned_kernel.ready else 503
-        return JSONResponse({"status": "ready" if status == 200 else "not-ready"}, status_code=status)
+        is_ready = await owned_kernel.readiness()
+        return JSONResponse(
+            {"status": "ready" if is_ready else "not-ready"},
+            status_code=200 if is_ready else 503,
+        )
 
     return Starlette(
         routes=[
@@ -347,8 +206,7 @@ def main() -> None:
     )
     kernel = build_kernel(settings)
     if settings.transport == "stdio":
-        mcp = build_server(settings, kernel)
-        mcp.run("stdio")
+        build_server(settings, kernel).run("stdio")
         return
 
     import uvicorn

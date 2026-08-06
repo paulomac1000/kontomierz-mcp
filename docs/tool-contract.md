@@ -5,38 +5,34 @@ type: contract
 status: evolving
 rigor: normative
 owners: [repository-maintainers]
-verification: Run `.venv/bin/python -m pytest tests/unit/test_manifests.py tests/unit/test_operations.py tests/unit/test_kernel.py`.
+verification: Run the manifest, operation, kernel, client, and MCP SDK contract tests.
 ---
 # Kontomierz tool contract
 
 ## Inputs
 
-Stable numeric IDs returned by list tools are accepted by detail and mutation tools. Money is passed as a decimal string plus a three-letter currency. Public dates use `YYYY-MM-DD`; months use `YYYY-MM`. Empty optional strings mean omitted values, not deletion.
+Stable positive numeric IDs returned by list tools are accepted by detail and mutation tools. Money is a finite decimal string plus a three-letter currency. Wallet balances may be zero or negative because the upstream contract has not established a positive-only restriction. Public dates use `YYYY-MM-DD`; months use `YYYY-MM`.
+
+For update tools, `None` means not provided. An empty string is an explicit request to clear a text field where the upstream accepts it.
 
 ## Outputs
 
-Successful tools return structured content with `data` and `_meta`. Metadata contains a request ID, duration, tool version, and stable target namespace. Empty lists are successful results.
+Successful tools return structured content with `data` and `_meta`. Metadata contains a request ID, duration, tool version, and target scope. Empty lists are successful results.
 
 ## Errors
 
-Tool failures are MCP-native error results produced by the official SDK from an application-owned exception. The visible text is a compact JSON object containing `code`, `message`, `retryable`, and optional `suggestion` or bounded details.
+Tool failures return an explicit MCP `CallToolResult` with `is_error=true`, controlled text JSON, and `structured_content.error`. The error contains `code`, `message`, `retryable`, and optional `suggestion` or bounded details. SDK-added exception prefixes are not part of the contract.
 
-Supported application codes distinguish invalid input, authentication, authorization, not found, conflict, rate limiting, timeout, cancellation, dependency unavailability, upstream failure, ambiguous outcome, and internal failure.
+## Safety and retry
 
-## Safety and confidentiality
+Each tool has an explicit manifest. Mutations require the operator gate. `concurrent_safe=false` is enforced per target. `automatic_retry=false` for every tool because the runtime has no retry loop.
 
-Each of the 27 tools has an explicit manifest. Risk is not inferred from a single READ/WRITE label. The manifest independently records side effects, confidentiality, operational impact, idempotency, automatic retry, reversibility, concurrency, operator gate, deadline, and target scope.
-
-All account, transaction, budget, schedule, chart, and wealth data is `financial`. Mutations require the operator write gate. Tool descriptions are discovery hints, not authorization.
-
-## Retry contract
-
-Automatic retry is disabled for every mutation. `create_transaction` is idempotent only when the caller preserves a unique `client_assigned_id`; that fact does not authorize blind retry after an ambiguous network outcome. Reads may be retried after eligible transient errors within the caller's deadline.
+A transient read error may be marked retryable for a caller-controlled retry. A write rejected before admission has not started. A started write with an ambiguous dependency outcome returns `AMBIGUOUS_OUTCOME`, `retryable=false`, and a reconciliation suggestion.
 
 ## Pagination
 
-A page is not evidence of the global total. Results report `items_in_page`, not `total`. `has_more` is true only when the upstream returns a full explicitly requested page; `next_page` is then the next page number. The contract does not call it an offset.
+The upstream has not provided a reliable total or continuation token. Results expose `items_in_page`, `may_have_more`, and `next_page_hint`. A full page is only a hint and never a claim that a next page exists.
 
 ## Compatibility changes
 
-This revision removes legacy SSE and the convenience REST bridge. It replaces localized public date inputs with ISO dates while retaining conversion inside the upstream adapter. These are intentional breaking changes requiring a minor version increase before release.
+This revision removes legacy SSE and the REST bridge, uses ISO public dates, switches the HTTP adapter to native async I/O, and makes clearing versus omission explicit.

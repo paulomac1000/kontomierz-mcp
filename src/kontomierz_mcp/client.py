@@ -1,11 +1,11 @@
-"""Synchronous Kontomierz HTTP adapter with typed, bounded failure mapping."""
+"""Asynchronous Kontomierz HTTP adapter with typed, bounded failure mapping."""
 
 from __future__ import annotations
 
 from collections.abc import Mapping
 from typing import Any
 
-import requests
+import httpx
 
 from .errors import ErrorCode, UpstreamError
 
@@ -13,7 +13,7 @@ Json = dict[str, Any] | list[Any]
 
 
 class KontomierzClient:
-    """Dependency client. It owns one requests session and no process globals."""
+    """Dependency client that owns one cancellation-aware asynchronous session."""
 
     def __init__(
         self,
@@ -22,19 +22,31 @@ class KontomierzClient:
         base_url: str,
         timeout_seconds: int,
         body_mode: str = "json",
-        session: requests.Session | None = None,
+        client: httpx.AsyncClient | None = None,
     ) -> None:
         self._api_key = api_key
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout_seconds
         self._body_mode = body_mode
-        self._session = session or requests.Session()
-        self._session.headers.update({"Accept": "application/json", "User-Agent": "kontomierz-mcp/1"})
+        self._client = client or httpx.AsyncClient(
+            headers={"Accept": "application/json", "User-Agent": "kontomierz-mcp/1"},
+            timeout=httpx.Timeout(timeout_seconds),
+        )
+        self._owns_client = client is None
 
-    def close(self) -> None:
-        self._session.close()
+    async def close(self) -> None:
+        if self._owns_client:
+            await self._client.aclose()
 
-    def _request(
+    async def probe(self) -> bool:
+        """Check the mandatory dependency without exposing upstream details."""
+        try:
+            await self.get_currencies()
+        except UpstreamError:
+            return False
+        return True
+
+    async def _request(
         self,
         method: str,
         path: str,
@@ -55,18 +67,29 @@ class KontomierzClient:
         if body is not None:
             body_key = "json" if self._body_mode == "json" else "data"
             kwargs[body_key] = dict(body)
+        is_write = method.upper() not in {"GET", "HEAD", "OPTIONS"}
         try:
-            response = self._session.request(**kwargs)
-        except requests.Timeout as exc:
-            raise UpstreamError(ErrorCode.TIMEOUT, "Kontomierz request timed out", retryable=True) from exc
-        except requests.ConnectionError as exc:
+            response = await self._client.request(**kwargs)
+        except httpx.TimeoutException as exc:
+            raise UpstreamError(
+                ErrorCode.TIMEOUT,
+                "Kontomierz request timed out",
+                retryable=not is_write,
+                write_outcome_ambiguous=is_write,
+            ) from exc
+        except httpx.TransportError as exc:
             raise UpstreamError(
                 ErrorCode.DEPENDENCY_UNAVAILABLE,
                 "Kontomierz is unavailable",
-                retryable=True,
+                retryable=not is_write,
+                write_outcome_ambiguous=is_write,
             ) from exc
-        except requests.RequestException as exc:
-            raise UpstreamError(ErrorCode.UPSTREAM_FAILURE, "Kontomierz request failed") from exc
+        except httpx.HTTPError as exc:
+            raise UpstreamError(
+                ErrorCode.UPSTREAM_FAILURE,
+                "Kontomierz request failed",
+                write_outcome_ambiguous=is_write,
+            ) from exc
 
         if response.status_code in {401, 403}:
             raise UpstreamError(ErrorCode.AUTHENTICATION_FAILED, "Kontomierz rejected the API credentials")
@@ -84,15 +107,16 @@ class KontomierzClient:
             raise UpstreamError(
                 ErrorCode.RATE_LIMITED,
                 "Kontomierz rate limit exceeded",
-                retryable=True,
+                retryable=not is_write,
                 details=details,
             )
         if response.status_code >= 500:
             raise UpstreamError(
                 ErrorCode.DEPENDENCY_UNAVAILABLE,
                 "Kontomierz service failed",
-                retryable=True,
+                retryable=not is_write,
                 details={"status": response.status_code},
+                write_outcome_ambiguous=is_write,
             )
         if response.status_code >= 400:
             raise UpstreamError(
@@ -106,9 +130,17 @@ class KontomierzClient:
         try:
             payload = response.json()
         except ValueError as exc:
-            raise UpstreamError(ErrorCode.UPSTREAM_FAILURE, "Kontomierz returned invalid JSON") from exc
+            raise UpstreamError(
+                ErrorCode.UPSTREAM_FAILURE,
+                "Kontomierz returned invalid JSON",
+                write_outcome_ambiguous=is_write,
+            ) from exc
         if not isinstance(payload, (dict, list)):
-            raise UpstreamError(ErrorCode.UPSTREAM_FAILURE, "Kontomierz returned an unsupported JSON value")
+            raise UpstreamError(
+                ErrorCode.UPSTREAM_FAILURE,
+                "Kontomierz returned an unsupported JSON value",
+                write_outcome_ambiguous=is_write,
+            )
         return payload
 
     @staticmethod
@@ -119,126 +151,107 @@ class KontomierzClient:
             return payload.get(key, payload)
         return payload
 
-    def get_user_accounts(self) -> list[dict[str, Any]]:
-        payload = self._request("GET", "user_accounts.json")
-        if not isinstance(payload, list):
-            raise UpstreamError(ErrorCode.UPSTREAM_FAILURE, "Unexpected accounts response")
-        return [item.get("user_account", item) for item in payload if isinstance(item, dict)]
+    async def get_user_accounts(self) -> list[dict[str, Any]]:
+        payload = await self._request("GET", "user_accounts.json")
+        items = self._expect_list(payload)
+        return [self._expect_dict(item.get("user_account", item)) for item in items]
 
-    def create_wallet(
+    async def create_wallet(
         self,
         currency_balance: str,
         currency_name: str,
-        user_name: str = "",
+        user_name: str | None = None,
         liquid: str = "1",
     ) -> dict[str, Any]:
-        body = {
+        body: dict[str, Any] = {
             "user_account[currency_balance]": currency_balance,
             "user_account[currency_name]": currency_name,
             "user_account[liquid]": liquid,
         }
-        if user_name:
+        if user_name is not None:
             body["user_account[user_name]"] = user_name
         return self._expect_dict(
+            self._unwrap(await self._request("POST", "user_accounts/create_wallet.json", body=body), "user_account")
+        )
+
+    async def update_wallet(self, wallet_id: int, **fields: Any) -> dict[str, Any]:
+        body = {f"user_account[{key}]": value for key, value in fields.items() if value is not None}
+        return self._expect_dict(
             self._unwrap(
-                self._request("POST", "user_accounts/create_wallet.json", body=body),
+                await self._request("PUT", f"user_accounts/{wallet_id}/update_wallet.json", body=body),
                 "user_account",
             )
         )
 
-    def update_wallet(self, wallet_id: int, **fields: Any) -> dict[str, Any]:
-        body = {f"user_account[{key}]": value for key, value in fields.items() if value not in {None, ""}}
-        return self._expect_dict(
-            self._unwrap(
-                self._request(
-                    "PUT",
-                    f"user_accounts/{wallet_id}/update_wallet.json",
-                    body=body,
-                ),
-                "user_account",
-            )
-        )
+    async def destroy_wallet(self, wallet_id: int) -> bool:
+        return bool(await self._request("DELETE", f"user_accounts/{wallet_id}/destroy_wallet.json", expect_json=False))
 
-    def destroy_wallet(self, wallet_id: int) -> bool:
-        return bool(self._request("DELETE", f"user_accounts/{wallet_id}/destroy_wallet.json", expect_json=False))
-
-    def get_money_transactions(self, **filters: Any) -> list[dict[str, Any]]:
-        payload = self._request("GET", "money_transactions.json", query=filters)
-        value = self._unwrap(payload, "money_transactions")
-        return self._expect_list(value)
-
-    def get_money_transaction(self, transaction_id: int) -> dict[str, Any]:
-        return self._expect_dict(
-            self._unwrap(
-                self._request("GET", f"money_transactions/{transaction_id}.json"),
-                "money_transaction",
-            )
-        )
-
-    def create_money_transaction(self, **fields: Any) -> dict[str, Any]:
-        body = {f"money_transaction[{key}]": value for key, value in fields.items() if value not in {None, ""}}
-        return self._expect_dict(
-            self._unwrap(
-                self._request("POST", "money_transactions.json", body=body),
-                "money_transaction",
-            )
-        )
-
-    def update_money_transaction(self, transaction_id: int, **fields: Any) -> dict[str, Any]:
-        body = {f"money_transaction[{key}]": value for key, value in fields.items() if value not in {None, ""}}
-        return self._expect_dict(
-            self._unwrap(
-                self._request(
-                    "PUT",
-                    f"money_transactions/{transaction_id}.json",
-                    body=body,
-                ),
-                "money_transaction",
-            )
-        )
-
-    def delete_money_transaction(self, transaction_id: int) -> bool:
-        return bool(self._request("DELETE", f"money_transactions/{transaction_id}.json", expect_json=False))
-
-    def get_categories(self, direction: str) -> list[dict[str, Any]]:
+    async def get_money_transactions(self, **filters: Any) -> list[dict[str, Any]]:
         return self._expect_list(
             self._unwrap(
-                self._request(
-                    "GET",
-                    "categories.json",
-                    query={"direction": direction, "in_wallet": "true"},
-                ),
+                await self._request("GET", "money_transactions.json", query=filters),
+                "money_transactions",
+            )
+        )
+
+    async def get_money_transaction(self, transaction_id: int) -> dict[str, Any]:
+        return self._expect_dict(
+            self._unwrap(await self._request("GET", f"money_transactions/{transaction_id}.json"), "money_transaction")
+        )
+
+    async def create_money_transaction(self, **fields: Any) -> dict[str, Any]:
+        body = {f"money_transaction[{key}]": value for key, value in fields.items() if value is not None}
+        return self._expect_dict(
+            self._unwrap(await self._request("POST", "money_transactions.json", body=body), "money_transaction")
+        )
+
+    async def update_money_transaction(self, transaction_id: int, **fields: Any) -> dict[str, Any]:
+        body = {f"money_transaction[{key}]": value for key, value in fields.items() if value is not None}
+        return self._expect_dict(
+            self._unwrap(
+                await self._request("PUT", f"money_transactions/{transaction_id}.json", body=body),
+                "money_transaction",
+            )
+        )
+
+    async def delete_money_transaction(self, transaction_id: int) -> bool:
+        return bool(await self._request("DELETE", f"money_transactions/{transaction_id}.json", expect_json=False))
+
+    async def get_categories(self, direction: str) -> list[dict[str, Any]]:
+        return self._expect_list(
+            self._unwrap(
+                await self._request("GET", "categories.json", query={"direction": direction, "in_wallet": "true"}),
                 "category_groups",
             )
         )
 
-    def get_tags(self) -> list[dict[str, Any]]:
-        return self._expect_list(self._unwrap(self._request("GET", "tags.json"), "tags"))
+    async def get_tags(self) -> list[dict[str, Any]]:
+        return self._expect_list(self._unwrap(await self._request("GET", "tags.json"), "tags"))
 
-    def get_currencies(self) -> list[dict[str, Any]]:
-        return self._expect_list(self._unwrap(self._request("GET", "currencies.json"), "currencies"))
+    async def get_currencies(self) -> list[dict[str, Any]]:
+        return self._expect_list(self._unwrap(await self._request("GET", "currencies.json"), "currencies"))
 
-    def get_budgets(self, month_on: str | None = None) -> list[dict[str, Any]]:
+    async def get_budgets(self, month_on: str | None = None) -> list[dict[str, Any]]:
         return self._expect_list(
             self._unwrap(
-                self._request("GET", "budgets.json", query={"month_on": month_on}),
+                await self._request("GET", "budgets.json", query={"month_on": month_on}),
                 "budgets",
             )
         )
 
-    def create_budget(
+    async def create_budget(
         self,
         limit: str,
         category_id: int | None = None,
         category_group_id: int | None = None,
         month_on: str = "",
     ) -> dict[str, Any]:
-        return self._budget_write("POST", "budgets.json", limit, category_id, category_group_id, month_on)
+        return await self._budget_write("POST", "budgets.json", limit, category_id, category_group_id, month_on)
 
-    def update_budget(self, budget_id: int, limit: str) -> dict[str, Any]:
-        return self._budget_write("PUT", f"budgets/{budget_id}.json", limit, None, None, "")
+    async def update_budget(self, budget_id: int, limit: str) -> dict[str, Any]:
+        return await self._budget_write("PUT", f"budgets/{budget_id}.json", limit, None, None, "")
 
-    def _budget_write(
+    async def _budget_write(
         self,
         method: str,
         path: str,
@@ -254,58 +267,60 @@ class KontomierzClient:
             body["budget[category_group_id]"] = category_group_id
         if month_on:
             body["budget[month_on]"] = month_on
-        return self._expect_dict(self._unwrap(self._request(method, path, body=body), "budget"))
+        return self._expect_dict(self._unwrap(await self._request(method, path, body=body), "budget"))
 
-    def delete_budget(self, budget_id: int) -> bool:
-        return bool(self._request("DELETE", f"budgets/{budget_id}.json", expect_json=False))
+    async def delete_budget(self, budget_id: int) -> bool:
+        return bool(await self._request("DELETE", f"budgets/{budget_id}.json", expect_json=False))
 
-    def copy_budgets_from_last_month(self) -> bool:
-        return bool(self._request("POST", "budgets/copy_from_last_to_present_month.json", expect_json=False))
+    async def copy_budgets_from_last_month(self) -> bool:
+        return bool(await self._request("POST", "budgets/copy_from_last_to_present_month.json", expect_json=False))
 
-    def get_scheduled_transactions(self, **filters: Any) -> list[dict[str, Any]]:
+    async def get_scheduled_transactions(self, **filters: Any) -> list[dict[str, Any]]:
         return self._expect_list(
             self._unwrap(
-                self._request("GET", "scheduled_transactions.json", query=filters),
+                await self._request("GET", "scheduled_transactions.json", query=filters),
                 "scheduled_transactions",
             )
         )
 
-    def get_schedule(self, schedule_id: int) -> dict[str, Any]:
-        return self._expect_dict(self._unwrap(self._request("GET", f"schedules/{schedule_id}.json"), "schedule"))
+    async def get_schedule(self, schedule_id: int) -> dict[str, Any]:
+        return self._expect_dict(self._unwrap(await self._request("GET", f"schedules/{schedule_id}.json"), "schedule"))
 
-    def create_schedule(self, **fields: Any) -> dict[str, Any]:
-        return self._schedule_write("POST", "schedules.json", fields)
+    async def create_schedule(self, **fields: Any) -> dict[str, Any]:
+        return await self._schedule_write("POST", "schedules.json", fields)
 
-    def update_schedule(self, schedule_id: int, **fields: Any) -> dict[str, Any]:
-        return self._schedule_write("PUT", f"schedules/{schedule_id}.json", fields)
+    async def update_schedule(self, schedule_id: int, **fields: Any) -> dict[str, Any]:
+        return await self._schedule_write("PUT", f"schedules/{schedule_id}.json", fields)
 
-    def _schedule_write(self, method: str, path: str, fields: Mapping[str, Any]) -> dict[str, Any]:
-        body = {f"schedule[{key}]": value for key, value in fields.items() if value not in {None, ""}}
-        return self._expect_dict(self._unwrap(self._request(method, path, body=body), "schedule"))
+    async def _schedule_write(self, method: str, path: str, fields: Mapping[str, Any]) -> dict[str, Any]:
+        body = {f"schedule[{key}]": value for key, value in fields.items() if value is not None}
+        return self._expect_dict(self._unwrap(await self._request(method, path, body=body), "schedule"))
 
-    def delete_schedule(self, schedule_id: int) -> bool:
-        return bool(self._request("DELETE", f"schedules/{schedule_id}.json", expect_json=False))
+    async def delete_schedule(self, schedule_id: int) -> bool:
+        return bool(await self._request("DELETE", f"schedules/{schedule_id}.json", expect_json=False))
 
-    def mark_schedule_paid(self, schedule_id: int, date: str) -> bool:
-        return bool(self._request("PUT", f"schedules/{schedule_id}/mark_as_payed/{date}.json", expect_json=False))
+    async def mark_schedule_paid(self, schedule_id: int, date: str) -> bool:
+        return bool(await self._request("PUT", f"schedules/{schedule_id}/mark_as_payed/{date}.json", expect_json=False))
 
-    def mark_schedule_unpaid(self, schedule_id: int, date: str) -> bool:
-        return bool(self._request("PUT", f"schedules/{schedule_id}/mark_as_unpayed/{date}.json", expect_json=False))
+    async def mark_schedule_unpaid(self, schedule_id: int, date: str) -> bool:
+        return bool(
+            await self._request(
+                "PUT",
+                f"schedules/{schedule_id}/mark_as_unpayed/{date}.json",
+                expect_json=False,
+            )
+        )
 
-    def get_wealth_points(self, start_on: str | None = None, end_on: str | None = None) -> list[dict[str, Any]]:
+    async def get_wealth_points(self, start_on: str | None = None, end_on: str | None = None) -> list[dict[str, Any]]:
         return self._expect_list(
             self._unwrap(
-                self._request(
-                    "GET",
-                    "wealth_points.json",
-                    query={"start_on": start_on, "end_on": end_on},
-                ),
+                await self._request("GET", "wealth_points.json", query={"start_on": start_on, "end_on": end_on}),
                 "wealth_points",
             )
         )
 
-    def get_pie_chart(self, **filters: Any) -> dict[str, Any]:
-        return self._expect_dict(self._request("GET", "charts/money_transactions.json", query=filters))
+    async def get_pie_chart(self, **filters: Any) -> dict[str, Any]:
+        return self._expect_dict(await self._request("GET", "charts/money_transactions.json", query=filters))
 
     @staticmethod
     def _expect_dict(value: Any) -> dict[str, Any]:

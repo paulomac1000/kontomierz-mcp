@@ -1,0 +1,74 @@
+from __future__ import annotations
+
+import pytest
+
+from kontomierz_mcp.config import Settings
+from kontomierz_mcp.errors import ApplicationError, ErrorCode
+from kontomierz_mcp.mock_backend import MockKontomierzClient
+from kontomierz_mcp.operations import build_operations
+
+
+@pytest.fixture
+def operations():
+    backend = MockKontomierzClient()
+    settings = Settings(api_key="", mock_data=True, enable_write_operations=True)
+    return build_operations(backend, settings), backend
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field", ["user_account_id", "category_id", "category_group_id"])
+async def test_negative_optional_ids_are_rejected(operations, field: str) -> None:
+    ops, _ = operations
+    with pytest.raises(ApplicationError) as captured:
+        await ops["list_transactions"](**{field: -1})
+    assert captured.value.code is ErrorCode.INVALID_PARAMETER
+
+
+@pytest.mark.asyncio
+async def test_negative_budget_category_is_rejected(operations) -> None:
+    ops, _ = operations
+    with pytest.raises(ApplicationError):
+        await ops["create_budget"](limit="10", category_id=-1)
+
+
+@pytest.mark.asyncio
+async def test_date_range_order_is_validated(operations) -> None:
+    ops, _ = operations
+    with pytest.raises(ApplicationError) as captured:
+        await ops["list_transactions"](start_on="2026-08-02", end_on="2026-08-01")
+    assert captured.value.message == "start_on must be on or before end_on"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("balance", ["0", "-100.25"])
+async def test_wallet_balance_allows_zero_and_debt(operations, balance: str) -> None:
+    ops, _ = operations
+    result = await ops["create_wallet"](currency_balance=balance, currency_name="pln")
+    assert result["currency_balance"] == balance
+
+
+@pytest.mark.asyncio
+async def test_empty_text_is_an_explicit_clear_value(operations) -> None:
+    ops, backend = operations
+    result = await ops["update_wallet"](wallet_id=101, user_name="")
+    assert result["user_name"] == ""
+    assert backend.accounts[0]["user_name"] == ""
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field,value", [("holidays", "x"), ("repeat", "x")])
+async def test_schedule_numeric_validation_never_leaks_value_error(operations, field: str, value: str) -> None:
+    ops, _ = operations
+    with pytest.raises(ApplicationError) as captured:
+        await ops["update_schedule"](schedule_id=301, **{field: value})
+    assert captured.value.code is ErrorCode.INVALID_PARAMETER
+
+
+@pytest.mark.asyncio
+async def test_pagination_is_explicitly_a_hint(operations) -> None:
+    ops, _ = operations
+    result = await ops["list_transactions"](per_page=2)
+    assert result["may_have_more"] is True
+    assert result["next_page_hint"] == 2
+    assert "has_more" not in result
+    assert "next_page" not in result
