@@ -5,11 +5,7 @@ from typing import Annotated
 
 from pydantic import Field
 
-from kontomierz_mcp.manifests import (
-    TOOL_DEFINITIONS,
-    TOOL_MANIFESTS,
-    project_manifest,
-)
+from kontomierz_mcp.manifests import TOOL_DEFINITIONS, TOOL_MANIFESTS, project_manifest
 
 _REQUIRED_FIELDS = {
     "name",
@@ -76,11 +72,15 @@ def test_manifest_claims_are_conservative_and_internally_consistent() -> None:
         else:
             assert manifest.idempotency_mechanism == "none"
         if manifest.side_effects in {"write", "destructive"}:
-            assert manifest.requires_confirmation is True
+            # A true confirmation claim requires an independent server-side approval authority.
+            # This server currently has only the operator write gate, so it must not advertise one.
+            assert manifest.requires_confirmation is False
             assert manifest.requires_operator_write_gate is True
             assert manifest.concurrent_safe is False
             assert manifest.reversible is False
             assert manifest.retryable is False
+            assert manifest.claim_evidence.retry.startswith("tests/unit/test_kernel_runtime.py::")
+            assert manifest.claim_evidence.concurrency.startswith("tests/unit/test_kernel_runtime.py::")
 
 
 def test_parameter_contract_generates_stable_python_signatures() -> None:

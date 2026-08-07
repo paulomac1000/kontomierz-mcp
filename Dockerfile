@@ -1,20 +1,19 @@
-FROM python:3.12-slim@sha256:646fb0bca3dd3ea1bcc6feb72c17ed16eed6e10cffc732fcc1478bd3e7f02d7b
+FROM python:3.12.11-slim@sha256:9fb9f94e7b4a4b73d779fbf1b1ef8c918514d9f6c1b0e6e646bfe1d83d214b99
 
-RUN groupadd --system app && useradd --system --gid app --home-dir /app app
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+RUN addgroup --system app && adduser --system --ingroup app app
+
 WORKDIR /app
-
-# CI resolves one wheelhouse, tests the application wheel against it, and
-# publishes the same files. Runtime installation never contacts an index.
 COPY dist/ /tmp/dist/
-RUN python -m pip install --no-cache-dir --no-index \
-      --find-links=/tmp/dist/wheelhouse \
-      /tmp/dist/kontomierz_mcp-*.whl \
-    && rm -rf /tmp/dist \
-    && chown -R app:app /app
+RUN cd /tmp/dist \
+    && sha256sum --check SHA256SUMS \
+    && python -m pip install --no-cache-dir --no-index \
+       --find-links /tmp/dist/wheelhouse /tmp/dist/kontomierz_mcp-*.whl \
+    && python -m pip check \
+    && rm -rf /tmp/dist
 
 USER app
-ENV MCP_TRANSPORT=stdio \
-    PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1
-
 ENTRYPOINT ["kontomierz-mcp"]

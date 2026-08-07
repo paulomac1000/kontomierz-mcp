@@ -7,15 +7,17 @@ import inspect
 import logging
 import time
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
-from importlib.metadata import PackageNotFoundError, version as package_version
-from typing import Any, AsyncIterator
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as package_version
+from typing import Any
 
 from . import __version__
 from .config import Settings
 from .errors import ApplicationError, ErrorCode, UpstreamError
 from .manifests import TOOL_DEFINITIONS, TOOL_MANIFESTS, ToolManifest, project_manifest
+from .security import InvocationContext, current_invocation_context
 
 Operation = Callable[..., Any | Awaitable[Any]]
 _logger = logging.getLogger(__name__)
@@ -23,7 +25,7 @@ _CAPABILITY_TOOL = "describe_kontomierz_capabilities"
 
 
 class InvocationKernel:
-    """Resolve policy, bound admission/concurrency, execute, and shape results."""
+    """Resolve policy, authenticate, bound concurrency, execute, and shape results."""
 
     def __init__(self, *, settings: Settings, operations: dict[str, Operation], dependency: Any) -> None:
         self._settings = settings
@@ -49,7 +51,6 @@ class InvocationKernel:
         return self._readiness_value
 
     async def readiness(self) -> bool:
-        """Return cached readiness that includes the mandatory dependency."""
         if not self.structurally_ready:
             return False
         now = time.monotonic()
@@ -153,7 +154,6 @@ class InvocationKernel:
         return sdk_version, protocol_versions
 
     def capability_document(self) -> dict[str, Any]:
-        """Return zero-I/O supported and active catalogs from the governed definitions."""
         dependency_ready = self.cached_dependency_ready
         projected = {
             name: project_manifest(
@@ -163,21 +163,10 @@ class InvocationKernel:
             )
             for name, definition in TOOL_DEFINITIONS.items()
         }
-        tools = {
-            name: TOOL_DEFINITIONS[name].as_dict(manifest=projected[name])
-            for name in TOOL_DEFINITIONS
-        }
-        active_tools = {
-            name: contract
-            for name, contract in tools.items()
-            if projected[name].active_state == "active"
-        }
+        tools = {name: TOOL_DEFINITIONS[name].as_dict(manifest=projected[name]) for name in TOOL_DEFINITIONS}
+        active_tools = {name: contract for name, contract in tools.items() if projected[name].active_state == "active"}
         sdk_version, protocol_versions = self._sdk_identity()
-        dependency_state = (
-            "unknown"
-            if dependency_ready is None
-            else ("ready" if dependency_ready else "unavailable")
-        )
+        dependency_state = "unknown" if dependency_ready is None else ("ready" if dependency_ready else "unavailable")
         return {
             "schema_version": "3.0.0",
             "server_version": __version__,
@@ -185,12 +174,8 @@ class InvocationKernel:
             "sdk_version": sdk_version,
             "protocol_versions": protocol_versions,
             "supported_transports": ["stdio", "streamable-http"],
-            "active_transport": (
-                "streamable-http"
-                if self._settings.transport in {"http", "streamable-http"}
-                else "stdio"
-            ),
-            "profile": "local-trusted-user",
+            "active_transport": "streamable-http" if self._settings.streamable_http else "stdio",
+            "profile": "authenticated-http" if self._settings.streamable_http else "local-process-principal",
             "dependency_state": dependency_state,
             "write_operations_enabled": self._settings.enable_write_operations,
             "supported_component_count": len(tools),
@@ -199,13 +184,28 @@ class InvocationKernel:
             "active_tools": active_tools,
         }
 
-    async def invoke(self, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    async def invoke(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        *,
+        context: InvocationContext | None = None,
+    ) -> dict[str, Any]:
         if self._closed:
             raise ApplicationError(ErrorCode.DEPENDENCY_UNAVAILABLE, "Server is shutting down", retryable=True)
         manifest = TOOL_MANIFESTS.get(tool_name)
         operation = self._operations.get(tool_name)
         if manifest is None or operation is None:
             raise ApplicationError(ErrorCode.RESOURCE_NOT_FOUND, f"Unknown tool: {tool_name}")
+        invocation_context = context or current_invocation_context()
+        if invocation_context is None:
+            invocation_context = (
+                InvocationContext.configured_http(self._settings)
+                if self._settings.streamable_http
+                else InvocationContext.local_stdio()
+            )
+        if not invocation_context.authenticated:
+            raise ApplicationError(ErrorCode.AUTHENTICATION_FAILED, "Calling principal is not authenticated")
         projected = project_manifest(
             manifest,
             writes_enabled=self._settings.enable_write_operations,
@@ -225,6 +225,11 @@ class InvocationKernel:
                     "Set ENABLE_WRITE_OPERATIONS=1 in the trusted server environment "
                     "after reviewing the target and operation."
                 ),
+            )
+        if manifest.requires_confirmation:
+            raise ApplicationError(
+                ErrorCode.AUTHORIZATION_FAILED,
+                "This capability requires a server-verified approval record, but no approval authority is configured",
             )
 
         request_id = uuid.uuid4().hex
@@ -277,6 +282,7 @@ class InvocationKernel:
                 "duration_ms": int((time.monotonic() - started_at) * 1000),
                 "tool_version": manifest.version,
                 "target": manifest.target_scope,
+                "transport": invocation_context.transport,
             },
         }
 

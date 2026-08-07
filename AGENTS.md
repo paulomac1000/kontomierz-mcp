@@ -1,64 +1,65 @@
----
-doc_id: guide.repository-agent-instructions
-type: guide
-status: active
-rigor: operational
-owners: [repository-maintainers]
-description: Operating modes, architecture boundaries, and verification commands for agents changing kontomierz-mcp.
-verification:
-  - Run `.venv/bin/python -m pytest -m "not external"`.
-  - Run the quality and exact-wheel commands in this file.
----
-# Repository instructions for agents
+# Repository instructions
 
-## Scope and precedence
+## Scope and risk contract
 
-These instructions apply to the complete repository. Direct user instructions and platform safety requirements have higher authority. Read [`docs/system-architecture.md`](docs/system-architecture.md) before changing lifecycle, transport, concurrency, security, or dependency code. Read [`docs/tool-contract.md`](docs/tool-contract.md) before changing a public tool, manifest, error, retry, date, money, or pagination contract.
+This repository is a financial MCP server. Reads can expose confidential financial or personal data. Writes can create, change, or delete persistent financial records. Treat target selection, authentication, write enablement, ambiguous outcomes, release permissions, and dependency identity as safety boundaries. Never weaken a fail-closed control merely to satisfy a test or validator.
 
-## Operating modes
+These instructions use the single-repository MCP-server profile. The root file is the only AGENTS.md for the candidate tree.
 
-- **Read-only audit:** do not modify files, branches, remote state, credentials, or external systems.
-- **Implementation:** write only to the requested branch and repository. Use mock data by default.
-- **Real-system verification:** requires a disposable Kontomierz account and explicit authorization.
-- **Release:** requires green hosted CI on the exact SHA and promotion of the tested wheel.
+## Architecture ownership
 
-## Architecture boundaries
+- `src/kontomierz_mcp/config.py` owns immutable startup configuration and unsafe-configuration rejection.
+- `src/kontomierz_mcp/security.py` owns process-derived stdio identity and Streamable HTTP authentication context.
+- `src/kontomierz_mcp/client.py` owns upstream HTTP behavior and typed dependency failures.
+- `src/kontomierz_mcp/operation_support.py` owns shared domain validation.
+- `src/kontomierz_mcp/operation_primary.py` and `src/kontomierz_mcp/operation_secondary.py` own transport-independent handlers.
+- `src/kontomierz_mcp/operations.py` binds the operation catalog to the dependency port.
+- `src/kontomierz_mcp/manifest_types.py` owns governed manifest and tool-definition types.
+- `src/kontomierz_mcp/manifest_policy.py` owns manifest construction and runtime active-state projection.
+- `src/kontomierz_mcp/tool_definitions_primary.py`, `src/kontomierz_mcp/tool_definitions_secondary.py`, and `src/kontomierz_mcp/tool_definitions_tertiary.py` own the public tool catalog.
+- `src/kontomierz_mcp/manifests.py` is the public catalog facade.
+- `src/kontomierz_mcp/kernel.py` is the only invocation policy/execution kernel.
+- `src/kontomierz_mcp/server.py` is the composition root and official MCP transport adapter.
+- `src/kontomierz_mcp/mock_backend.py` is deterministic test data only and must not silently become production behavior.
 
-- `config.py` owns the immutable process configuration.
-- `client.py` is the only module that speaks the Kontomierz HTTP protocol and must remain natively asynchronous.
-- `operations.py` owns domain validation and upstream-format conversion.
-- `manifests.py` owns safety, confidentiality, retry, idempotency, and concurrency claims.
-- `kernel.py` is the only execution path. It owns bounded admission, running concurrency, per-target serialization, deadlines, readiness, and error normalization.
-- `server.py` owns official MCP SDK registration and explicit `CallToolResult` shaping.
-- `mock_backend.py` contains synthetic data only.
+Keep transports thin. Do not call the Kontomierz adapter directly from an MCP wrapper. Public names, signatures, parameter descriptions, versions, and safety metadata must remain discoverable from the governed catalog.
 
-Legacy HTTP+SSE and the unauthenticated REST bridge are removed. Stdio and loopback Streamable HTTP are the only current transports.
+## Safety invariants
 
-## Safety contracts
+Stdio may use a process-derived local principal. Streamable HTTP must authenticate a request-scoped principal before MCP handling and remains loopback-only. Do not accept a principal, write-enable flag, approval, target override, or credential from model-controlled tool arguments.
 
-Financial data is confidential. Writes require the trusted operator gate. A started write that times out or loses a response is an ambiguous outcome and must not be retried before reconciliation. A write rejected before admission has not started. Secrets and raw upstream bodies must not enter logs or model-visible errors.
+Mutations require the trusted operator write gate. The current server has no independent approval authority, so manifests must not claim confirmation. If a future manifest requires confirmation, invocation must remain fail-closed until a trusted approval record bound to principal, capability, target, and argument digest is verified server-side.
 
-`concurrent_safe=false` is enforced per `target_scope`; it is not documentation-only. Automatic retries are currently disabled for every tool. Read retry eligibility may be reported by typed errors, but the server itself does not retry.
+Never automatically retry mutations. A timeout, transport loss, malformed response after a successful HTTP mutation, or other ambiguous post-start failure must stay `AMBIGUOUS_OUTCOME` until exact target state is reconciled. Preserve per-target serialization for capabilities that are not concurrency-safe.
 
-## Setup and completion gate
+Do not expose API keys, Bearer tokens, raw upstream bodies, or principal secrets in tool results or logs. Health endpoints may report bounded status only.
+
+## Change discipline
+
+Update tests whenever behavior, manifests, public schemas, authentication, retry semantics, target binding, or release policy changes. Keep external Kontomierz assumptions conservative until a disposable real-account test proves them. Do not convert a deferred evidence item into a positive claim merely because the mock backend passes.
+
+GitHub Actions must use immutable action revisions, explicit permissions, concrete runners, job timeouts, and the workflow profile declared in `.github/workflow-policy.yaml`. Trusted `ai-skills` validators must be checked out at the pinned immutable revision and moved outside the candidate tree before auditing it.
+
+## Completion gate
+
+Create and activate a virtual environment before running repository commands. The commands below mirror executable CI gates and are the completion contract:
 
 ```bash
-python3 -m venv .venv
-.venv/bin/python -m pip install -e ".[dev]"
-.venv/bin/python -m ruff check .
-.venv/bin/python -m ruff format --check .
-.venv/bin/python -m mypy src/kontomierz_mcp
-.venv/bin/python -m bandit -q -r src/kontomierz_mcp
-.venv/bin/python -m pytest -m "not external" \
-  --cov=kontomierz_mcp --cov-branch --cov-report=term-missing --cov-report=xml
-.venv/bin/python scripts/mock_smoke.py
-.venv/bin/python -m build
+python -m pip install -e ".[dev]"
+python -m pip check
+python -m ruff check .
+python -m ruff format --check .
+python -m mypy src/kontomierz_mcp
+python -m bandit -q -r src/kontomierz_mcp
+python -m pip_audit
+python -m pytest -m "not external" --cov=kontomierz_mcp --cov-branch --cov-report=term-missing --cov-report=xml
+python scripts/mock_smoke.py
 ```
 
-The official MCP SDK test is mandatory. Do not replace its import with `pytest.importorskip`. If the local package mirror cannot supply `mcp` v2, record that limitation and rely on hosted CI before review readiness.
+The hosted exact-artifact job additionally builds one application wheel, installs it without network access from the closed wheelhouse, runs official-client stdio and authenticated Streamable HTTP smoke tests, verifies Docker installation checksums, and smoke-tests the exact container before preserving the release archive.
 
-Build an isolated environment, install `dist/*.whl`, and rerun the non-external suite. Tests requiring a real account must use `external` and retain a concrete `TODO(real-system-agent)`.
+Tests that require a disposable real Kontomierz account remain explicit external evidence. Do not run them against a personal or non-disposable account.
 
-## Completion report
+## Documentation and release
 
-Report the exact revision, commands, pass/skip/fail counts, unavailable checks, mock-versus-real evidence, behavior changes, and residual risks. A local pass is not a formal `ai-skills` adoption approval.
+When public behavior changes, update README, changelog when release-visible, system architecture, tool contract, upstream assumptions, and the ai-skills gap assessment as appropriate. Do not claim formal L2+ adoption until the exact immutable revision has the required hosted evidence, reviewed dependency locks, provider-backed migration assessment, real-system evidence, protected release configuration, and independent approval.

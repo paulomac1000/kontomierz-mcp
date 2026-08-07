@@ -2,19 +2,9 @@
 
 from __future__ import annotations
 
-from .manifest_core import (
-    ClaimEvidence,
-    ToolDefinition,
-    _LOCAL_RETRY,
-    _LOCAL_TARGET,
-    manifest,
-    p,
-    read_manifest,
-    write_manifest,
-)
+from .manifest_core import ToolDefinition, p, read_manifest, write_manifest
 
 PRIMARY_TOOL_DEFINITIONS: dict[str, ToolDefinition] = {
-
     "list_accounts": ToolDefinition(
         read_manifest("list_accounts", confidentiality="financial"),
         "List configured accounts and wallets with balances.",
@@ -124,5 +114,5 @@ PRIMARY_TOOL_DEFINITIONS: dict[str, ToolDefinition] = {
     "list_currencies": ToolDefinition(
         read_manifest("list_currencies", confidentiality="public"),
         "List currencies supported by the Kontomierz backend.",
-    )
+    ),
 }

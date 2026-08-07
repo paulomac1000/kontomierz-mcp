@@ -18,6 +18,7 @@ from .kernel import InvocationKernel
 from .manifests import TOOL_DEFINITIONS
 from .mock_backend import MockKontomierzClient
 from .operations import build_operations
+from .security import BearerPrincipalMiddleware, current_invocation_context
 
 _logger = logging.getLogger(__name__)
 
@@ -63,7 +64,8 @@ def build_server(settings: Settings, kernel: InvocationKernel | None = None) -> 
         version=__version__,
         instructions=(
             "Use capability discovery before planning a workflow and list tools before detail or mutation calls. "
-            "Financial data is confidential. Writes require the trusted operator gate and consumer confirmation. "
+            "Financial data is confidential. Writes require the trusted operator gate. "
+            "Streamable HTTP requires server-validated Bearer authentication. "
             "Never retry an ambiguous write before reconciling the exact target state."
         ),
         lifespan=lifespan,
@@ -71,7 +73,7 @@ def build_server(settings: Settings, kernel: InvocationKernel | None = None) -> 
 
     async def dispatch(name: str, arguments: dict[str, Any]) -> Any:
         try:
-            result = await owned_kernel.invoke(name, arguments)
+            result = await owned_kernel.invoke(name, arguments, context=current_invocation_context())
             return CallToolResult(
                 content=[TextContent(type="text", text=json.dumps(result["data"], ensure_ascii=False))],
                 structured_content=result,
@@ -104,14 +106,19 @@ def build_server(settings: Settings, kernel: InvocationKernel | None = None) -> 
 
 
 def create_http_app(settings: Settings, kernel: InvocationKernel | None = None) -> Any:
-    """Create loopback-only Streamable HTTP plus health endpoints."""
+    """Create authenticated loopback Streamable HTTP plus unauthenticated health endpoints."""
     from starlette.applications import Starlette
     from starlette.responses import JSONResponse
     from starlette.routing import Mount, Route
 
+    if not settings.streamable_http:
+        raise ValueError("create_http_app requires a Streamable HTTP Settings snapshot")
+    settings.validate()
+
     owned_kernel = kernel or build_kernel(settings)
     mcp = build_server(settings, owned_kernel)
     mcp_app = mcp.streamable_http_app(stateless_http=True, json_response=True)
+    authenticated_mcp_app = BearerPrincipalMiddleware(mcp_app, settings)
 
     @asynccontextmanager
     async def lifespan(_app: Starlette) -> AsyncIterator[None]:
@@ -135,7 +142,7 @@ def create_http_app(settings: Settings, kernel: InvocationKernel | None = None) 
         routes=[
             Route("/health/live", live, methods=["GET"]),
             Route("/health/ready", ready, methods=["GET"]),
-            Mount("/", app=mcp_app),
+            Mount("/", app=authenticated_mcp_app),
         ],
         lifespan=lifespan,
     )
@@ -155,5 +162,5 @@ def main() -> None:
     import uvicorn
 
     app = create_http_app(settings, kernel)
-    _logger.info("Starting loopback Streamable HTTP on http://%s:%d/mcp", settings.host, settings.port)
+    _logger.info("Starting authenticated loopback Streamable HTTP on http://%s:%d/mcp", settings.host, settings.port)
     uvicorn.run(app, host=settings.host, port=settings.port, log_level=settings.log_level.lower())

@@ -6,6 +6,7 @@ from dataclasses import replace
 
 from . import __version__
 from .manifest_types import (
+    _MISSING,
     ActiveState,
     ClaimEvidence,
     Confidentiality,
@@ -20,7 +21,6 @@ from .manifest_types import (
     TargetBinding,
     ToolManifest,
     ToolParameter,
-    _MISSING,
 )
 
 _READ_RETRY = RetryConditions(
@@ -47,8 +47,7 @@ _LOCAL_RETRY = RetryConditions(
 _ACCOUNT_TARGET = TargetBinding(
     identity="single process-owned Kontomierz account selected by immutable startup settings",
     revalidation=(
-        "Reuse the configured base URL and credential scope immediately before I/O; "
-        "never substitute a target."
+        "Reuse the configured base URL and credential scope immediately before I/O; never substitute a target."
     ),
 )
 _LOCAL_TARGET = TargetBinding(
@@ -139,16 +138,16 @@ def read_manifest(
         impact="none",
         reversible=True,
         claim_evidence=ClaimEvidence(
-            idempotency=f"{name} performs no mutation; repeated calls only re-read the bound target.",
-            retry=(
-                f"{name} permits at most two caller-controlled attempts for the named transient codes "
-                "within the aggregate deadline; tests cover typed read failures."
+            idempotency=(
+                "tests/unit/test_manifests_runtime.py::"
+                "test_manifest_claims_are_conservative_and_internally_consistent"
             ),
-            concurrency=(
-                f"{name} shares only the concurrency-safe async dependency client; "
-                "kernel overlap tests cover parallel read admission."
+            retry="tests/unit/test_kernel_runtime.py::test_read_dependency_timeout_is_not_ambiguous",
+            concurrency="tests/unit/test_kernel_runtime.py::test_concurrency_limit_applies_to_running_async_operations",
+            reversibility=(
+                "tests/unit/test_manifests_runtime.py::"
+                "test_manifest_claims_are_conservative_and_internally_consistent"
             ),
-            reversibility=f"{name} has no application side effect to compensate.",
         ),
     )
 
@@ -166,22 +165,26 @@ def write_manifest(name: str, *, destructive: bool = False, impact: Impact = "fi
         concurrent_safe=False,
         concurrency_scope="exclusive-target:kontomierz-account",
         timeout_ms=30_000,
-        requires_confirmation=True,
+        requires_confirmation=False,
         determinism="eventually-consistent",
         latency="interactive",
         cost="low",
         impact=impact,
         reversible=False,
         claim_evidence=ClaimEvidence(
-            idempotency=f"{name} makes no replay-safe idempotency claim.",
-            retry=f"{name} forbids automatic and blind caller retry after ambiguous completion.",
-            concurrency=f"{name} is serialized by the exclusive kontomierz-account target lock.",
-            reversibility=f"{name} has no reviewed compensation action and is conservatively irreversible.",
+            idempotency=(
+                "tests/unit/test_manifests_runtime.py::"
+                "test_manifest_claims_are_conservative_and_internally_consistent"
+            ),
+            retry="tests/unit/test_kernel_runtime.py::test_started_write_deadline_is_ambiguous",
+            concurrency="tests/unit/test_kernel_runtime.py::test_non_concurrent_safe_writes_are_serialized_per_target",
+            reversibility=(
+                "tests/unit/test_manifests_runtime.py::"
+                "test_manifest_claims_are_conservative_and_internally_consistent"
+            ),
         ),
         requires_operator_write_gate=True,
     )
-
-
 
 
 def project_manifest(
@@ -190,7 +193,6 @@ def project_manifest(
     writes_enabled: bool,
     dependency_ready: bool | None,
 ) -> ToolManifest:
-    """Project supported metadata into the active configuration and cached dependency state."""
     state: ActiveState = "active"
     if manifest_value.requires_operator_write_gate and not writes_enabled:
         state = "disabled"

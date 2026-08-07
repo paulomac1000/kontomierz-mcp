@@ -15,7 +15,7 @@ pytestmark = pytest.mark.sdk
 def _input_schema(tool) -> dict[str, object]:
     schema = getattr(tool, "inputSchema", None)
     if schema is None:
-        schema = getattr(tool, "input_schema")
+        schema = tool.input_schema
     return schema
 
 
@@ -55,6 +55,7 @@ async def test_official_in_memory_capability_document_has_full_active_state() ->
     assert set(document["tools"]) == set(TOOL_DEFINITIONS)
     assert document["tools"]["create_wallet"]["manifest"]["active_state"] == "disabled"
     assert document["tools"]["list_accounts"]["manifest"]["active_state"] == "active"
+    assert document["profile"] == "local-process-principal"
 
 
 @pytest.mark.asyncio

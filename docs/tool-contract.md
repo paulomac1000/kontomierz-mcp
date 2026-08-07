@@ -5,7 +5,7 @@ type: contract
 status: evolving
 rigor: normative
 owners: [repository-maintainers]
-verification: Run the manifest, operation, kernel, client, and MCP SDK contract tests.
+verification: Run the manifest, operation, kernel, client, security, and MCP SDK contract tests.
 ---
 # Kontomierz tool contract
 
@@ -17,7 +17,7 @@ For update tools, `None` means not provided. An empty string is an explicit requ
 
 ## Outputs
 
-Successful tools return structured content with `data` and `_meta`. Metadata contains a request ID, duration, tool version, and target scope. Empty lists are successful results.
+Successful tools return structured content with `data` and `_meta`. Metadata contains a request ID, duration, tool version, target scope, and authenticated transport class. Empty lists are successful results. Principal identifiers are intentionally not echoed in tool output.
 
 ## Errors
 
@@ -25,9 +25,15 @@ Tool failures return an explicit MCP `CallToolResult` with `is_error=true`, cont
 
 ## Safety and retry
 
-Each tool has one complete governed manifest containing risk, side effects, confidentiality, idempotency mechanism, retry conditions, concurrency scope, confirmation hint, determinism, latency, cost, impact, reversibility, target binding, and active state. Mutations require the operator gate. `concurrent_safe=false` is enforced per target. `automatic_retry=false` for every tool because the runtime has no retry loop.
+Each tool has one complete governed manifest containing risk, side effects, confidentiality, idempotency mechanism, retry conditions, concurrency scope, confirmation requirement, determinism, latency, cost, impact, reversibility, target binding, and active state. Mutations require the operator gate. `concurrent_safe=false` is enforced per target. `automatic_retry=false` for every tool because the runtime has no retry loop.
+
+`requires_confirmation` is currently false for every mutation because no independent approval authority exists. This is intentional: the server does not claim a control it cannot verify. The kernel fails closed if a future manifest sets it true before a trusted approval-record verifier is installed.
 
 A transient read error may be marked retryable for a caller-controlled retry. A write rejected before admission has not started. A started write with an ambiguous dependency outcome returns `AMBIGUOUS_OUTCOME`, `retryable=false`, and a reconciliation suggestion.
+
+## Transport identity
+
+Stdio uses a process-derived local principal. Streamable HTTP requires a server-owned Bearer token and principal mapping; authentication occurs before MCP request handling. Neither the write gate, HTTP principal, nor any future approval record may be supplied as a tool argument.
 
 ## Pagination
 

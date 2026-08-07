@@ -5,14 +5,14 @@ type: system
 status: evolving
 rigor: normative
 owners: [repository-maintainers]
-verification: Run `.venv/bin/python -m pytest -m "not external"` and the exact-wheel CI job.
+verification: Run `python -m pytest -m "not external"` and the exact-artifact CI job.
 ---
 # Kontomierz MCP system architecture
 
 ## Operational answer
 
 ```text
-stdio or loopback Streamable HTTP
+local stdio process principal OR authenticated loopback Streamable HTTP principal
   -> official MCP SDK registration
   -> InvocationKernel
   -> domain validation and policy
@@ -24,11 +24,13 @@ No transport invokes an operation or dependency directly.
 
 ## Component ownership
 
-`Settings` is created before dependencies. `InvocationKernel` owns bounded admission, running concurrency, per-target serialization, deadlines, readiness state, and dependency lifetime. `KontomierzClient` owns one cancellation-aware `httpx.AsyncClient`. The governed catalog owns every public signature, description, manifest, version, and discovery expectation. The SDK server projects that catalog into protocol registration and owns lifecycle entry.
+`Settings` is created before dependencies. `security.py` owns process-derived stdio identity and the Streamable HTTP Bearer boundary. `InvocationKernel` owns authenticated-context enforcement, bounded admission, running concurrency, per-target serialization, deadlines, readiness state, and dependency lifetime. `KontomierzClient` owns one cancellation-aware `httpx.AsyncClient`. The governed catalog owns every public signature, description, manifest, version, and discovery expectation. The SDK server projects that catalog into protocol registration and owns lifecycle entry.
 
 ## Security boundary
 
-The current deployment boundary is one trusted local user. Stdio is the default. Streamable HTTP is loopback-only. Public or LAN binding is rejected because principal authentication and resource authorization are not implemented. The API key enters only the HTTP adapter and is never returned in errors.
+Stdio is the safe default and derives a principal from the local process boundary. Streamable HTTP is loopback-only and requires a bounded Bearer token plus a server-configured principal before an MCP request reaches the SDK application. Health endpoints intentionally remain outside that authentication boundary. The model cannot supply the principal or enable writes.
+
+Mutations additionally require the process-level `ENABLE_WRITE_OPERATIONS` gate. The current server has no independent approval authority, therefore governed manifests deliberately set `requires_confirmation=false`. If confirmation is introduced later, the kernel already fails closed for any manifest that requests it until a trusted server-side approval record can be verified.
 
 ## Deadlines, cancellation, and concurrency
 
@@ -42,11 +44,11 @@ Liveness proves the ASGI process responds. Readiness requires the full operation
 
 ## Failure modes
 
-- Invalid input, disabled writes, and admission rejection stop before dependency I/O.
-- Authentication, not-found, conflict, rate-limit, timeout, dependency, and malformed-response failures retain distinct codes.
+- Invalid input, unauthenticated HTTP requests, disabled writes, and admission rejection stop before dependency I/O.
+- Authentication, authorization, not-found, conflict, rate-limit, timeout, dependency, and malformed-response failures retain distinct codes.
 - Tool errors are explicit MCP `CallToolResult` documents with stable structured JSON.
 - Unexpected exceptions are logged with a request ID and exposed only as sanitized internal errors.
 
 ## Non-goals
 
-This revision does not provide public multi-tenant hosting, OAuth, per-resource caller authorization, durable background work, or a compatibility REST API.
+This revision does not provide public multi-tenant hosting, OAuth, per-resource authorization beyond the single configured Kontomierz target, durable background work, or a compatibility REST API.

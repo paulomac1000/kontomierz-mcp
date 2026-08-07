@@ -1,77 +1,106 @@
-name: Promote tested container image
+# ai-skills-policy-profile: protected-release
+name: Publish tested image
 
 on:
   workflow_run:
     workflows: [CI]
     types: [completed]
-    branches: [main]
 
 permissions:
   contents: read
   actions: read
-  packages: write
-  id-token: write
-  attestations: write
 
 concurrency:
   group: publish-${{ github.event.workflow_run.head_sha }}
   cancel-in-progress: false
 
+env:
+  HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+  SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
+  IMAGE: ghcr.io/${{ github.repository_owner }}/kontomierz-mcp
+
 jobs:
-  promote:
-    if: github.event.workflow_run.conclusion == 'success'
+  verify-artifact:
+    if: >-
+      ${{ github.event.workflow_run.conclusion == 'success' &&
+          github.event.workflow_run.head_branch == 'main' }}
     runs-on: ubuntu-24.04
-    environment: release
-    timeout-minutes: 20
-    env:
-      HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
-      IMAGE: ghcr.io/${{ github.repository }}
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+      - name: Download closed release bundle from successful CI
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          ref: ${{ env.HEAD_SHA }}
-          persist-credentials: false
-      - name: Download exact tested release bundle
+          github-token: ${{ github.token }}
+          run-id: ${{ env.SOURCE_RUN_ID }}
+          name: release-bundle-${{ env.HEAD_SHA }}
+          path: dist
+      - name: Verify archive identity without executing candidate content
+        run: |
+          set -euo pipefail
+          test "$HEAD_SHA" = "${{ github.event.workflow_run.head_sha }}"
+          (cd dist && sha256sum --check SHA256SUMS)
+          (cd dist && sha256sum --check RELEASE_SHA256SUMS)
+          python - "$HEAD_SHA" <<'PY'
+          import json
+          import sys
+          metadata = json.load(open("dist/IMAGE_METADATA.json", encoding="utf-8"))
+          if metadata.get("source_sha") != sys.argv[1]:
+              raise SystemExit("release artifact source SHA mismatch")
+          PY
+
+  publish:
+    needs: verify-artifact
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: release
+    permissions:
+      contents: read
+      actions: read
+      packages: write
+      id-token: write
+      attestations: write
+    steps:
+      - name: Download already-verified closed release bundle
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ env.SOURCE_RUN_ID }}
+          name: release-bundle-${{ env.HEAD_SHA }}
+          path: dist
+      - name: Re-verify archive before promotion
+        run: |
+          set -euo pipefail
+          (cd dist && sha256sum --check SHA256SUMS)
+          (cd dist && sha256sum --check RELEASE_SHA256SUMS)
+          python - "$HEAD_SHA" <<'PY'
+          import json
+          import sys
+          metadata = json.load(open("dist/IMAGE_METADATA.json", encoding="utf-8"))
+          if metadata.get("source_sha") != sys.argv[1]:
+              raise SystemExit("release artifact source SHA mismatch")
+          PY
+      - name: Load exact CI-tested image without running it
+        run: gzip -dc dist/kontomierz-mcp-image.tar.gz | docker load
+      - name: Authenticate registry
         env:
-          GH_TOKEN: ${{ github.token }}
-          RUN_ID: ${{ github.event.workflow_run.id }}
+          GHCR_TOKEN: ${{ github.token }}
+        run: printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: Promote immutable and convenience tags
         run: |
           set -euo pipefail
-          mkdir -p dist
-          gh run download "$RUN_ID" --name "release-bundle-$HEAD_SHA" --dir dist
-          sha256sum --check dist/SHA256SUMS
-      - name: Verify build provenance for the image archive
-        run: |
-          set -euo pipefail
-          gh attestation verify dist/kontomierz-mcp-image.tar.gz \
-            --repo "$GITHUB_REPOSITORY" \
-            --bundle dist/build-provenance.jsonl \
-            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/ci.yml" \
-            --source-digest "$HEAD_SHA"
-      - name: Load and smoke the exact tested image
-        run: |
-          set -euo pipefail
-          gzip -dc dist/kontomierz-mcp-image.tar.gz | docker load
-          docker run --rm --entrypoint python "kontomierz-mcp:$HEAD_SHA" -c \
-            "import kontomierz_mcp; print(kontomierz_mcp.__version__)"
-      - name: Push two tags for the same loaded image
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          SHORT="${HEAD_SHA:0:12}"
-          echo "$GH_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
-          docker tag "kontomierz-mcp:$HEAD_SHA" "$IMAGE:sha-$SHORT"
-          docker tag "kontomierz-mcp:$HEAD_SHA" "$IMAGE:latest"
-          docker push "$IMAGE:sha-$SHORT"
-          docker push "$IMAGE:latest"
-      - name: Verify registry digests
+          SOURCE="kontomierz-mcp:$HEAD_SHA"
+          SHA_TAG="$IMAGE:sha-$HEAD_SHA"
+          LATEST_TAG="$IMAGE:latest"
+          docker tag "$SOURCE" "$SHA_TAG"
+          docker tag "$SOURCE" "$LATEST_TAG"
+          docker push "$SHA_TAG"
+          docker push "$LATEST_TAG"
+      - name: Verify promoted tags resolve to one digest
         id: digest
         run: |
           set -euo pipefail
-          SHORT="${HEAD_SHA:0:12}"
-          SHA_DIGEST="$(docker buildx imagetools inspect "$IMAGE:sha-$SHORT" | awk '$1 == "Digest:" {print $2; exit}')"
-          LATEST_DIGEST="$(docker buildx imagetools inspect "$IMAGE:latest" | awk '$1 == "Digest:" {print $2; exit}')"
+          SHA_DIGEST="$(docker buildx imagetools inspect "$IMAGE:sha-$HEAD_SHA" --format '{{json .Manifest.Digest}}' | tr -d '"')"
+          LATEST_DIGEST="$(docker buildx imagetools inspect "$IMAGE:latest" --format '{{json .Manifest.Digest}}' | tr -d '"')"
           test -n "$SHA_DIGEST"
           test "$SHA_DIGEST" = "$LATEST_DIGEST"
           echo "digest=$SHA_DIGEST" >> "$GITHUB_OUTPUT"
@@ -87,12 +116,9 @@ jobs:
             {
               "source_repository": "${{ github.repository }}",
               "source_revision": "${{ env.HEAD_SHA }}",
-              "source_workflow_run_id": "${{ github.event.workflow_run.id }}",
-              "promotion_environment": "release",
-              "statement": "Promoted unchanged from the exact CI-tested image archive"
+              "source_workflow_run_id": "${{ env.SOURCE_RUN_ID }}",
+              "artifact": "release-bundle-${{ env.HEAD_SHA }}"
             }
-          push-to-registry: true
-          create-storage-record: false
       - name: Upload promotion evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:

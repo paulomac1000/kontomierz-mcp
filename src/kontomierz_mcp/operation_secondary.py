@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from .config import Settings
 from . import __version__
+from .config import Settings
 from .manifests import TOOL_DEFINITIONS
 from .operation_support import (
     bounded,
@@ -35,13 +35,21 @@ async def dispatch_secondary(name: str, a: dict[str, Any], client: Any, settings
         group = identifier(a.get("category_group_id"), "category_group_id", optional=True)
         if (category is None) == (group is None):
             fail("provide exactly one of category_id or category_group_id")
-        return await resolve(client.create_budget(
-            money(a["limit"], "limit", positive=True), category, group, month(a.get("month", "")),
-        ))
+        return await resolve(
+            client.create_budget(
+                money(a["limit"], "limit", positive=True),
+                category,
+                group,
+                month(a.get("month", "")),
+            )
+        )
     if name == "update_budget":
-        return await resolve(client.update_budget(
-            identifier(a["budget_id"], "budget_id"), money(a["limit"], "limit", positive=True),
-        ))
+        return await resolve(
+            client.update_budget(
+                identifier(a["budget_id"], "budget_id"),
+                money(a["limit"], "limit", positive=True),
+            )
+        )
     if name == "delete_budget":
         item_id = identifier(a["budget_id"], "budget_id")
         await resolve(client.delete_budget(item_id))
@@ -55,29 +63,44 @@ async def dispatch_secondary(name: str, a: dict[str, Any], client: Any, settings
             fail("schedule_group_name must be paid or unpaid")
         number, limit = page(a.get("page", 1)), page_limit(a.get("per_page", 0))
         start, end = date_range(a.get("start_on", ""), a.get("end_on", ""))
-        items = await resolve(client.get_scheduled_transactions(
-            schedule_group_name=group, page=number, per_page=limit,
-            start_on=start, end_on=end,
-            direction=direction(a.get("direction", "all"), allow_all=True, plural=True),
-        ))
+        items = await resolve(
+            client.get_scheduled_transactions(
+                schedule_group_name=group,
+                page=number,
+                per_page=limit,
+                start_on=start,
+                end_on=end,
+                direction=direction(a.get("direction", "all"), allow_all=True, plural=True),
+            )
+        )
         return paging(items, number, limit)
     if name == "get_schedule":
         return await resolve(client.get_schedule(identifier(a["schedule_id"], "schedule_id")))
     if name == "create_schedule":
-        return await resolve(client.create_schedule(
-            direction=direction(a["direction"]),
-            deadline_on=date_value(a["deadline_on"], "deadline_on"),
-            holidays=str(bounded(a["holidays"], "holidays", {0, 1, 2})),
-            description=text(a["description"], "description"),
-            currency_amount=money(a["currency_amount"], "currency_amount", positive=True),
-            currency_name=currency(a["currency_name"]),
-            repeat=str(bounded(a["repeat"], "repeat", set(range(1, 10)))),
-        ))
+        return await resolve(
+            client.create_schedule(
+                direction=direction(a["direction"]),
+                deadline_on=date_value(a["deadline_on"], "deadline_on"),
+                holidays=str(bounded(a["holidays"], "holidays", {0, 1, 2})),
+                description=text(a["description"], "description"),
+                currency_amount=money(a["currency_amount"], "currency_amount", positive=True),
+                currency_name=currency(a["currency_name"]),
+                repeat=str(bounded(a["repeat"], "repeat", set(range(1, 10)))),
+            )
+        )
     if name == "update_schedule":
-        fields = provided(a, (
-            "direction", "deadline_on", "holidays", "description",
-            "currency_amount", "currency_name", "repeat",
-        ))
+        fields = provided(
+            a,
+            (
+                "direction",
+                "deadline_on",
+                "holidays",
+                "description",
+                "currency_amount",
+                "currency_name",
+                "repeat",
+            ),
+        )
         if "direction" in fields:
             fields["direction"] = direction(fields["direction"])
         if "deadline_on" in fields:
@@ -105,15 +128,19 @@ async def dispatch_secondary(name: str, a: dict[str, Any], client: Any, settings
         if a.get("chart_kind", "pie") != "pie":
             fail("chart_kind must be pie")
         start, end = date_range(a.get("start_on", ""), a.get("end_on", ""))
-        return await resolve(client.get_pie_chart(
-            chart_kind="pie", start_on=start, end_on=end,
-            direction=direction(a.get("direction", "all"), allow_all=True, plural=True),
-            category_group_id=identifier(a.get("category_group_id"), "category_group_id", optional=True),
-            category_id=identifier(a.get("category_id"), "category_id", optional=True),
-            user_account_id=identifier(a.get("user_account_id"), "user_account_id", optional=True),
-            q=str(a.get("q", "")).strip() or None,
-            tag_name=str(a.get("tag_name", "")).strip() or None,
-        ))
+        return await resolve(
+            client.get_pie_chart(
+                chart_kind="pie",
+                start_on=start,
+                end_on=end,
+                direction=direction(a.get("direction", "all"), allow_all=True, plural=True),
+                category_group_id=identifier(a.get("category_group_id"), "category_group_id", optional=True),
+                category_id=identifier(a.get("category_id"), "category_id", optional=True),
+                user_account_id=identifier(a.get("user_account_id"), "user_account_id", optional=True),
+                q=str(a.get("q", "")).strip() or None,
+                tag_name=str(a.get("tag_name", "")).strip() or None,
+            )
+        )
     if name == "list_wealth_points":
         start, end = date_range(a.get("start_on", ""), a.get("end_on", ""))
         return await resolve(client.get_wealth_points(start, end))
@@ -122,12 +149,8 @@ async def dispatch_secondary(name: str, a: dict[str, Any], client: Any, settings
             "schema_version": "3.0.0",
             "server_version": __version__,
             "supported_transports": ["stdio", "streamable-http"],
-            "active_transport": (
-                "streamable-http"
-                if settings.transport in {"http", "streamable-http"}
-                else "stdio"
-            ),
+            "active_transport": "streamable-http" if settings.streamable_http else "stdio",
             "write_operations_enabled": settings.enable_write_operations,
-            "tools": {name: definition.as_dict() for name, definition in TOOL_DEFINITIONS.items()},
+            "tools": {tool_name: definition.as_dict() for tool_name, definition in TOOL_DEFINITIONS.items()},
         }
     raise KeyError(name)

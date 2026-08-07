@@ -4,6 +4,8 @@ import pytest
 
 from kontomierz_mcp.config import ConfigurationError, Settings, load_env_file
 
+HTTP_TOKEN = "a" * 32
+
 
 def test_settings_load_all_runtime_limits_from_environment() -> None:
     settings = Settings.from_env(
@@ -22,6 +24,20 @@ def test_settings_load_all_runtime_limits_from_environment() -> None:
     assert settings.readiness_cache_seconds == 7
 
 
+def test_http_settings_load_authenticated_principal() -> None:
+    settings = Settings.from_env(
+        {
+            "KONTOMIERZ_MOCK_DATA": "1",
+            "MCP_TRANSPORT": "streamable-http",
+            "MCP_HTTP_AUTH_TOKEN": HTTP_TOKEN,
+            "MCP_HTTP_PRINCIPAL": "operator:test",
+        },
+        env_file=None,
+    )
+    assert settings.streamable_http is True
+    assert settings.http_principal == "operator:test"
+
+
 def test_pending_limit_cannot_be_smaller_than_running_limit() -> None:
     with pytest.raises(ConfigurationError, match="MCP_MAX_PENDING_INVOCATIONS"):
         Settings(api_key="", mock_data=True, max_concurrency=4, max_pending_invocations=3).validate()
@@ -33,13 +49,25 @@ def test_pending_limit_cannot_be_smaller_than_running_limit() -> None:
         ({}, "KONTOMIERZ_API_KEY"),
         ({"KONTOMIERZ_MOCK_DATA": "1", "MCP_TRANSPORT": "sse"}, "MCP_TRANSPORT"),
         (
-            {"KONTOMIERZ_MOCK_DATA": "1", "MCP_TRANSPORT": "http", "MCP_HOST": "0.0.0.0"},
+            {
+                "KONTOMIERZ_MOCK_DATA": "1",
+                "MCP_TRANSPORT": "http",
+                "MCP_HOST": "0.0.0.0",
+                "MCP_HTTP_AUTH_TOKEN": HTTP_TOKEN,
+                "MCP_HTTP_PRINCIPAL": "operator:test",
+            },
             "Remote HTTP",
         ),
         ({"KONTOMIERZ_MOCK_DATA": "1", "KONTOMIERZ_BODY_MODE": "xml"}, "KONTOMIERZ_BODY_MODE"),
         ({"KONTOMIERZ_MOCK_DATA": "1", "LOG_LEVEL": "TRACE"}, "LOG_LEVEL"),
         ({"KONTOMIERZ_MOCK_DATA": "1", "MCP_PORT": "x"}, "MCP_PORT"),
         ({"KONTOMIERZ_MOCK_DATA": "1", "MCP_PORT": "0"}, "MCP_PORT"),
+        ({"KONTOMIERZ_MOCK_DATA": "1", "MCP_PORT": "65536"}, "MCP_PORT"),
+        ({"KONTOMIERZ_MOCK_DATA": "1", "MCP_TRANSPORT": "http"}, "MCP_HTTP_AUTH_TOKEN"),
+        (
+            {"KONTOMIERZ_MOCK_DATA": "1", "MCP_TRANSPORT": "http", "MCP_HTTP_AUTH_TOKEN": HTTP_TOKEN},
+            "MCP_HTTP_PRINCIPAL",
+        ),
     ],
 )
 def test_invalid_settings_fail_closed(environment: dict[str, str], message: str) -> None:

@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from .manifest_core import (
-    ClaimEvidence,
-    ToolDefinition,
     _LOCAL_RETRY,
     _LOCAL_TARGET,
+    ClaimEvidence,
+    ToolDefinition,
     manifest,
     p,
     read_manifest,
@@ -105,15 +105,20 @@ TERTIARY_TOOL_DEFINITIONS: dict[str, ToolDefinition] = {
             impact="none",
             reversible=True,
             claim_evidence=ClaimEvidence(
-                idempotency="Catalog discovery is a pure projection of immutable settings and cached state.",
-                retry="No retry is permitted or required because discovery performs no dependency I/O.",
-                concurrency="Discovery reads immutable catalog data and cached readiness state only.",
-                reversibility="Discovery has no application side effect to compensate.",
+                idempotency=(
+                    "tests/integration/test_mcp_sdk_contract.py::"
+                    "test_official_in_memory_capability_document_has_full_active_state"
+                ),
+                retry="No external I/O is performed by capability discovery, so retry is not part of the contract.",
+                concurrency=(
+                    "tests/unit/test_kernel_runtime.py::test_concurrency_limit_applies_to_running_async_operations"
+                ),
+                reversibility="Capability discovery has no application side effect to compensate.",
             ),
             target_binding=_LOCAL_TARGET,
             target_scope="kontomierz-server",
         ),
         "Describe supported and active capabilities without contacting the upstream service.",
         usage_notes="Returns schema, server and SDK identity, transport profile, tool definitions, and active states",
-    )
+    ),
 }

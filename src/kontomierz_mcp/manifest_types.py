@@ -18,8 +18,6 @@ ActiveState = Literal["active", "disabled", "degraded", "unavailable", "deprecat
 
 @dataclass(frozen=True, slots=True)
 class RetryConditions:
-    """Named retry policy exposed to consumers and enforced by runtime error shaping."""
-
     eligible_error_codes: tuple[str, ...]
     attempt_limit: int
     backoff: str
@@ -29,8 +27,6 @@ class RetryConditions:
 
 @dataclass(frozen=True, slots=True)
 class TargetBinding:
-    """Stable target identity and no-fallback rule for one configured account."""
-
     identity: str
     revalidation: str
     fallback: Literal["forbidden"] = "forbidden"
@@ -38,8 +34,6 @@ class TargetBinding:
 
 @dataclass(frozen=True, slots=True)
 class ClaimEvidence:
-    """Review pointers supporting every positive behavioral claim."""
-
     idempotency: str
     retry: str
     concurrency: str
@@ -48,8 +42,6 @@ class ClaimEvidence:
 
 @dataclass(frozen=True, slots=True)
 class ToolManifest:
-    """Complete multi-axis manifest required by the governed MCP contract."""
-
     name: str
     version: str
     risk: Risk
@@ -91,8 +83,6 @@ _MISSING = object()
 
 @dataclass(frozen=True, slots=True)
 class ToolParameter:
-    """One public input parameter used to generate signatures and discovery expectations."""
-
     name: str
     annotation: str
     description: str
@@ -122,8 +112,6 @@ class ToolParameter:
 
 @dataclass(frozen=True, slots=True)
 class ToolDefinition:
-    """Single source for registration, descriptions, schema expectations, and policy."""
-
     manifest: ToolManifest
     summary: str
     parameters: tuple[ToolParameter, ...] = ()
@@ -149,7 +137,9 @@ class ToolDefinition:
         )
         controls: list[str] = []
         if self.manifest.requires_operator_write_gate:
-            controls.append("Requires the trusted operator write gate and consumer confirmation")
+            controls.append("Requires the trusted operator write gate")
+        if self.manifest.requires_confirmation:
+            controls.append("Requires a server-verified approval record")
         if self.manifest.side_effects in {"write", "destructive"}:
             controls.append("Never retry after an ambiguous outcome before reconciliation")
         elif self.manifest.retryable:
@@ -168,5 +158,3 @@ class ToolDefinition:
             "parameters": [parameter.as_dict() for parameter in self.parameters],
             "manifest": selected.as_dict(),
         }
-
-

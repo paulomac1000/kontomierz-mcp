@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping
 
 _DEFAULT_API_BASE_URL = "https://secure.kontomierz.pl/k4"
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 _TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
+_MAX_HTTP_CREDENTIAL_BYTES = 512
 
 
 class ConfigurationError(ValueError):
@@ -50,6 +51,20 @@ def _positive_int(env: Mapping[str, str], name: str, default: int) -> int:
     return value
 
 
+def _bounded_ascii_secret(value: str, name: str) -> str:
+    if not value:
+        raise ConfigurationError(f"{name} is required for Streamable HTTP")
+    try:
+        encoded = value.encode("ascii")
+    except UnicodeEncodeError as exc:
+        raise ConfigurationError(f"{name} must contain ASCII characters only") from exc
+    if len(encoded) < 32:
+        raise ConfigurationError(f"{name} must contain at least 32 ASCII bytes")
+    if len(encoded) > _MAX_HTTP_CREDENTIAL_BYTES:
+        raise ConfigurationError(f"{name} must not exceed {_MAX_HTTP_CREDENTIAL_BYTES} ASCII bytes")
+    return value
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     """One validated settings snapshot owned by the composition root."""
@@ -68,6 +83,8 @@ class Settings:
     max_pending_invocations: int = 16
     readiness_timeout_seconds: int = 5
     readiness_cache_seconds: int = 10
+    http_auth_token: str = ""
+    http_principal: str = ""
 
     @classmethod
     def from_env(
@@ -75,7 +92,7 @@ class Settings:
         environ: Mapping[str, str] | None = None,
         *,
         env_file: Path | None = Path(".env"),
-    ) -> "Settings":
+    ) -> Settings:
         if environ is None:
             if env_file is not None:
                 load_env_file(env_file)
@@ -101,20 +118,35 @@ class Settings:
             max_pending_invocations=_positive_int(env, "MCP_MAX_PENDING_INVOCATIONS", 16),
             readiness_timeout_seconds=_positive_int(env, "MCP_READINESS_TIMEOUT", 5),
             readiness_cache_seconds=_positive_int(env, "MCP_READINESS_CACHE_SECONDS", 10),
+            http_auth_token=env.get("MCP_HTTP_AUTH_TOKEN", "").strip(),
+            http_principal=env.get("MCP_HTTP_PRINCIPAL", "").strip(),
         )
         settings.validate()
         return settings
+
+    @property
+    def streamable_http(self) -> bool:
+        return self.transport in {"http", "streamable-http"}
 
     def validate(self) -> None:
         if not self.api_key and not self.mock_data:
             raise ConfigurationError("KONTOMIERZ_API_KEY is required unless KONTOMIERZ_MOCK_DATA=1")
         if self.transport not in {"stdio", "http", "streamable-http"}:
-            raise ConfigurationError("MCP_TRANSPORT must be stdio or http")
-        if self.transport in {"http", "streamable-http"} and self.host not in _LOOPBACK_HOSTS:
-            raise ConfigurationError(
-                "Remote HTTP is disabled until authenticated principal and authorization policy are configured; "
-                "use a loopback MCP_HOST"
-            )
+            raise ConfigurationError("MCP_TRANSPORT must be stdio, http, or streamable-http")
+        if not 1 <= self.port <= 65535:
+            raise ConfigurationError("MCP_PORT must be between 1 and 65535")
+        if self.streamable_http:
+            if self.host not in _LOOPBACK_HOSTS:
+                raise ConfigurationError("Remote HTTP is disabled; Streamable HTTP must use a loopback MCP_HOST")
+            _bounded_ascii_secret(self.http_auth_token, "MCP_HTTP_AUTH_TOKEN")
+            if not self.http_principal:
+                raise ConfigurationError("MCP_HTTP_PRINCIPAL is required for Streamable HTTP")
+            try:
+                principal_bytes = self.http_principal.encode("ascii")
+            except UnicodeEncodeError as exc:
+                raise ConfigurationError("MCP_HTTP_PRINCIPAL must contain ASCII characters only") from exc
+            if len(principal_bytes) > 128:
+                raise ConfigurationError("MCP_HTTP_PRINCIPAL must not exceed 128 ASCII bytes")
         if self.max_pending_invocations < self.max_concurrency:
             raise ConfigurationError("MCP_MAX_PENDING_INVOCATIONS must be at least MCP_MAX_CONCURRENCY")
         if self.body_mode not in {"json", "form"}:

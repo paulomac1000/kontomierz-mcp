@@ -4,19 +4,20 @@ import inspect
 import json
 import sys
 from contextlib import asynccontextmanager
-from types import ModuleType, SimpleNamespace
+from types import ModuleType
 from typing import Any, get_type_hints
 
+import pytest
 from pydantic import create_model
 
-import pytest
-
-from kontomierz_mcp.config import Settings
 from kontomierz_mcp import __version__
+from kontomierz_mcp.config import Settings
 from kontomierz_mcp.manifests import TOOL_DEFINITIONS
 from kontomierz_mcp.mock_backend import MockKontomierzClient
-from kontomierz_mcp.server import build_kernel, build_server, create_http_app
 from kontomierz_mcp.mock_samples import SMOKE_SAMPLES
+from kontomierz_mcp.server import build_kernel, build_server, create_http_app
+
+HTTP_TOKEN = "a" * 32
 
 
 class FakeTextContent:
@@ -133,7 +134,13 @@ async def test_tool_error_is_an_explicit_stable_call_tool_result(monkeypatch: py
 @pytest.mark.asyncio
 async def test_http_health_routes_include_dependency_readiness(monkeypatch: pytest.MonkeyPatch) -> None:
     install_fake_sdk(monkeypatch)
-    settings = Settings(api_key="", mock_data=True, transport="http")
+    settings = Settings(
+        api_key="",
+        mock_data=True,
+        transport="http",
+        http_auth_token=HTTP_TOKEN,
+        http_principal="test-operator",
+    )
     dependency = MockKontomierzClient()
     kernel = build_kernel(settings, dependency)
     app = create_http_app(settings, kernel)
@@ -165,8 +172,7 @@ def test_registration_uses_governed_names_descriptions_and_signatures(monkeypatc
         signature = inspect.signature(function)
         assert tuple(signature.parameters) == tuple(parameter.name for parameter in definition.parameters)
         assert tuple(
-            item for item, parameter in signature.parameters.items()
-            if parameter.default is inspect.Parameter.empty
+            item for item, parameter in signature.parameters.items() if parameter.default is inspect.Parameter.empty
         ) == definition.required_parameters
 
 

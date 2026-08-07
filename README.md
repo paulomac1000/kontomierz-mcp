@@ -4,9 +4,9 @@ A loopback-first MCP server for the Kontomierz personal-finance API. The server 
 
 ## Security and migration status
 
-The current candidate is **2.0.0** because it intentionally removes legacy HTTP+SSE and the unauthenticated REST bridge and changes public date, error, pagination, and update semantics. It is not presented as formally L2+ compliant yet. Formal adoption remains blocked on hosted exact-revision evidence, reviewed hash locks, a provider-backed migration assessment, and contract tests against a disposable real Kontomierz account.
+The current candidate is **2.0.0** because it intentionally removes legacy HTTP+SSE and the unauthenticated REST bridge and changes public date, error, pagination, and update semantics. It is not presented as formally L2+ compliant yet. Formal adoption remains blocked on reviewed hash locks, a provider-backed migration assessment, independent approval, and contract tests against a disposable real Kontomierz account.
 
-Financial reads are confidential. Mutations are denied unless `ENABLE_WRITE_OPERATIONS=1` is set by the trusted server operator. A model argument cannot enable writes. A started mutation with an uninterpretable outcome is never declared safely retryable.
+Financial reads are confidential. Mutations are denied unless `ENABLE_WRITE_OPERATIONS=1` is set by the trusted server operator. A model argument cannot enable writes. The server does **not** advertise `requires_confirmation=true` because no independent server-side approval authority exists yet; any future confirmation claim must be backed by a trusted approval record rather than a model-controlled argument. A started mutation with an uninterpretable outcome is never declared safely retryable.
 
 ## Install
 
@@ -24,9 +24,11 @@ KONTOMIERZ_MOCK_DATA=1 .venv/bin/kontomierz-mcp
 
 The default transport is stdio. Configure an MCP host to execute `.venv/bin/kontomierz-mcp` with `KONTOMIERZ_API_KEY` in its trusted environment.
 
-## Loopback Streamable HTTP
+## Authenticated loopback Streamable HTTP
 
 ```bash
+export MCP_HTTP_AUTH_TOKEN="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
+export MCP_HTTP_PRINCIPAL="local-operator"
 KONTOMIERZ_MOCK_DATA=1 \
 MCP_TRANSPORT=streamable-http \
 MCP_HOST=127.0.0.1 \
@@ -34,21 +36,21 @@ MCP_PORT=9101 \
 .venv/bin/kontomierz-mcp
 ```
 
-The MCP endpoint is `/mcp`; liveness and readiness are `/health/live` and `/health/ready`. `0.0.0.0` is rejected until principal authentication and resource authorization are implemented.
+Every request to the MCP application must send `Authorization: Bearer <MCP_HTTP_AUTH_TOKEN>`. The token is mapped server-side to `MCP_HTTP_PRINCIPAL`, so the model cannot choose its own principal. The MCP endpoint is `/mcp`; liveness and readiness remain unauthenticated at `/health/live` and `/health/ready`. Non-loopback binding is rejected.
 
 ## Docker
 
-Docker consumes an already-built wheel and wheelhouse rather than resolving dependencies during the image build:
+Docker consumes an already-built wheel and wheelhouse rather than resolving dependencies during the image build. The build verifies `dist/SHA256SUMS` before installing the wheel:
 
 ```bash
-.venv/bin/python -m build
+.venv/bin/python -m pip wheel --no-deps --no-build-isolation . --wheel-dir dist
 mkdir -p dist/wheelhouse
 .venv/bin/python -m pip download --dest dist/wheelhouse dist/kontomierz_mcp-*.whl
+(cd dist && find . -type f -name '*.whl' -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
 docker build -t kontomierz-mcp:local .
-docker run --rm -i --env-file .env kontomierz-mcp:local
 ```
 
-The image runs as a non-root user and defaults to stdio. Hosted CI preserves the exact tested image archive; protected release promotion loads that archive rather than rebuilding it.
+The image runs as a non-root user and defaults to stdio. Hosted CI builds and smoke-tests the exact image archive under read-only permissions. The protected publish workflow only verifies, loads, tags, and pushes that closed archive; it does not checkout or run candidate source after release write permissions are granted.
 
 ## Tests
 

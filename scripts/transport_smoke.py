@@ -14,6 +14,9 @@ from urllib.request import urlopen
 
 from kontomierz_mcp.manifests import TOOL_DEFINITIONS
 
+_HTTP_TOKEN = "transport-smoke-auth-token-0000000000000000"
+_HTTP_PRINCIPAL = "ci:transport-smoke"
+
 
 def _free_port() -> int:
     with closing(socket.socket()) as listener:
@@ -24,7 +27,7 @@ def _free_port() -> int:
 def _input_schema(tool) -> dict[str, object]:
     schema = getattr(tool, "inputSchema", None)
     if schema is None:
-        schema = getattr(tool, "input_schema")
+        schema = tool.input_schema
     return schema
 
 
@@ -77,7 +80,9 @@ async def smoke_stdio(executable: Path) -> None:
 
 
 async def smoke_http(executable: Path) -> None:
+    import httpx2
     from mcp import Client
+    from mcp.client.streamable_http import streamable_http_client
 
     port = _free_port()
     environment = {
@@ -87,6 +92,8 @@ async def smoke_http(executable: Path) -> None:
         "MCP_TRANSPORT": "streamable-http",
         "MCP_HOST": "127.0.0.1",
         "MCP_PORT": str(port),
+        "MCP_HTTP_AUTH_TOKEN": _HTTP_TOKEN,
+        "MCP_HTTP_PRINCIPAL": _HTTP_PRINCIPAL,
     }
     process = subprocess.Popen(
         [str(executable)],
@@ -111,8 +118,14 @@ async def smoke_http(executable: Path) -> None:
         else:
             raise TimeoutError("HTTP server did not become ready")
 
-        async with Client(f"http://127.0.0.1:{port}/mcp") as client:
-            await _assert_contract(client)
+        http_client = httpx2.AsyncClient(headers={"Authorization": f"Bearer {_HTTP_TOKEN}"})
+        async with http_client:
+            transport = streamable_http_client(
+                f"http://127.0.0.1:{port}/mcp",
+                http_client=http_client,
+            )
+            async with Client(transport) as client:
+                await _assert_contract(client)
     finally:
         process.terminate()
         try:
