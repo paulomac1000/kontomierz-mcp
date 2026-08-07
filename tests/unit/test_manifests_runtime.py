@@ -92,9 +92,12 @@ def test_parameter_contract_generates_stable_python_signatures() -> None:
         )
         signature = inspect.signature(namespace[definition.name])
         assert tuple(signature.parameters) == tuple(parameter.name for parameter in definition.parameters)
-        assert tuple(
-            name for name, parameter in signature.parameters.items() if parameter.default is inspect.Parameter.empty
-        ) == definition.required_parameters
+        assert (
+            tuple(
+                name for name, parameter in signature.parameters.items() if parameter.default is inspect.Parameter.empty
+            )
+            == definition.required_parameters
+        )
         for parameter in definition.parameters:
             generated = signature.parameters[parameter.name]
             if not parameter.required:

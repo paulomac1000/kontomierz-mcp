@@ -12,9 +12,7 @@ from kontomierz_mcp.server import build_kernel
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_unusable_success_response_after_write_reaches_protocol_as_ambiguous() -> None:
-    transport = httpx.MockTransport(
-        lambda _request: httpx.Response(200, json={"user_account": []})
-    )
+    transport = httpx.MockTransport(lambda _request: httpx.Response(200, json={"user_account": []}))
     async_client = httpx.AsyncClient(transport=transport)
     dependency = KontomierzClient(
         api_key="secret",

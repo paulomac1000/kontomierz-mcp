@@ -139,14 +139,12 @@ def read_manifest(
         reversible=True,
         claim_evidence=ClaimEvidence(
             idempotency=(
-                "tests/unit/test_manifests_runtime.py::"
-                "test_manifest_claims_are_conservative_and_internally_consistent"
+                "tests/unit/test_manifests_runtime.py::test_manifest_claims_are_conservative_and_internally_consistent"
             ),
             retry="tests/unit/test_kernel_runtime.py::test_read_dependency_timeout_is_not_ambiguous",
             concurrency="tests/unit/test_kernel_runtime.py::test_concurrency_limit_applies_to_running_async_operations",
             reversibility=(
-                "tests/unit/test_manifests_runtime.py::"
-                "test_manifest_claims_are_conservative_and_internally_consistent"
+                "tests/unit/test_manifests_runtime.py::test_manifest_claims_are_conservative_and_internally_consistent"
             ),
         ),
     )
@@ -173,14 +171,12 @@ def write_manifest(name: str, *, destructive: bool = False, impact: Impact = "fi
         reversible=False,
         claim_evidence=ClaimEvidence(
             idempotency=(
-                "tests/unit/test_manifests_runtime.py::"
-                "test_manifest_claims_are_conservative_and_internally_consistent"
+                "tests/unit/test_manifests_runtime.py::test_manifest_claims_are_conservative_and_internally_consistent"
             ),
             retry="tests/unit/test_kernel_runtime.py::test_started_write_deadline_is_ambiguous",
             concurrency="tests/unit/test_kernel_runtime.py::test_non_concurrent_safe_writes_are_serialized_per_target",
             reversibility=(
-                "tests/unit/test_manifests_runtime.py::"
-                "test_manifest_claims_are_conservative_and_internally_consistent"
+                "tests/unit/test_manifests_runtime.py::test_manifest_claims_are_conservative_and_internally_consistent"
             ),
         ),
         requires_operator_write_gate=True,

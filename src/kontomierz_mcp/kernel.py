@@ -97,9 +97,7 @@ class InvocationKernel:
     @asynccontextmanager
     async def _execution_slot(self, manifest: ToolManifest) -> AsyncIterator[None]:
         lock = (
-            None
-            if manifest.concurrent_safe
-            else self._target_locks.setdefault(manifest.target_scope, asyncio.Lock())
+            None if manifest.concurrent_safe else self._target_locks.setdefault(manifest.target_scope, asyncio.Lock())
         )
         if lock is None:
             async with self._semaphore:
@@ -258,9 +256,7 @@ class InvocationKernel:
                     "The operation exceeded its deadline",
                     retryable=manifest.retryable,
                     suggestion=(
-                        "Retry only within the manifest attempt and deadline bounds."
-                        if manifest.retryable
-                        else None
+                        "Retry only within the manifest attempt and deadline bounds." if manifest.retryable else None
                     ),
                 ) from exc
             except asyncio.CancelledError:

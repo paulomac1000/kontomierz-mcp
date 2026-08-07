@@ -22,9 +22,7 @@ from .manifest_core import (
 )
 from .tool_definitions import TOOL_DEFINITIONS
 
-TOOL_MANIFESTS: dict[str, ToolManifest] = {
-    name: definition.manifest for name, definition in TOOL_DEFINITIONS.items()
-}
+TOOL_MANIFESTS: dict[str, ToolManifest] = {name: definition.manifest for name, definition in TOOL_DEFINITIONS.items()}
 
 __all__ = [
     "ActiveState",

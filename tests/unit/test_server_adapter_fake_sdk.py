@@ -171,9 +171,12 @@ def test_registration_uses_governed_names_descriptions_and_signatures(monkeypatc
         assert function.__doc__ == definition.description
         signature = inspect.signature(function)
         assert tuple(signature.parameters) == tuple(parameter.name for parameter in definition.parameters)
-        assert tuple(
-            item for item, parameter in signature.parameters.items() if parameter.default is inspect.Parameter.empty
-        ) == definition.required_parameters
+        assert (
+            tuple(
+                item for item, parameter in signature.parameters.items() if parameter.default is inspect.Parameter.empty
+            )
+            == definition.required_parameters
+        )
 
 
 def test_generated_annotations_preserve_parameter_descriptions(monkeypatch: pytest.MonkeyPatch) -> None:

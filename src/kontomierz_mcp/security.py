@@ -91,9 +91,7 @@ class BearerPrincipalMiddleware:
             await self._reject(send)
             return
 
-        token = bind_invocation_context(
-            InvocationContext.authenticated_http(self._principal)
-        )
+        token = bind_invocation_context(InvocationContext.authenticated_http(self._principal))
         try:
             await self._app(scope, receive, send)
         finally:

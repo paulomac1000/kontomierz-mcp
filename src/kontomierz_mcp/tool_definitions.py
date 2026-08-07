@@ -11,9 +11,6 @@ TOOL_DEFINITIONS: dict[str, ToolDefinition] = {
     **TERTIARY_TOOL_DEFINITIONS,
 }
 
-_EXPECTED = sum(
-    len(part)
-    for part in (PRIMARY_TOOL_DEFINITIONS, SECONDARY_TOOL_DEFINITIONS, TERTIARY_TOOL_DEFINITIONS)
-)
+_EXPECTED = sum(len(part) for part in (PRIMARY_TOOL_DEFINITIONS, SECONDARY_TOOL_DEFINITIONS, TERTIARY_TOOL_DEFINITIONS))
 if len(TOOL_DEFINITIONS) != _EXPECTED:
     raise RuntimeError("duplicate governed tool definition")
