@@ -55,13 +55,17 @@ async def test_bearer_middleware_rejects_missing_or_wrong_token_without_entering
     async def receive() -> dict[str, Any]:
         return {"type": "http.request", "body": b"", "more_body": False}
 
-    for headers in ([], [(b"authorization", b"Bearer wrong")]):
+    async def exercise(headers: list[tuple[bytes, bytes]]) -> list[dict[str, Any]]:
         messages: list[dict[str, Any]] = []
 
         async def send(message: dict[str, Any]) -> None:
             messages.append(message)
 
         await middleware({"type": "http", "headers": headers}, receive, send)
+        return messages
+
+    for headers in ([], [(b"authorization", b"Bearer wrong")]):
+        messages = await exercise(headers)
         assert messages[0]["status"] == 401
         assert entered is False
 

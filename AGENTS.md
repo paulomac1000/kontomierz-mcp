@@ -1,3 +1,15 @@
+---
+doc_id: guide.kontomierz-agent-instructions
+type: guide
+status: evolving
+rigor: operational
+owners:
+  - repository-maintainers
+description: Repository workflow, safety boundaries, and completion rules for agents changing Kontomierz MCP.
+verification:
+  - Run the completion gate in this file from an activated virtual environment.
+  - Confirm hosted CI belongs to the exact final revision.
+---
 # Repository instructions
 
 ## Scope and risk contract
