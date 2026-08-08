@@ -2,9 +2,9 @@
 name: CI
 
 on:
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
   push:
+    branches: [main]
+  pull_request:
     branches: [main]
   workflow_dispatch:
 
@@ -12,29 +12,34 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 env:
-  AI_SKILLS_SHA: c6dc6b13b2dd40b6e087140cd071b45067d75b39
   CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+  AI_SKILLS_REV: c6dc6b13b2dd40b6e087140cd071b45067d75b39
 
 jobs:
   quality:
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
           ref: ${{ env.CANDIDATE_SHA }}
+          fetch-depth: 1
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v6
         with:
           python-version: "3.12"
-          cache: pip
-          cache-dependency-path: pyproject.toml
-      - name: Install project quality environment
-        run: python -m pip install -e ".[dev]"
+      - name: Install hash-locked project quality environment
+        run: |
+          set -euo pipefail
+          python -m pip install --no-deps --only-binary=:all: --require-hashes \
+            -r requirements/dev-linux-x64-py312.lock
+          python -m pip install --no-deps --only-binary=:all: --require-hashes \
+            -r requirements/build-linux-x64.lock
+          python -m pip install --no-deps --no-build-isolation -e .
       - name: Verify installed dependency graph
         run: python -m pip check
       - name: Verify checkout identity
@@ -52,22 +57,54 @@ jobs:
       - name: Test with branch coverage
         run: >-
           python -m pytest -m "not external"
-          --cov=kontomierz_mcp --cov-branch
-          --cov-report=term-missing --cov-report=xml
+          --cov=kontomierz_mcp --cov-branch --cov-report=term-missing
+          --cov-report=xml --junitxml=pytest-junit.xml
       - name: Mock all-tools smoke
         run: python scripts/mock_smoke.py
       - name: Upload quality evidence
-        if: success()
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: quality-evidence-${{ env.CANDIDATE_SHA }}
-          path: coverage.xml
-          if-no-files-found: error
-          retention-days: 30
+          path: |
+            coverage.xml
+            pytest-junit.xml
+            requirements/*.lock
+          if-no-files-found: warn
+          retention-days: 14
+
+  compatibility:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v6
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install lane-specific hash-locked development graph
+        shell: bash
+        run: |
+          set -euo pipefail
+          PYTAG="$(python -c 'import sys; print(f"py{sys.version_info.major}{sys.version_info.minor}")')"
+          python -m pip install --no-deps --only-binary=:all: --require-hashes \
+            -r "requirements/dev-linux-x64-${PYTAG}.lock"
+          python -m pip install --no-deps --only-binary=:all: --require-hashes \
+            -r requirements/build-linux-x64.lock
+          python -m pip install --no-deps --no-build-isolation -e .
+      - run: python -m pip check
+      - run: python -m pytest -m "not external" -q
 
   standards:
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
@@ -77,120 +114,137 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
           repository: paulomac1000/ai-skills
-          ref: ${{ env.AI_SKILLS_SHA }}
-          path: .trusted/ai-skills
+          ref: ${{ env.AI_SKILLS_REV }}
+          path: .trusted-ai-skills
           persist-credentials: false
       - name: Move trusted verifier outside candidate tree
         run: |
-          set -euo pipefail
-          mv .trusted/ai-skills "$RUNNER_TEMP/ai-skills"
-          rmdir .trusted
-          test "$(git -C "$RUNNER_TEMP/ai-skills" rev-parse HEAD)" = "$AI_SKILLS_SHA"
+          rm -rf /tmp/trusted-ai-skills
+          mv .trusted-ai-skills /tmp/trusted-ai-skills
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v6
         with:
           python-version: "3.12"
       - name: Install trusted validator lock
         run: >-
-          python -m pip install --require-hashes
-          -r "$RUNNER_TEMP/ai-skills/requirements-dev-linux-x64-py312.lock"
+          python -m pip install
+          --only-binary=:all:
+          --require-hashes
+          -r /tmp/trusted-ai-skills/requirements/validators.lock
       - name: Validate governed documents with trusted AFDS validator
-        run: python "$RUNNER_TEMP/ai-skills/skills/afds-doc-writer/validate.py" AGENTS.md docs
+        run: python /tmp/trusted-ai-skills/skills/afds-standard/scripts/validate_afds.py .
       - name: Audit AGENTS instructions from trusted revision
         run: >-
-          python "$RUNNER_TEMP/ai-skills/skills/agents-md-architect/tools/audit_agents_md.py"
-          . --profile mcp-server --layout single --language en --strict
+          python /tmp/trusted-ai-skills/skills/agents-md-standard/scripts/audit_agents_instructions.py
+          . --ci-mode
       - name: Audit workflows from trusted revision
         run: >-
-          python "$RUNNER_TEMP/ai-skills/skills/ci-cd-architect/tools/check_github_actions_policy.py" .
-
-  compatibility:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        python: ["3.11", "3.12", "3.13"]
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
-        with:
-          ref: ${{ env.CANDIDATE_SHA }}
-          persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v6
-        with:
-          python-version: ${{ matrix.python }}
-      - run: python -m pip install -e ".[dev]"
-      - run: python -m pip check
-      - run: python -m pytest -m "not external" -q
+          python /tmp/trusted-ai-skills/skills/ci-cd/scripts/audit_workflows.py
+          --repo-root .
+          --policy .github/workflow-policy.yaml
 
   exact-artifact:
-    needs: [quality, standards, compatibility]
+    needs: [quality, compatibility, standards]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    env:
+      SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
-          ref: ${{ env.CANDIDATE_SHA }}
+          ref: ${{ env.SOURCE_SHA }}
+          fetch-depth: 1
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v6
         with:
           python-version: "3.12"
-      - name: Install build tooling
-        run: python -m pip install "setuptools>=75" wheel -e ".[dev]"
+      - name: Install hash-locked build environment
+        run: |
+          set -euo pipefail
+          python -m pip install --no-deps --only-binary=:all: --require-hashes \
+            -r requirements/dev-linux-x64-py312.lock
+          python -m pip install --no-deps --only-binary=:all: --require-hashes \
+            -r requirements/build-linux-x64.lock
       - name: Build exact application wheel
         run: |
-          set -euo pipefail
-          rm -rf dist
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          rm -rf dist build src/*.egg-info
           python -m pip wheel --no-deps --no-build-isolation . --wheel-dir dist
-          test "$(find dist -maxdepth 1 -name 'kontomierz_mcp-*.whl' | wc -l)" -eq 1
-      - name: Resolve current runtime wheelhouse
+          test "$(find dist -maxdepth 1 -type f -name 'kontomierz_mcp-*.whl' | wc -l)" -eq 1
+      - name: Materialize hash-locked runtime wheelhouse
         run: |
-          set -euo pipefail
           mkdir -p dist/wheelhouse
-          python -m pip download --dest dist/wheelhouse dist/kontomierz_mcp-*.whl
-          (cd dist && find . -type f -name '*.whl' -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
-          (cd dist && sha256sum --check SHA256SUMS)
+          python -m pip download \
+            --no-deps \
+            --only-binary=:all: \
+            --require-hashes \
+            --dest dist/wheelhouse \
+            -r requirements/runtime-linux-x64-py312.lock
+          (
+            cd dist
+            find . -type f -name '*.whl' -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+          )
       - name: Install exact wheel without network
         run: |
-          set -euo pipefail
+          rm -rf .artifact-venv /tmp/kontomierz-wheel-test
           python -m venv .artifact-venv
-          .artifact-venv/bin/python -m pip install --no-index --find-links dist/wheelhouse dist/kontomierz_mcp-*.whl
+          .artifact-venv/bin/python -m pip install \
+            --no-index \
+            --find-links dist/wheelhouse \
+            --no-deps \
+            --only-binary=:all: \
+            --require-hashes \
+            -r requirements/runtime-linux-x64-py312.lock
+          .artifact-venv/bin/python -m pip install --no-index --no-deps dist/kontomierz_mcp-*.whl
           .artifact-venv/bin/python -m pip check
-          .artifact-venv/bin/python -c "import kontomierz_mcp; print(kontomierz_mcp.__version__)"
+          mkdir -p /tmp/kontomierz-wheel-test
+          cp -R tests scripts pyproject.toml /tmp/kontomierz-wheel-test/
+          (
+            cd /tmp/kontomierz-wheel-test
+            "$GITHUB_WORKSPACE/.artifact-venv/bin/python" -m pytest -m "not external" -q
+          )
+          .artifact-venv/bin/python scripts/mock_smoke.py
       - name: Official Client stdio smoke from exact wheel
-        run: .artifact-venv/bin/python scripts/transport_smoke.py stdio --executable .artifact-venv/bin/kontomierz-mcp
+        run: >-
+          .artifact-venv/bin/python scripts/transport_smoke.py stdio
+          --executable .artifact-venv/bin/kontomierz-mcp
       - name: Official Client authenticated HTTP smoke from exact wheel
         run: >-
           .artifact-venv/bin/python scripts/transport_smoke.py streamable-http
           --executable .artifact-venv/bin/kontomierz-mcp
       - name: Build and smoke image from exact wheel
         run: |
-          set -euo pipefail
-          docker build --pull=false -t "kontomierz-mcp:$CANDIDATE_SHA" .
-          docker run --rm --entrypoint python "kontomierz-mcp:$CANDIDATE_SHA" -c \
-            "from kontomierz_mcp.config import Settings; print(Settings(api_key='', mock_data=True))"
+          docker build -t "kontomierz-mcp:${SOURCE_SHA}" .
+          docker run --rm "kontomierz-mcp:${SOURCE_SHA}" python -c \
+            "import os, kontomierz_mcp; assert os.geteuid() != 0; print(kontomierz_mcp.__version__)"
+          docker save "kontomierz-mcp:${SOURCE_SHA}" | gzip -n > dist/kontomierz-mcp-image.tar.gz
       - name: Close release artifact set
         run: |
-          set -euo pipefail
-          IMAGE_ID="$(docker image inspect --format '{{.Id}}' "kontomierz-mcp:$CANDIDATE_SHA")"
-          WHEEL_SHA="$(sha256sum dist/kontomierz_mcp-*.whl | awk '{print $1}')"
-          python - "$CANDIDATE_SHA" "$IMAGE_ID" "$WHEEL_SHA" > dist/IMAGE_METADATA.json <<'PY'
-          import json
-          import sys
-          print(json.dumps({"source_sha": sys.argv[1], "image_id": sys.argv[2], "wheel_sha256": sys.argv[3]}, sort_keys=True))
-          PY
-          docker save "kontomierz-mcp:$CANDIDATE_SHA" | gzip -9 > dist/kontomierz-mcp-image.tar.gz
-          (cd dist && sha256sum kontomierz-mcp-image.tar.gz IMAGE_METADATA.json SHA256SUMS > RELEASE_SHA256SUMS)
-          (cd dist && sha256sum --check RELEASE_SHA256SUMS)
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          (
+            cd dist
+            find . -maxdepth 1 -type f \( -name '*.whl' -o -name 'kontomierz-mcp-image.tar.gz' \) \
+              -print0 | sort -z | xargs -0 sha256sum > RELEASE_SHA256SUMS
+          )
+          cp requirements/runtime-linux-x64-py312.lock dist/
+          cp requirements/build-linux-x64.lock dist/
+          cat > dist/BUILD_METADATA <<EOF
+          SOURCE_SHA=${SOURCE_SHA}
+          PYTHON_VERSION=3.12
+          RUNTIME_LOCK=requirements/runtime-linux-x64-py312.lock
+          BUILD_LOCK=requirements/build-linux-x64.lock
+          EOF
       - name: Upload exact closed release bundle
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: release-bundle-${{ env.CANDIDATE_SHA }}
+          name: release-bundle-${{ env.SOURCE_SHA }}
           path: |
             dist/kontomierz_mcp-*.whl
             dist/wheelhouse/
-            dist/SHA256SUMS
             dist/kontomierz-mcp-image.tar.gz
-            dist/IMAGE_METADATA.json
+            dist/SHA256SUMS
             dist/RELEASE_SHA256SUMS
+            dist/BUILD_METADATA
+            dist/runtime-linux-x64-py312.lock
+            dist/build-linux-x64.lock
           if-no-files-found: error
           retention-days: 30
