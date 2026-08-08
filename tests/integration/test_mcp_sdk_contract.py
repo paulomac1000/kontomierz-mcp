@@ -56,6 +56,7 @@ async def test_official_in_memory_capability_document_has_full_active_state() ->
     assert document["tools"]["create_wallet"]["manifest"]["active_state"] == "disabled"
     assert document["tools"]["list_accounts"]["manifest"]["active_state"] == "active"
     assert document["profile"] == "local-process-principal"
+    assert document["authorization_policy"] == "single-account-resource-v2"
 
 
 @pytest.mark.asyncio

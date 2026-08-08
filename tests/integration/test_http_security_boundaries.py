@@ -13,6 +13,7 @@ TOKEN = "b" * 32
 class SpyKernel:
     def __init__(self) -> None:
         self.invoke_calls = 0
+        self.readiness_calls = 0
         self.closed = False
 
     async def invoke(self, name: str, arguments: dict[str, Any], *, context: Any = None) -> dict[str, Any]:
@@ -21,6 +22,7 @@ class SpyKernel:
         return {"data": {}, "_meta": {}}
 
     async def readiness(self) -> bool:
+        self.readiness_calls += 1
         return True
 
     async def close(self) -> None:
@@ -109,3 +111,21 @@ def test_final_http_app_rejects_missing_or_duplicate_bearer_before_kernel_io() -
         )
         assert duplicate.status_code == 401
         assert kernel.invoke_calls == 0
+
+
+def test_live_is_public_but_ready_authenticates_before_dependency_probe() -> None:
+    kernel = SpyKernel()
+    app = create_http_app(settings(), kernel=kernel)  # type: ignore[arg-type]
+
+    with TestClient(app, base_url="http://127.0.0.1:9101") as client:
+        live = client.get("/health/live")
+        assert live.status_code == 200
+        assert kernel.readiness_calls == 0
+
+        missing = client.get("/health/ready")
+        assert missing.status_code == 401
+        assert kernel.readiness_calls == 0
+
+        ready = client.get("/health/ready", headers={"authorization": f"Bearer {TOKEN}"})
+        assert ready.status_code == 200
+        assert kernel.readiness_calls == 1

@@ -11,6 +11,7 @@ from typing import Annotated, Any
 from pydantic import Field
 
 from . import __version__
+from .audit import configure_audit_sink
 from .client import KontomierzClient
 from .config import Settings
 from .errors import ApplicationError
@@ -106,8 +107,9 @@ def build_server(settings: Settings, kernel: InvocationKernel | None = None) -> 
 
 
 def create_http_app(settings: Settings, kernel: InvocationKernel | None = None) -> Any:
-    """Create authenticated loopback Streamable HTTP plus unauthenticated health endpoints."""
+    """Create loopback Streamable HTTP with public liveness and authenticated readiness."""
     from starlette.applications import Starlette
+    from starlette.middleware import Middleware
     from starlette.responses import JSONResponse
     from starlette.routing import Mount, Route
 
@@ -132,7 +134,6 @@ def create_http_app(settings: Settings, kernel: InvocationKernel | None = None) 
         transport_security=transport_security,
         host=settings.host,
     )
-    authenticated_mcp_app = BearerPrincipalMiddleware(mcp_app, settings)
 
     @asynccontextmanager
     async def lifespan(_app: Starlette) -> AsyncIterator[None]:
@@ -156,8 +157,9 @@ def create_http_app(settings: Settings, kernel: InvocationKernel | None = None) 
         routes=[
             Route("/health/live", live, methods=["GET"]),
             Route("/health/ready", ready, methods=["GET"]),
-            Mount("/", app=authenticated_mcp_app),
+            Mount("/", app=mcp_app),
         ],
+        middleware=[Middleware(BearerPrincipalMiddleware, settings=settings, public_paths=frozenset({"/health/live"}))],
         lifespan=lifespan,
     )
 
@@ -168,6 +170,7 @@ def main() -> None:
         level=getattr(logging, settings.log_level),
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
+    configure_audit_sink()
     kernel = build_kernel(settings)
     if settings.transport == "stdio":
         build_server(settings, kernel).run("stdio")

@@ -10,7 +10,7 @@ import subprocess
 import time
 from contextlib import closing
 from pathlib import Path
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 from kontomierz_mcp.manifests import TOOL_DEFINITIONS
 
@@ -48,7 +48,7 @@ async def _assert_contract(client, *, http: bool) -> None:
     assert capabilities.is_error is False
     document = capabilities.structured_content["data"]
     assert document["schema_version"] == "3.0.0"
-    assert document["authorization_policy"] == "single-account-v1"
+    assert document["authorization_policy"] == "single-account-resource-v2"
     assert set(document["tools"]) == set(TOOL_DEFINITIONS)
     assert document["tools"]["create_wallet"]["manifest"]["active_state"] == "disabled"
     if http:
@@ -113,12 +113,13 @@ async def smoke_http(executable: Path) -> None:
     try:
         deadline = time.monotonic() + 15
         ready_url = f"http://127.0.0.1:{port}/health/ready"
+        ready_request = Request(ready_url, headers={"Authorization": f"Bearer {_HTTP_TOKEN}"})
         while time.monotonic() < deadline:
             if process.poll() is not None:
                 diagnostics = process.stderr.read() if process.stderr else ""
                 raise RuntimeError(f"HTTP server exited early: {diagnostics}")
             try:
-                with urlopen(ready_url, timeout=1) as response:  # noqa: S310 - fixed loopback URL
+                with urlopen(ready_request, timeout=1) as response:  # noqa: S310 - fixed loopback URL
                     if response.status == 200:
                         break
             except OSError:

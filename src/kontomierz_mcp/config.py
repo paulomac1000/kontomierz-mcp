@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,6 +14,9 @@ _TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
 _MAX_HTTP_CREDENTIAL_BYTES = 512
 _MAX_HTTP_REQUEST_BODY_BYTES = 4 * 1024 * 1024
 _HTTP_CAPABILITY_CLASSES = frozenset({"read", "write", "destructive"})
+_DESTRUCTIVE_CAPABILITIES = frozenset({"destroy_wallet", "delete_transaction", "delete_budget", "delete_schedule"})
+_DESTRUCTIVE_RESOURCE = re.compile(r"^(?:wallet|transaction|budget|schedule):[1-9][0-9]*$")
+_CAPABILITY_ID = re.compile(r"^[a-z][a-z0-9_]{0,127}$")
 
 
 class ConfigurationError(ValueError):
@@ -66,6 +70,35 @@ def _http_capabilities(env: Mapping[str, str]) -> tuple[str, ...]:
     return values
 
 
+def _csv_values(env: Mapping[str, str], name: str) -> tuple[str, ...]:
+    raw = env.get(name, "")
+    return tuple(dict.fromkeys(part.strip() for part in raw.split(",") if part.strip()))
+
+
+def _destructive_capabilities(env: Mapping[str, str]) -> tuple[str, ...]:
+    values = _csv_values(env, "MCP_HTTP_ALLOWED_DESTRUCTIVE_CAPABILITIES")
+    invalid = [
+        value
+        for value in values
+        if _CAPABILITY_ID.fullmatch(value) is None or value not in _DESTRUCTIVE_CAPABILITIES
+    ]
+    if invalid:
+        raise ConfigurationError(
+            "MCP_HTTP_ALLOWED_DESTRUCTIVE_CAPABILITIES contains invalid capability IDs: " + ", ".join(sorted(invalid))
+        )
+    return values
+
+
+def _destructive_resources(env: Mapping[str, str]) -> tuple[str, ...]:
+    values = _csv_values(env, "MCP_HTTP_ALLOWED_DESTRUCTIVE_RESOURCES")
+    invalid = [value for value in values if _DESTRUCTIVE_RESOURCE.fullmatch(value) is None]
+    if invalid:
+        raise ConfigurationError(
+            "MCP_HTTP_ALLOWED_DESTRUCTIVE_RESOURCES must contain exact resource IDs such as wallet:123"
+        )
+    return values
+
+
 def _bounded_ascii_secret(value: str, name: str) -> str:
     if not value:
         raise ConfigurationError(f"{name} is required for Streamable HTTP")
@@ -101,6 +134,8 @@ class Settings:
     http_auth_token: str = ""
     http_principal: str = ""
     http_allowed_capabilities: tuple[str, ...] = ("read",)
+    http_allowed_destructive_capabilities: tuple[str, ...] = ()
+    http_allowed_destructive_resources: tuple[str, ...] = ()
     http_max_request_body_bytes: int = 1024 * 1024
 
     @classmethod
@@ -138,6 +173,8 @@ class Settings:
             http_auth_token=env.get("MCP_HTTP_AUTH_TOKEN", "").strip(),
             http_principal=env.get("MCP_HTTP_PRINCIPAL", "").strip(),
             http_allowed_capabilities=_http_capabilities(env),
+            http_allowed_destructive_capabilities=_destructive_capabilities(env),
+            http_allowed_destructive_resources=_destructive_resources(env),
             http_max_request_body_bytes=_positive_int(env, "MCP_HTTP_MAX_REQUEST_BODY_BYTES", 1024 * 1024),
         )
         settings.validate()
@@ -169,6 +206,24 @@ class Settings:
             invalid_capabilities = sorted(set(self.http_allowed_capabilities) - _HTTP_CAPABILITY_CLASSES)
             if not self.http_allowed_capabilities or invalid_capabilities:
                 raise ConfigurationError("MCP_HTTP_ALLOWED_CAPABILITIES must contain only read, write, destructive")
+            invalid_destructive_capabilities = sorted(
+                set(self.http_allowed_destructive_capabilities) - _DESTRUCTIVE_CAPABILITIES
+            )
+            invalid_destructive_resources = [
+                resource
+                for resource in self.http_allowed_destructive_resources
+                if _DESTRUCTIVE_RESOURCE.fullmatch(resource) is None
+            ]
+            if invalid_destructive_capabilities:
+                raise ConfigurationError("MCP_HTTP_ALLOWED_DESTRUCTIVE_CAPABILITIES contains invalid capability IDs")
+            if invalid_destructive_resources:
+                raise ConfigurationError("MCP_HTTP_ALLOWED_DESTRUCTIVE_RESOURCES must use exact resource IDs")
+            if "destructive" in self.http_allowed_capabilities and (
+                not self.http_allowed_destructive_capabilities or not self.http_allowed_destructive_resources
+            ):
+                raise ConfigurationError(
+                    "HTTP destructive access requires explicit capability and exact resource allowlists"
+                )
             if self.http_max_request_body_bytes > _MAX_HTTP_REQUEST_BODY_BYTES:
                 raise ConfigurationError(
                     f"MCP_HTTP_MAX_REQUEST_BODY_BYTES must not exceed {_MAX_HTTP_REQUEST_BODY_BYTES}"

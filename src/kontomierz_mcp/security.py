@@ -57,13 +57,23 @@ class BearerPrincipalMiddleware:
 
     _MAX_AUTHORIZATION_BYTES = 1024
 
-    def __init__(self, app: ASGIApp, settings: Settings) -> None:
+    def __init__(
+        self,
+        app: ASGIApp,
+        settings: Settings,
+        *,
+        public_paths: frozenset[str] = frozenset(),
+    ) -> None:
         self._app = app
         self._token = settings.http_auth_token.encode("ascii")
         self._principal = settings.http_principal
+        self._public_paths = public_paths
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope.get("type") != "http":
+            await self._app(scope, receive, send)
+            return
+        if scope.get("path") in self._public_paths:
             await self._app(scope, receive, send)
             return
 
