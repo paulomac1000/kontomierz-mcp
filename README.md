@@ -58,7 +58,7 @@ mkdir -p dist/wheelhouse
 docker build -t kontomierz-mcp:local .
 ```
 
-The image runs as a non-root user and defaults to stdio. Hosted CI builds and smoke-tests the exact image archive under read-only permissions. The protected publish workflow verifies that the candidate SHA is reachable from the trusted default branch, then only verifies, loads, tags, and pushes the closed archive; it does not execute candidate source after release write permissions are granted.
+The image runs as a non-root user and defaults to stdio. Hosted CI builds and smoke-tests the exact image archive under read-only permissions. The protected publish workflow verifies that the candidate SHA is reachable from the trusted default branch and refuses to continue unless the repository `release` environment already has required deployment reviewers, self-review prevention, and protected-branch deployment policy. It then only verifies, loads, tags, and pushes the closed archive; it does not execute candidate source after release write permissions are granted.
 
 ## Tests
 

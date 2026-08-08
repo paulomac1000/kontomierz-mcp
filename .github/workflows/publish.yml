@@ -38,6 +38,50 @@ jobs:
           set -euo pipefail
           git cat-file -e "$HEAD_SHA^{commit}"
           git merge-base --is-ancestor "$HEAD_SHA" HEAD
+      - name: Require protected release environment policy
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import urllib.error
+          import urllib.request
+
+          repository = os.environ["GITHUB_REPOSITORY"]
+          request = urllib.request.Request(
+              f"https://api.github.com/repos/{repository}/environments/release",
+              headers={
+                  "Accept": "application/vnd.github+json",
+                  "Authorization": f"Bearer {os.environ['GH_TOKEN']}",
+                  "X-GitHub-Api-Version": "2026-03-10",
+              },
+          )
+          try:
+              with urllib.request.urlopen(request, timeout=10) as response:
+                  environment = json.load(response)
+          except urllib.error.HTTPError as exc:
+              if exc.code == 404:
+                  raise SystemExit(
+                      "release environment is missing; an administrator must create and protect it before publishing"
+                  ) from exc
+              raise
+
+          reviewer_rule = next(
+              (rule for rule in environment.get("protection_rules", []) if rule.get("type") == "required_reviewers"),
+              None,
+          )
+          if not reviewer_rule or not reviewer_rule.get("reviewers"):
+              raise SystemExit("release environment must require at least one deployment reviewer")
+          if reviewer_rule.get("prevent_self_review") is not True:
+              raise SystemExit("release environment must prevent self-review")
+
+          branch_policy = environment.get("deployment_branch_policy") or {}
+          if branch_policy.get("protected_branches") is not True:
+              raise SystemExit("release environment must restrict deployments to protected branches")
+          if branch_policy.get("custom_branch_policies") is not False:
+              raise SystemExit("release environment must use protected-branch policy, not an unrestricted custom policy")
+          PY
       - name: Download closed release bundle from successful CI
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:

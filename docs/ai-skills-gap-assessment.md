@@ -41,7 +41,7 @@ Target technical alignment with the immutable `ai-skills` revision `c6dc6b13b2dd
 - The structural migration assessment records current real evidence and explicit blockers but cannot become an approval until provider-backed evidence and an independent review are bound to the final immutable revision.
 - Real upstream write method/body, pagination termination, and `client_assigned_id` reconciliation contracts require a disposable Kontomierz account.
 - Independent approval for the final immutable revision is still required.
-- Repository administrators must configure the `release` environment with required reviewers; workflow source alone cannot enforce repository environment policy.
+- Repository administrators must configure the `release` environment with required reviewers, self-review prevention, and protected-branch deployment policy. The publish verifier now fails closed when that environment is missing or insufficiently protected, but repository administration still requires an external privileged action.
 - The current protected publish step emits a promotion attestation. A stronger provider-verifiable build provenance statement for the read-only CI build remains a separate evidence item.
 - Public non-loopback hosting and multi-tenant authorization remain unsupported.
 
