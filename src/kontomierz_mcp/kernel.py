@@ -21,7 +21,7 @@ from .authorization import AuthorizationDecision, AuthorizationPolicy
 from .config import Settings
 from .errors import ApplicationError, ErrorCode, UpstreamError
 from .manifests import TOOL_DEFINITIONS, TOOL_MANIFESTS, ToolManifest, project_manifest
-from .security import InvocationContext, current_invocation_context
+from .security import InvocationContext
 
 Operation = Callable[..., Any | Awaitable[Any]]
 _logger = logging.getLogger(__name__)
