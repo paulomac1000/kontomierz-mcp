@@ -9,6 +9,7 @@ import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from importlib import import_module
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as package_version
 from typing import Any
@@ -144,9 +145,9 @@ class InvocationKernel:
         except PackageNotFoundError:
             sdk_version = "unavailable"
         try:
-            from mcp.shared.version import SUPPORTED_PROTOCOL_VERSIONS
-
-            protocol_versions = [str(item) for item in SUPPORTED_PROTOCOL_VERSIONS]
+            version_module = import_module("mcp.shared.version")
+            supported_protocol_versions = getattr(version_module, "SUPPORTED_PROTOCOL_VERSIONS", ())
+            protocol_versions = [str(item) for item in supported_protocol_versions]
         except ImportError:
             protocol_versions = []
         return sdk_version, protocol_versions

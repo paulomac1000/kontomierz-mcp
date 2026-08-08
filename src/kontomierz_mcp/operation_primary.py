@@ -52,14 +52,16 @@ async def dispatch_primary(name: str, a: dict[str, Any], client: Any) -> Any:
             )
         )
     if name == "update_wallet":
-        fields = provided(a, ("currency_balance", "currency_name", "user_name", "liquid"))
-        if "currency_balance" in fields:
-            fields["currency_balance"] = money(fields["currency_balance"], "currency_balance", positive=False)
-        if "currency_name" in fields:
-            fields["currency_name"] = currency(fields["currency_name"])
-        if "liquid" in fields and fields["liquid"] not in {"0", "1"}:
+        wallet_fields = provided(a, ("currency_balance", "currency_name", "user_name", "liquid"))
+        if "currency_balance" in wallet_fields:
+            wallet_fields["currency_balance"] = money(
+                wallet_fields["currency_balance"], "currency_balance", positive=False
+            )
+        if "currency_name" in wallet_fields:
+            wallet_fields["currency_name"] = currency(wallet_fields["currency_name"])
+        if "liquid" in wallet_fields and wallet_fields["liquid"] not in {"0", "1"}:
             fail("liquid must be 0 or 1")
-        return await resolve(client.update_wallet(identifier(a["wallet_id"], "wallet_id"), **fields))
+        return await resolve(client.update_wallet(identifier(a["wallet_id"], "wallet_id"), **wallet_fields))
     if name == "destroy_wallet":
         item_id = identifier(a["wallet_id"], "wallet_id")
         await resolve(client.destroy_wallet(item_id))
@@ -86,7 +88,7 @@ async def dispatch_primary(name: str, a: dict[str, Any], client: Any) -> Any:
     if name == "get_transaction":
         return await resolve(client.get_money_transaction(identifier(a["transaction_id"], "transaction_id")))
     if name == "create_transaction":
-        fields: dict[str, Any] = {
+        create_fields: dict[str, Any] = {
             "client_assigned_id": text(a["client_assigned_id"], "client_assigned_id"),
             "user_account_id": identifier(a.get("user_account_id"), "user_account_id", optional=True),
             "category_id": identifier(a.get("category_id"), "category_id", optional=True),
@@ -95,14 +97,14 @@ async def dispatch_primary(name: str, a: dict[str, Any], client: Any) -> Any:
             "name": a.get("name", ""),
         }
         if a.get("currency_amount"):
-            fields["currency_amount"] = money(a["currency_amount"], "currency_amount", positive=True)
+            create_fields["currency_amount"] = money(a["currency_amount"], "currency_amount", positive=True)
         if a.get("currency_name"):
-            fields["currency_name"] = currency(a["currency_name"])
+            create_fields["currency_name"] = currency(a["currency_name"])
         if a.get("transaction_on"):
-            fields["transaction_on"] = date_value(a["transaction_on"], "transaction_on")
-        return await resolve(client.create_money_transaction(**fields))
+            create_fields["transaction_on"] = date_value(a["transaction_on"], "transaction_on")
+        return await resolve(client.create_money_transaction(**create_fields))
     if name == "update_transaction":
-        fields = provided(
+        update_fields = provided(
             a,
             (
                 "user_account_id",
@@ -115,20 +117,20 @@ async def dispatch_primary(name: str, a: dict[str, Any], client: Any) -> Any:
                 "transaction_on",
             ),
         )
-        if "user_account_id" in fields:
-            fields["user_account_id"] = identifier(fields["user_account_id"], "user_account_id")
-        if "category_id" in fields:
-            fields["category_id"] = identifier(fields["category_id"], "category_id")
-        if "currency_amount" in fields:
-            fields["currency_amount"] = money(fields["currency_amount"], "currency_amount", positive=True)
-        if "currency_name" in fields:
-            fields["currency_name"] = currency(fields["currency_name"])
-        if "direction" in fields:
-            fields["direction"] = direction(fields["direction"])
-        if "transaction_on" in fields:
-            fields["transaction_on"] = date_value(fields["transaction_on"], "transaction_on")
+        if "user_account_id" in update_fields:
+            update_fields["user_account_id"] = identifier(update_fields["user_account_id"], "user_account_id")
+        if "category_id" in update_fields:
+            update_fields["category_id"] = identifier(update_fields["category_id"], "category_id")
+        if "currency_amount" in update_fields:
+            update_fields["currency_amount"] = money(update_fields["currency_amount"], "currency_amount", positive=True)
+        if "currency_name" in update_fields:
+            update_fields["currency_name"] = currency(update_fields["currency_name"])
+        if "direction" in update_fields:
+            update_fields["direction"] = direction(update_fields["direction"])
+        if "transaction_on" in update_fields:
+            update_fields["transaction_on"] = date_value(update_fields["transaction_on"], "transaction_on")
         transaction_id = identifier(a["transaction_id"], "transaction_id")
-        return await resolve(client.update_money_transaction(transaction_id, **fields))
+        return await resolve(client.update_money_transaction(transaction_id, **update_fields))
     if name == "delete_transaction":
         item_id = identifier(a["transaction_id"], "transaction_id")
         await resolve(client.delete_money_transaction(item_id))
