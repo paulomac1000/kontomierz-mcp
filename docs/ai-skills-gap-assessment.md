@@ -38,7 +38,7 @@ Target technical alignment with the immutable `ai-skills` revision `c6dc6b13b2dd
 ## Deferred gaps
 
 - Reviewed runtime and development dependency locks with hashes are still missing. Current exact-artifact CI closes and verifies the resolved wheelhouse after resolution, but resolution itself is not reproducible yet.
-- The structural migration assessment records current real evidence and explicit blockers but cannot become an approval until provider-backed evidence and an independent review are bound to the final immutable revision.
+- A schema-valid `migration-assessment.yaml` is still missing. The pinned schema requires a concrete GitHub `decision.reviewer` even for `request-changes`, and the validator requires that reviewer to be independent from every `prepared_by` identity. PR #7 currently has no submitted GitHub review, so no reviewer identity or review ID is fabricated.
 - Real upstream write method/body, pagination termination, and `client_assigned_id` reconciliation contracts require a disposable Kontomierz account.
 - Independent approval for the final immutable revision is still required.
 - Repository administrators must configure the `release` environment with required reviewers, self-review prevention, and protected-branch deployment policy. The publish verifier now fails closed when that environment is missing or insufficiently protected, but repository administration still requires an external privileged action.
