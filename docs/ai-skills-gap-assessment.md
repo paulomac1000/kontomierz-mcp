@@ -33,14 +33,15 @@ Target technical alignment with the immutable `ai-skills` revision `c6dc6b13b2dd
 - Breaking transport, error, pagination, and input changes are versioned as `2.0.0`.
 - MCP errors are explicit stable `CallToolResult` documents.
 - Readiness includes a bounded cached dependency probe behind the authenticated HTTP readiness boundary.
+- Linux x64 runtime and development dependency graphs are exact-wheel hash-locked separately for Python 3.11, 3.12, and 3.13; build tooling has its own hash lock. Acceptance paths install them with `--require-hashes --no-deps --only-binary=:all:` and verify completeness with `pip check`.
+- Exact-artifact CI materializes the Python 3.12 runtime wheelhouse from the committed lock, tests a runtime-only installed wheel without network resolution, and includes the runtime/build locks in the checksummed release bundle.
 - Workflow policy profiles are explicit and trusted validators are pinned to the reviewed assessed ai-skills revision.
 - Read-only release validation proves the source SHA is reachable from the trusted default branch before accepting the closed CI artifact.
 - Protected publishing does not execute candidate source after release write permissions are granted and uses a full 40-character SHA tag.
-- The Docker build verifies the exact wheel/wheelhouse checksum manifest before installation.
+- The Docker build verifies the exact wheel/wheelhouse checksum manifest and installs the committed runtime lock with `--require-hashes` before the application wheel.
 
 ## Deferred gaps
 
-- Reviewed runtime and development dependency locks with hashes are still missing. Current exact-artifact CI closes and verifies the resolved wheelhouse after resolution, but resolution itself is not reproducible yet.
 - A schema-valid `migration-assessment.yaml` is still missing. The pinned schema requires a concrete GitHub `decision.reviewer` even for `request-changes`, and the validator requires that reviewer to be independent from every `prepared_by` identity. PR #7 currently has no submitted GitHub review, so no reviewer identity or review ID is fabricated.
 - Real upstream write method/body, pagination termination, `client_assigned_id` reconciliation, money precision, rate-limit, and credential-recovery contracts require a disposable Kontomierz account. These gaps are encoded as intentionally failing `external` tests rather than passing skips.
 - Independent approval for the final immutable revision is still required.
@@ -50,4 +51,4 @@ Target technical alignment with the immutable `ai-skills` revision `c6dc6b13b2dd
 
 ## Approval condition
 
-Keep the PR draft until hosted quality, standards, Python compatibility, exact-wheel, authenticated stdio/HTTP smoke, adversarial HTTP security, and Docker gates pass on the same exact implementation SHA; real-system evidence is completed; dependency locks and release evidence are reviewed; the migration assessment is switched to provider-backed mode with real final evidence; the `release` environment is administratively protected; and an independent reviewer approves the immutable revision.
+Keep the PR draft until hosted quality, standards, Python compatibility, locked exact-wheel, authenticated stdio/HTTP smoke, adversarial HTTP security, and Docker gates pass on the same exact implementation SHA; real-system evidence is completed; release evidence is reviewed; the migration assessment is switched to provider-backed mode with real final evidence; the `release` environment is administratively protected; and an independent reviewer approves the immutable revision.
