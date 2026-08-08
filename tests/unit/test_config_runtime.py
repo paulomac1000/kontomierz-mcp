@@ -42,6 +42,23 @@ def test_http_settings_load_authenticated_principal() -> None:
     assert settings.http_max_request_body_bytes == 2048
 
 
+def test_http_destructive_settings_load_exact_allowlists() -> None:
+    settings = Settings.from_env(
+        {
+            "KONTOMIERZ_MOCK_DATA": "1",
+            "MCP_TRANSPORT": "streamable-http",
+            "MCP_HTTP_AUTH_TOKEN": HTTP_TOKEN,
+            "MCP_HTTP_PRINCIPAL": "operator:test",
+            "MCP_HTTP_ALLOWED_CAPABILITIES": "read,destructive",
+            "MCP_HTTP_ALLOWED_DESTRUCTIVE_CAPABILITIES": "destroy_wallet,delete_transaction",
+            "MCP_HTTP_ALLOWED_DESTRUCTIVE_RESOURCES": "wallet:123,transaction:456",
+        },
+        env_file=None,
+    )
+    assert settings.http_allowed_destructive_capabilities == ("destroy_wallet", "delete_transaction")
+    assert settings.http_allowed_destructive_resources == ("wallet:123", "transaction:456")
+
+
 def test_pending_limit_cannot_be_smaller_than_running_limit() -> None:
     with pytest.raises(ConfigurationError, match="MCP_MAX_PENDING_INVOCATIONS"):
         Settings(api_key="", mock_data=True, max_concurrency=4, max_pending_invocations=3).validate()
@@ -88,6 +105,36 @@ def test_pending_limit_cannot_be_smaller_than_running_limit() -> None:
                 "MCP_TRANSPORT": "http",
                 "MCP_HTTP_AUTH_TOKEN": HTTP_TOKEN,
                 "MCP_HTTP_PRINCIPAL": "operator:test",
+                "MCP_HTTP_ALLOWED_CAPABILITIES": "read,destructive",
+            },
+            "destructive access",
+        ),
+        (
+            {
+                "KONTOMIERZ_MOCK_DATA": "1",
+                "MCP_TRANSPORT": "http",
+                "MCP_HTTP_AUTH_TOKEN": HTTP_TOKEN,
+                "MCP_HTTP_PRINCIPAL": "operator:test",
+                "MCP_HTTP_ALLOWED_DESTRUCTIVE_CAPABILITIES": "list_accounts",
+            },
+            "MCP_HTTP_ALLOWED_DESTRUCTIVE_CAPABILITIES",
+        ),
+        (
+            {
+                "KONTOMIERZ_MOCK_DATA": "1",
+                "MCP_TRANSPORT": "http",
+                "MCP_HTTP_AUTH_TOKEN": HTTP_TOKEN,
+                "MCP_HTTP_PRINCIPAL": "operator:test",
+                "MCP_HTTP_ALLOWED_DESTRUCTIVE_RESOURCES": "wallet:0",
+            },
+            "MCP_HTTP_ALLOWED_DESTRUCTIVE_RESOURCES",
+        ),
+        (
+            {
+                "KONTOMIERZ_MOCK_DATA": "1",
+                "MCP_TRANSPORT": "http",
+                "MCP_HTTP_AUTH_TOKEN": HTTP_TOKEN,
+                "MCP_HTTP_PRINCIPAL": "operator:test",
                 "MCP_HTTP_MAX_REQUEST_BODY_BYTES": str(4 * 1024 * 1024 + 1),
             },
             "MCP_HTTP_MAX_REQUEST_BODY_BYTES",
@@ -112,3 +159,31 @@ def test_invalid_env_file_line_is_rejected(tmp_path: Path) -> None:
     path.write_text("NOT_AN_ASSIGNMENT\n", encoding="utf-8")
     with pytest.raises(ConfigurationError, match="expected KEY=VALUE"):
         load_env_file(path, {})
+
+
+def test_destructive_capability_and_resource_allowlists_must_match() -> None:
+    base = {
+        "KONTOMIERZ_MOCK_DATA": "1",
+        "MCP_TRANSPORT": "streamable-http",
+        "MCP_HTTP_AUTH_TOKEN": HTTP_TOKEN,
+        "MCP_HTTP_PRINCIPAL": "operator:test",
+        "MCP_HTTP_ALLOWED_CAPABILITIES": "read,destructive",
+    }
+    with pytest.raises(ConfigurationError, match="matching exact resource"):
+        Settings.from_env(
+            {
+                **base,
+                "MCP_HTTP_ALLOWED_DESTRUCTIVE_CAPABILITIES": "destroy_wallet",
+                "MCP_HTTP_ALLOWED_DESTRUCTIVE_RESOURCES": "transaction:123",
+            },
+            env_file=None,
+        )
+    with pytest.raises(ConfigurationError, match="match an explicitly allowed"):
+        Settings.from_env(
+            {
+                **base,
+                "MCP_HTTP_ALLOWED_DESTRUCTIVE_CAPABILITIES": "destroy_wallet",
+                "MCP_HTTP_ALLOWED_DESTRUCTIVE_RESOURCES": "wallet:123,transaction:456",
+            },
+            env_file=None,
+        )

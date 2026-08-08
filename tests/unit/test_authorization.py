@@ -3,12 +3,13 @@ from __future__ import annotations
 import io
 import json
 import logging
+from dataclasses import replace
 from typing import Any
 
 import pytest
 
 from kontomierz_mcp.audit import configure_audit_sink
-from kontomierz_mcp.authorization import AuthorizationDecision
+from kontomierz_mcp.authorization import AuthorizationDecision, AuthorizationPolicy
 from kontomierz_mcp.config import ConfigurationError, Settings
 from kontomierz_mcp.errors import ApplicationError, ErrorCode
 from kontomierz_mcp.kernel import InvocationKernel
@@ -235,3 +236,23 @@ async def test_stdio_principal_and_policy_decision_are_emitted_to_structured_aud
     assert event["result_category"] == "SUCCESS"
     assert "principal" not in result["_meta"]
     assert result["_meta"]["target"] == "kontomierz-account"
+
+
+def test_every_governed_tool_has_an_explicit_resource_binding() -> None:
+    from kontomierz_mcp import authorization
+    from kontomierz_mcp.manifests import TOOL_MANIFESTS
+
+    assert set(authorization._RESOURCE_BINDINGS) == set(TOOL_MANIFESTS)
+
+
+def test_future_tool_without_resource_binding_fails_closed() -> None:
+    from kontomierz_mcp.manifests import TOOL_MANIFESTS
+
+    manifest = replace(TOOL_MANIFESTS["list_accounts"], name="future_unmapped_tool")
+    policy = AuthorizationPolicy(Settings(api_key="", mock_data=True))
+    context = InvocationContext.local_stdio()
+
+    decision = policy.authorize(context, manifest, {})
+    assert decision.allowed is False
+    assert decision.reason == "capability has no governed resource binding"
+    assert policy.capability_allowed(context, manifest) is False

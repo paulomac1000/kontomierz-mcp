@@ -75,7 +75,7 @@ The image runs as a non-root user and defaults to stdio. Hosted CI builds and sm
 .venv/bin/python -m pytest -m "not external"
 ```
 
-The default suite uses synthetic data. The official MCP SDK test is mandatory and fails collection when the SDK is absent; it is not silently skipped. Tests marked `external` describe evidence still needed from a disposable real account. See [`AGENTS.md`](AGENTS.md) for the full gate.
+The default suite uses synthetic data. The official MCP SDK test is mandatory and fails collection when the SDK is absent; it is not silently skipped. Tests marked `external` are deliberate `NOT IMPLEMENTED` evidence gates for disposable real-system or provider-backed work and fail when explicitly selected until an authorized agent implements them. See [`docs/production-readiness.md`](docs/production-readiness.md) and [`AGENTS.md`](AGENTS.md) for the handoff and full gate.
 
 ## Contracts and architecture
 

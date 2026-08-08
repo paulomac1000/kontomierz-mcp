@@ -14,7 +14,13 @@ _TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
 _MAX_HTTP_CREDENTIAL_BYTES = 512
 _MAX_HTTP_REQUEST_BODY_BYTES = 4 * 1024 * 1024
 _HTTP_CAPABILITY_CLASSES = frozenset({"read", "write", "destructive"})
-_DESTRUCTIVE_CAPABILITIES = frozenset({"destroy_wallet", "delete_transaction", "delete_budget", "delete_schedule"})
+_DESTRUCTIVE_RESOURCE_PREFIX = {
+    "destroy_wallet": "wallet:",
+    "delete_transaction": "transaction:",
+    "delete_budget": "budget:",
+    "delete_schedule": "schedule:",
+}
+_DESTRUCTIVE_CAPABILITIES = frozenset(_DESTRUCTIVE_RESOURCE_PREFIX)
 _DESTRUCTIVE_RESOURCE = re.compile(r"^(?:wallet|transaction|budget|schedule):[1-9][0-9]*$")
 _CAPABILITY_ID = re.compile(r"^[a-z][a-z0-9_]{0,127}$")
 
@@ -222,6 +228,22 @@ class Settings:
                 raise ConfigurationError(
                     "HTTP destructive access requires explicit capability and exact resource allowlists"
                 )
+            if "destructive" in self.http_allowed_capabilities:
+                resources = self.http_allowed_destructive_resources
+                for capability in self.http_allowed_destructive_capabilities:
+                    prefix = _DESTRUCTIVE_RESOURCE_PREFIX[capability]
+                    if not any(resource.startswith(prefix) for resource in resources):
+                        raise ConfigurationError(
+                            "Each destructive capability must have at least one matching exact resource ID"
+                        )
+                allowed_prefixes = {
+                    _DESTRUCTIVE_RESOURCE_PREFIX[capability]
+                    for capability in self.http_allowed_destructive_capabilities
+                }
+                if any(not any(resource.startswith(prefix) for prefix in allowed_prefixes) for resource in resources):
+                    raise ConfigurationError(
+                        "Each destructive resource must match an explicitly allowed destructive capability"
+                    )
             if self.http_max_request_body_bytes > _MAX_HTTP_REQUEST_BODY_BYTES:
                 raise ConfigurationError(
                     f"MCP_HTTP_MAX_REQUEST_BODY_BYTES must not exceed {_MAX_HTTP_REQUEST_BODY_BYTES}"

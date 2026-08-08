@@ -15,6 +15,23 @@ _HANDLER_MARKER = "_kontomierz_audit_handler"
 _logger = logging.getLogger(_AUDIT_LOGGER_NAME)
 
 
+def _fallback_audit_failure() -> None:
+    """Emit a minimal operational signal without changing the invocation result."""
+    try:
+        sys.stderr.write('{"event":"mcp_audit_emission_failure","policy":"fail-open-result-preserving"}\n')
+        sys.stderr.flush()
+    except Exception:
+        return
+
+
+class _AuditStreamHandler(logging.StreamHandler):
+    """Dedicated handler that makes sink failures observable without failing the tool call."""
+
+    def handleError(self, record: logging.LogRecord) -> None:
+        del record
+        _fallback_audit_failure()
+
+
 @dataclass(slots=True)
 class InvocationAuditState:
     """Mutable state used to emit exactly one bounded audit event per invocation."""
@@ -60,21 +77,12 @@ def configure_audit_sink(*, stream: TextIO | None = None, replace: bool = False)
             logger.removeHandler(handler)
         existing = []
     if not existing:
-        handler = logging.StreamHandler(stream)
+        handler = _AuditStreamHandler(stream)
         handler.setLevel(logging.INFO)
         handler.setFormatter(logging.Formatter("%(message)s"))
         setattr(handler, _HANDLER_MARKER, True)
         logger.addHandler(handler)
     return logger
-
-
-def _fallback_audit_failure() -> None:
-    """Emit a minimal operational signal without changing the invocation result."""
-    try:
-        sys.stderr.write('{"event":"mcp_audit_emission_failure","policy":"fail-open-result-preserving"}\n')
-        sys.stderr.flush()
-    except Exception:
-        return
 
 
 def emit_invocation_audit(state: InvocationAuditState) -> None:

@@ -25,7 +25,7 @@ All notable changes to kontomierz-mcp are recorded here.
 - An audit-only INFO sink independent from ordinary `LOG_LEVEL`, with result-preserving fail-open behavior on sink failure.
 - Intentional Streamable HTTP Host/Origin policy, stateless mode, bounded request bodies, authenticated readiness, and adversarial pre-I/O tests.
 - Bounded admission, running concurrency, per-target write serialization, dependency-aware readiness, and conservative ambiguous-write handling.
-- Deterministic mock backend, all-tool smoke, official-client test scaffolding, and explicit real-system TODOs.
+- Deterministic mock backend, all-tool smoke, official-client tests, and intentionally failing external evidence placeholders for real-system and provider-only acceptance work.
 - Exact-wheel and exact-image CI promotion, protected release environment, default-branch ancestry proof, registry digest comparison, and promotion attestation.
 - AFDS architecture, contract, upstream, migration, and standards-gap documentation plus root `AGENTS.md`.
 

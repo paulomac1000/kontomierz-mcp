@@ -154,6 +154,8 @@ class AuthorizationPolicy:
 
     def _capability_policy(self, context: InvocationContext, manifest: ToolManifest) -> tuple[bool, str]:
         capability_class = self.capability_class(manifest)
+        if manifest.name not in _RESOURCE_BINDINGS:
+            return False, "capability has no governed resource binding"
         if not context.authenticated:
             return False, "principal is not authenticated"
 

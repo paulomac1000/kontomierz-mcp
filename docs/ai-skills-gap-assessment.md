@@ -33,7 +33,7 @@ Target technical alignment with the immutable `ai-skills` revision `c6dc6b13b2dd
 - Breaking transport, error, pagination, and input changes are versioned as `2.0.0`.
 - MCP errors are explicit stable `CallToolResult` documents.
 - Readiness includes a bounded cached dependency probe behind the authenticated HTTP readiness boundary.
-- Workflow policy profiles are explicit and trusted validators are pinned to the current assessed ai-skills revision.
+- Workflow policy profiles are explicit and trusted validators are pinned to the reviewed assessed ai-skills revision.
 - Read-only release validation proves the source SHA is reachable from the trusted default branch before accepting the closed CI artifact.
 - Protected publishing does not execute candidate source after release write permissions are granted and uses a full 40-character SHA tag.
 - The Docker build verifies the exact wheel/wheelhouse checksum manifest before installation.
@@ -42,7 +42,7 @@ Target technical alignment with the immutable `ai-skills` revision `c6dc6b13b2dd
 
 - Reviewed runtime and development dependency locks with hashes are still missing. Current exact-artifact CI closes and verifies the resolved wheelhouse after resolution, but resolution itself is not reproducible yet.
 - A schema-valid `migration-assessment.yaml` is still missing. The pinned schema requires a concrete GitHub `decision.reviewer` even for `request-changes`, and the validator requires that reviewer to be independent from every `prepared_by` identity. PR #7 currently has no submitted GitHub review, so no reviewer identity or review ID is fabricated.
-- Real upstream write method/body, pagination termination, and `client_assigned_id` reconciliation contracts require a disposable Kontomierz account.
+- Real upstream write method/body, pagination termination, `client_assigned_id` reconciliation, money precision, rate-limit, and credential-recovery contracts require a disposable Kontomierz account. These gaps are encoded as intentionally failing `external` tests rather than passing skips.
 - Independent approval for the final immutable revision is still required.
 - Repository administrators must configure the `release` environment with required reviewers, self-review prevention, and protected-branch deployment policy. The publish verifier fails closed when that environment is missing or insufficiently protected, but repository administration still requires an external privileged action.
 - The current protected publish step emits a promotion attestation. A stronger provider-verifiable build provenance statement for the read-only CI build remains a separate evidence item.
