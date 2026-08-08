@@ -33,10 +33,8 @@ class InvocationContext:
         return cls(principal=principal, transport="streamable-http", authenticated=True)
 
     @classmethod
-    def configured_http(cls, settings: Settings) -> InvocationContext:
-        authenticated = bool(settings.http_auth_token and settings.http_principal)
-        principal = settings.http_principal if authenticated else "unbound-http-principal"
-        return cls(principal=principal, transport="streamable-http", authenticated=authenticated)
+    def unauthenticated_http(cls) -> InvocationContext:
+        return cls(principal="unbound-http-principal", transport="streamable-http", authenticated=False)
 
 
 _context: ContextVar[InvocationContext | None] = ContextVar("kontomierz_invocation_context", default=None)

@@ -12,20 +12,25 @@ All notable changes to kontomierz-mcp are recorded here.
 - Replaced SDK-generated exception text with explicit structured MCP error results.
 - Changed update inputs so `None` means omission and an empty string can intentionally clear supported text fields.
 - Replaced the synchronous dependency adapter with native asynchronous I/O.
+- Streamable HTTP authorization is read-only by default; write/destructive capability classes require explicit server-side opt-in in addition to the operator write gate.
 
 ### Added
 
 - One governed catalog for tool signatures, descriptions, schemas, versions, manifests, active state, and registration.
 - Complete multi-axis capability manifests and supported-versus-active capability discovery.
+- Explicit application-owned authorization binding principal, exact capability, immutable configured target, and normalized arguments, with pre-I/O revalidation.
+- One structured server-side audit event per invocation with principal, policy decision, target, result category, and correlation data without credentials or protected response bodies.
+- Intentional Streamable HTTP Host/Origin policy, stateless mode, and bounded request bodies with adversarial pre-I/O tests.
 - Bounded admission, running concurrency, per-target write serialization, dependency-aware readiness, and conservative ambiguous-write handling.
 - Deterministic mock backend, all-tool smoke, official-client test scaffolding, and explicit real-system TODOs.
-- Exact-wheel and exact-image CI promotion, protected release environment, registry digest comparison, and promotion attestation.
+- Exact-wheel and exact-image CI promotion, protected release environment, default-branch ancestry proof, registry digest comparison, and promotion attestation.
 - AFDS architecture, contract, upstream, migration, and standards-gap documentation plus root `AGENTS.md`.
 
 ### Security
 
-- Public network binding fails closed until principal authentication and resource authorization exist.
-- Financial reads are classified as confidential; every mutation requires the trusted operator write gate.
+- Non-loopback HTTP binding remains forbidden; loopback HTTP requires request-scoped Bearer authentication and explicit server-side capability/target authorization.
+- Financial reads are classified as confidential; every mutation requires the trusted operator write gate and HTTP writes require an independently allowed capability class.
+- Missing or invalid credentials, Host/Origin policy violations, and oversized HTTP bodies are rejected before operation I/O.
 - Any uninterpretable successful response to a mutation is treated as a potentially completed write.
 - No mutation is declared replay-safe or automatically retryable without real-system evidence.
 

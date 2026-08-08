@@ -31,7 +31,7 @@ def _input_schema(tool) -> dict[str, object]:
     return schema
 
 
-async def _assert_contract(client) -> None:
+async def _assert_contract(client, *, http: bool) -> None:
     listing = await client.list_tools()
     discovered = {tool.name: tool for tool in listing.tools}
     assert set(discovered) == set(TOOL_DEFINITIONS)
@@ -48,8 +48,12 @@ async def _assert_contract(client) -> None:
     assert capabilities.is_error is False
     document = capabilities.structured_content["data"]
     assert document["schema_version"] == "3.0.0"
+    assert document["authorization_policy"] == "single-account-v1"
     assert set(document["tools"]) == set(TOOL_DEFINITIONS)
     assert document["tools"]["create_wallet"]["manifest"]["active_state"] == "disabled"
+    if http:
+        assert document["http_state_mode"] == "stateless"
+        assert document["http_allowed_capabilities"] == ["read"]
 
     result = await client.call_tool("list_accounts", {})
     assert result.is_error is False
@@ -76,7 +80,7 @@ async def smoke_stdio(executable: Path) -> None:
         },
     )
     async with Client(stdio_client(parameters)) as client:
-        await _assert_contract(client)
+        await _assert_contract(client, http=False)
 
 
 async def smoke_http(executable: Path) -> None:
@@ -88,12 +92,16 @@ async def smoke_http(executable: Path) -> None:
     environment = {
         **os.environ,
         "KONTOMIERZ_MOCK_DATA": "1",
-        "ENABLE_WRITE_OPERATIONS": "0",
+        # Enable the independent operator gate while keeping HTTP policy read-only.
+        # The write denial below therefore proves server-side capability authorization.
+        "ENABLE_WRITE_OPERATIONS": "1",
         "MCP_TRANSPORT": "streamable-http",
         "MCP_HOST": "127.0.0.1",
         "MCP_PORT": str(port),
         "MCP_HTTP_AUTH_TOKEN": _HTTP_TOKEN,
         "MCP_HTTP_PRINCIPAL": _HTTP_PRINCIPAL,
+        "MCP_HTTP_ALLOWED_CAPABILITIES": "read",
+        "MCP_HTTP_MAX_REQUEST_BODY_BYTES": "1048576",
     }
     process = subprocess.Popen(
         [str(executable)],
@@ -125,7 +133,7 @@ async def smoke_http(executable: Path) -> None:
                 http_client=http_client,
             )
             async with Client(transport) as client:
-                await _assert_contract(client)
+                await _assert_contract(client, http=True)
     finally:
         process.terminate()
         try:

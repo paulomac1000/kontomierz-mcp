@@ -4,9 +4,11 @@ A loopback-first MCP server for the Kontomierz personal-finance API. The server 
 
 ## Security and migration status
 
-The current candidate is **2.0.0** because it intentionally removes legacy HTTP+SSE and the unauthenticated REST bridge and changes public date, error, pagination, and update semantics. It is not presented as formally L2+ compliant yet. Formal adoption remains blocked on reviewed hash locks, a provider-backed migration assessment, independent approval, and contract tests against a disposable real Kontomierz account.
+The current candidate is **2.0.0** because it intentionally removes legacy HTTP+SSE and the unauthenticated REST bridge and changes public date, error, pagination, and update semantics. It is not presented as formally L2+ compliant yet. Formal adoption remains blocked on reviewed hash locks, completion of the machine-readable migration assessment with provider-backed independent approval, protected release-environment administration, and contract tests against a disposable real Kontomierz account.
 
-Financial reads are confidential. Mutations are denied unless `ENABLE_WRITE_OPERATIONS=1` is set by the trusted server operator. A model argument cannot enable writes. The server does **not** advertise `requires_confirmation=true` because no independent server-side approval authority exists yet; any future confirmation claim must be backed by a trusted approval record rather than a model-controlled argument. A started mutation with an uninterpretable outcome is never declared safely retryable.
+Financial reads are confidential. Every invocation is authenticated and then authorized server-side against the exact capability and immutable configured target. HTTP principals are read-only by default through `MCP_HTTP_ALLOWED_CAPABILITIES=read`. Mutations require both an explicitly allowed HTTP capability class (for HTTP callers) and `ENABLE_WRITE_OPERATIONS=1` from the trusted server operator. A model argument cannot establish identity, authorization, or write enablement.
+
+The server does **not** advertise `requires_confirmation=true` because no independent server-side approval authority exists yet; any future confirmation claim must be backed by a trusted approval record rather than a model-controlled argument. A started mutation with an uninterpretable outcome is never declared safely retryable. Each invocation emits one structured server-side audit record with principal, exact capability, target identity, policy decision, operator-gate decision, dependency state, result category, cancellation/saturation state, and correlation ID; credentials and protected response bodies are excluded.
 
 ## Install
 
@@ -33,10 +35,16 @@ KONTOMIERZ_MOCK_DATA=1 \
 MCP_TRANSPORT=streamable-http \
 MCP_HOST=127.0.0.1 \
 MCP_PORT=9101 \
+MCP_HTTP_ALLOWED_CAPABILITIES=read \
+MCP_HTTP_MAX_REQUEST_BODY_BYTES=1048576 \
 .venv/bin/kontomierz-mcp
 ```
 
-Every request to the MCP application must send `Authorization: Bearer <MCP_HTTP_AUTH_TOKEN>`. The token is mapped server-side to `MCP_HTTP_PRINCIPAL`, so the model cannot choose its own principal. The MCP endpoint is `/mcp`; liveness and readiness remain unauthenticated at `/health/live` and `/health/ready`. Non-loopback binding is rejected.
+Every request to the MCP application must send `Authorization: Bearer <MCP_HTTP_AUTH_TOKEN>`. The token is mapped server-side to `MCP_HTTP_PRINCIPAL`, so the model cannot choose its own principal. The principal is then authorized against the exact tool, configured target, normalized argument digest, and capability policy. The policy is revalidated immediately before operation I/O.
+
+The MCP endpoint is `/mcp`; liveness and readiness remain unauthenticated at `/health/live` and `/health/ready`. Non-loopback binding is rejected. The HTTP adapter explicitly configures Host and Origin policy, stateless mode, and a bounded request body instead of relying on SDK defaults.
+
+To permit HTTP writes, add `write` (and, separately, `destructive` if required) to `MCP_HTTP_ALLOWED_CAPABILITIES` **and** enable `ENABLE_WRITE_OPERATIONS=1`. Authentication alone never grants write access.
 
 ## Docker
 
@@ -50,7 +58,7 @@ mkdir -p dist/wheelhouse
 docker build -t kontomierz-mcp:local .
 ```
 
-The image runs as a non-root user and defaults to stdio. Hosted CI builds and smoke-tests the exact image archive under read-only permissions. The protected publish workflow only verifies, loads, tags, and pushes that closed archive; it does not checkout or run candidate source after release write permissions are granted.
+The image runs as a non-root user and defaults to stdio. Hosted CI builds and smoke-tests the exact image archive under read-only permissions. The protected publish workflow verifies that the candidate SHA is reachable from the trusted default branch, then only verifies, loads, tags, and pushes the closed archive; it does not execute candidate source after release write permissions are granted.
 
 ## Tests
 

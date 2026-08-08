@@ -117,7 +117,21 @@ def create_http_app(settings: Settings, kernel: InvocationKernel | None = None) 
 
     owned_kernel = kernel or build_kernel(settings)
     mcp = build_server(settings, owned_kernel)
-    mcp_app = mcp.streamable_http_app(stateless_http=True, json_response=True)
+    from mcp.server.transport_security import TransportSecuritySettings
+
+    host_header = f"[{settings.host}]" if ":" in settings.host else settings.host
+    transport_security = TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=[host_header, f"{host_header}:*"],
+        allowed_origins=[f"http://{host_header}", f"http://{host_header}:*"],
+    )
+    mcp_app = mcp.streamable_http_app(
+        stateless_http=True,
+        json_response=True,
+        max_request_body_size=settings.http_max_request_body_bytes,
+        transport_security=transport_security,
+        host=settings.host,
+    )
     authenticated_mcp_app = BearerPrincipalMiddleware(mcp_app, settings)
 
     @asynccontextmanager

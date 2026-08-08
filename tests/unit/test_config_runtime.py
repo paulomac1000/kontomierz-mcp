@@ -31,11 +31,15 @@ def test_http_settings_load_authenticated_principal() -> None:
             "MCP_TRANSPORT": "streamable-http",
             "MCP_HTTP_AUTH_TOKEN": HTTP_TOKEN,
             "MCP_HTTP_PRINCIPAL": "operator:test",
+            "MCP_HTTP_ALLOWED_CAPABILITIES": "read,write",
+            "MCP_HTTP_MAX_REQUEST_BODY_BYTES": "2048",
         },
         env_file=None,
     )
     assert settings.streamable_http is True
     assert settings.http_principal == "operator:test"
+    assert settings.http_allowed_capabilities == ("read", "write")
+    assert settings.http_max_request_body_bytes == 2048
 
 
 def test_pending_limit_cannot_be_smaller_than_running_limit() -> None:
@@ -67,6 +71,26 @@ def test_pending_limit_cannot_be_smaller_than_running_limit() -> None:
         (
             {"KONTOMIERZ_MOCK_DATA": "1", "MCP_TRANSPORT": "http", "MCP_HTTP_AUTH_TOKEN": HTTP_TOKEN},
             "MCP_HTTP_PRINCIPAL",
+        ),
+        (
+            {
+                "KONTOMIERZ_MOCK_DATA": "1",
+                "MCP_TRANSPORT": "http",
+                "MCP_HTTP_AUTH_TOKEN": HTTP_TOKEN,
+                "MCP_HTTP_PRINCIPAL": "operator:test",
+                "MCP_HTTP_ALLOWED_CAPABILITIES": "read,admin",
+            },
+            "MCP_HTTP_ALLOWED_CAPABILITIES",
+        ),
+        (
+            {
+                "KONTOMIERZ_MOCK_DATA": "1",
+                "MCP_TRANSPORT": "http",
+                "MCP_HTTP_AUTH_TOKEN": HTTP_TOKEN,
+                "MCP_HTTP_PRINCIPAL": "operator:test",
+                "MCP_HTTP_MAX_REQUEST_BODY_BYTES": str(4 * 1024 * 1024 + 1),
+            },
+            "MCP_HTTP_MAX_REQUEST_BODY_BYTES",
         ),
     ],
 )

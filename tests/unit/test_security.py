@@ -42,7 +42,7 @@ def test_port_must_fit_tcp_range() -> None:
 
 
 @pytest.mark.asyncio
-async def test_bearer_middleware_rejects_missing_or_wrong_token_without_entering_app() -> None:
+async def test_bearer_middleware_rejects_missing_wrong_or_duplicate_token_without_entering_app() -> None:
     entered = False
 
     async def app(scope: dict[str, Any], receive: Any, send: Any) -> None:
@@ -64,7 +64,16 @@ async def test_bearer_middleware_rejects_missing_or_wrong_token_without_entering
         await middleware({"type": "http", "headers": headers}, receive, send)
         return messages
 
-    for headers in ([], [(b"authorization", b"Bearer wrong")]):
+    cases = (
+        [],
+        [(b"authorization", b"Bearer wrong")],
+        [(b"authorization", b"Basic not-bearer")],
+        [(b"authorization", b"Bearer")],
+        [(b"authorization", b"Bearer " + b"x" * 1025)],
+        [(b"authorization", b"Bearer \xff")],
+        [(b"authorization", f"Bearer {TOKEN}".encode()), (b"authorization", f"Bearer {TOKEN}".encode())],
+    )
+    for headers in cases:
         messages = await exercise(headers)
         assert messages[0]["status"] == 401
         assert entered is False

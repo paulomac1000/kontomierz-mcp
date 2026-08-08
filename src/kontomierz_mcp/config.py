@@ -11,6 +11,8 @@ _DEFAULT_API_BASE_URL = "https://secure.kontomierz.pl/k4"
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 _TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
 _MAX_HTTP_CREDENTIAL_BYTES = 512
+_MAX_HTTP_REQUEST_BODY_BYTES = 4 * 1024 * 1024
+_HTTP_CAPABILITY_CLASSES = frozenset({"read", "write", "destructive"})
 
 
 class ConfigurationError(ValueError):
@@ -51,6 +53,19 @@ def _positive_int(env: Mapping[str, str], name: str, default: int) -> int:
     return value
 
 
+def _http_capabilities(env: Mapping[str, str]) -> tuple[str, ...]:
+    raw = env.get("MCP_HTTP_ALLOWED_CAPABILITIES", "read")
+    values = tuple(dict.fromkeys(part.strip().lower() for part in raw.split(",") if part.strip()))
+    if not values:
+        raise ConfigurationError("MCP_HTTP_ALLOWED_CAPABILITIES must contain at least one capability class")
+    invalid = sorted(set(values) - _HTTP_CAPABILITY_CLASSES)
+    if invalid:
+        raise ConfigurationError(
+            "MCP_HTTP_ALLOWED_CAPABILITIES contains invalid capability classes: " + ", ".join(invalid)
+        )
+    return values
+
+
 def _bounded_ascii_secret(value: str, name: str) -> str:
     if not value:
         raise ConfigurationError(f"{name} is required for Streamable HTTP")
@@ -85,6 +100,8 @@ class Settings:
     readiness_cache_seconds: int = 10
     http_auth_token: str = ""
     http_principal: str = ""
+    http_allowed_capabilities: tuple[str, ...] = ("read",)
+    http_max_request_body_bytes: int = 1024 * 1024
 
     @classmethod
     def from_env(
@@ -120,6 +137,8 @@ class Settings:
             readiness_cache_seconds=_positive_int(env, "MCP_READINESS_CACHE_SECONDS", 10),
             http_auth_token=env.get("MCP_HTTP_AUTH_TOKEN", "").strip(),
             http_principal=env.get("MCP_HTTP_PRINCIPAL", "").strip(),
+            http_allowed_capabilities=_http_capabilities(env),
+            http_max_request_body_bytes=_positive_int(env, "MCP_HTTP_MAX_REQUEST_BODY_BYTES", 1024 * 1024),
         )
         settings.validate()
         return settings
@@ -147,6 +166,13 @@ class Settings:
                 raise ConfigurationError("MCP_HTTP_PRINCIPAL must contain ASCII characters only") from exc
             if len(principal_bytes) > 128:
                 raise ConfigurationError("MCP_HTTP_PRINCIPAL must not exceed 128 ASCII bytes")
+            invalid_capabilities = sorted(set(self.http_allowed_capabilities) - _HTTP_CAPABILITY_CLASSES)
+            if not self.http_allowed_capabilities or invalid_capabilities:
+                raise ConfigurationError("MCP_HTTP_ALLOWED_CAPABILITIES must contain only read, write, destructive")
+            if self.http_max_request_body_bytes > _MAX_HTTP_REQUEST_BODY_BYTES:
+                raise ConfigurationError(
+                    f"MCP_HTTP_MAX_REQUEST_BODY_BYTES must not exceed {_MAX_HTTP_REQUEST_BODY_BYTES}"
+                )
         if self.max_pending_invocations < self.max_concurrency:
             raise ConfigurationError("MCP_MAX_PENDING_INVOCATIONS must be at least MCP_MAX_CONCURRENCY")
         if self.body_mode not in {"json", "form"}:

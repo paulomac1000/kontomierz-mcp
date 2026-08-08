@@ -39,6 +39,19 @@ class FakeCallToolResult:
         self.is_error = is_error
 
 
+class FakeTransportSecuritySettings:
+    def __init__(
+        self,
+        *,
+        enable_dns_rebinding_protection: bool,
+        allowed_hosts: list[str],
+        allowed_origins: list[str],
+    ) -> None:
+        self.enable_dns_rebinding_protection = enable_dns_rebinding_protection
+        self.allowed_hosts = allowed_hosts
+        self.allowed_origins = allowed_origins
+
+
 class FakeSessionManager:
     def __init__(self) -> None:
         self.entered = False
@@ -53,6 +66,8 @@ class FakeSessionManager:
 
 
 class FakeMCPServer:
+    last_instance: FakeMCPServer | None = None
+
     def __init__(self, name: str, *, version: str, instructions: str, lifespan: Any) -> None:
         self.name = name
         self.version = version
@@ -61,6 +76,8 @@ class FakeMCPServer:
         self.tools: dict[str, Any] = {}
         self.session_manager = FakeSessionManager()
         self.run_transport: str | None = None
+        self.http_settings: dict[str, Any] | None = None
+        FakeMCPServer.last_instance = self
 
     def tool(self):
         def register(function):
@@ -69,9 +86,22 @@ class FakeMCPServer:
 
         return register
 
-    def streamable_http_app(self, *, stateless_http: bool, json_response: bool):
-        assert stateless_http is True
-        assert json_response is True
+    def streamable_http_app(
+        self,
+        *,
+        stateless_http: bool,
+        json_response: bool,
+        max_request_body_size: int,
+        transport_security: FakeTransportSecuritySettings,
+        host: str,
+    ):
+        self.http_settings = {
+            "stateless_http": stateless_http,
+            "json_response": json_response,
+            "max_request_body_size": max_request_body_size,
+            "transport_security": transport_security,
+            "host": host,
+        }
 
         async def app(scope, receive, send):
             del scope, receive
@@ -88,14 +118,18 @@ def install_fake_sdk(monkeypatch: pytest.MonkeyPatch) -> None:
     mcp = ModuleType("mcp")
     mcp_types = ModuleType("mcp.types")
     mcp_server = ModuleType("mcp.server")
+    mcp_server.__path__ = []  # type: ignore[attr-defined]
+    mcp_transport_security = ModuleType("mcp.server.transport_security")
     mcp_types.TextContent = FakeTextContent
     mcp_types.CallToolResult = FakeCallToolResult
     mcp_server.MCPServer = FakeMCPServer
+    mcp_transport_security.TransportSecuritySettings = FakeTransportSecuritySettings
     mcp.types = mcp_types
     mcp.server = mcp_server
     monkeypatch.setitem(sys.modules, "mcp", mcp)
     monkeypatch.setitem(sys.modules, "mcp.types", mcp_types)
     monkeypatch.setitem(sys.modules, "mcp.server", mcp_server)
+    monkeypatch.setitem(sys.modules, "mcp.server.transport_security", mcp_transport_security)
 
 
 @pytest.mark.asyncio
@@ -132,7 +166,9 @@ async def test_tool_error_is_an_explicit_stable_call_tool_result(monkeypatch: py
 
 
 @pytest.mark.asyncio
-async def test_http_health_routes_include_dependency_readiness(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_http_health_routes_include_dependency_readiness_and_explicit_transport_policy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     install_fake_sdk(monkeypatch)
     settings = Settings(
         api_key="",
@@ -140,6 +176,7 @@ async def test_http_health_routes_include_dependency_readiness(monkeypatch: pyte
         transport="http",
         http_auth_token=HTTP_TOKEN,
         http_principal="test-operator",
+        http_max_request_body_bytes=2048,
     )
     dependency = MockKontomierzClient()
     kernel = build_kernel(settings, dependency)
@@ -152,6 +189,21 @@ async def test_http_health_routes_include_dependency_readiness(monkeypatch: pyte
     assert json.loads(live.body) == {"status": "alive"}
     assert ready.status_code == 200
     assert json.loads(ready.body) == {"status": "ready"}
+
+    mounted = routes[""].app
+    assert mounted is not None
+    fake_mcp = FakeMCPServer.last_instance
+    assert fake_mcp is not None
+    assert fake_mcp.version == __version__
+    assert fake_mcp.http_settings is not None
+    assert fake_mcp.http_settings["stateless_http"] is True
+    assert fake_mcp.http_settings["json_response"] is True
+    assert fake_mcp.http_settings["max_request_body_size"] == 2048
+    assert fake_mcp.http_settings["host"] == "127.0.0.1"
+    transport_security = fake_mcp.http_settings["transport_security"]
+    assert transport_security.enable_dns_rebinding_protection is True
+    assert transport_security.allowed_hosts == ["127.0.0.1", "127.0.0.1:*"]
+    assert transport_security.allowed_origins == ["http://127.0.0.1", "http://127.0.0.1:*"]
 
     async with app.router.lifespan_context(app):
         assert routes[""].app is not None

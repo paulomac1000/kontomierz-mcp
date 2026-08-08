@@ -9,12 +9,15 @@ import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from importlib import import_module
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as package_version
 from typing import Any
 
 from . import __version__
+from .audit import InvocationAuditState, emit_invocation_audit
+from .authorization import AuthorizationDecision, AuthorizationPolicy
 from .config import Settings
 from .errors import ApplicationError, ErrorCode, UpstreamError
 from .manifests import TOOL_DEFINITIONS, TOOL_MANIFESTS, ToolManifest, project_manifest
@@ -32,6 +35,7 @@ class InvocationKernel:
         self._settings = settings
         self._operations = operations
         self._dependency = dependency
+        self._authorization = AuthorizationPolicy(settings)
         self._semaphore = asyncio.Semaphore(settings.max_concurrency)
         self._admission_lock = asyncio.Lock()
         self._admitted_invocations = 0
@@ -152,16 +156,18 @@ class InvocationKernel:
             protocol_versions = []
         return sdk_version, protocol_versions
 
-    def capability_document(self) -> dict[str, Any]:
+    def capability_document(self, context: InvocationContext | None = None) -> dict[str, Any]:
         dependency_ready = self.cached_dependency_ready
-        projected = {
-            name: project_manifest(
+        projected: dict[str, ToolManifest] = {}
+        for name, definition in TOOL_DEFINITIONS.items():
+            selected = project_manifest(
                 definition.manifest,
                 writes_enabled=self._settings.enable_write_operations,
                 dependency_ready=dependency_ready,
             )
-            for name, definition in TOOL_DEFINITIONS.items()
-        }
+            if context is not None and not self._authorization.authorize(context, definition.manifest, {}).allowed:
+                selected = replace(selected, active_state="disabled")
+            projected[name] = selected
         tools = {name: TOOL_DEFINITIONS[name].as_dict(manifest=projected[name]) for name in TOOL_DEFINITIONS}
         active_tools = {name: contract for name, contract in tools.items() if projected[name].active_state == "active"}
         sdk_version, protocol_versions = self._sdk_identity()
@@ -177,6 +183,14 @@ class InvocationKernel:
             "profile": "authenticated-http" if self._settings.streamable_http else "local-process-principal",
             "dependency_state": dependency_state,
             "write_operations_enabled": self._settings.enable_write_operations,
+            "authorization_policy": "single-account-v1",
+            "http_state_mode": "stateless" if self._settings.streamable_http else None,
+            "http_allowed_capabilities": (
+                list(self._settings.http_allowed_capabilities) if self._settings.streamable_http else None
+            ),
+            "http_max_request_body_bytes": (
+                self._settings.http_max_request_body_bytes if self._settings.streamable_http else None
+            ),
             "supported_component_count": len(tools),
             "active_component_count": len(active_tools),
             "tools": tools,
@@ -190,21 +204,77 @@ class InvocationKernel:
         *,
         context: InvocationContext | None = None,
     ) -> dict[str, Any]:
+        request_id = uuid.uuid4().hex
+        started_at = time.monotonic()
+        audit = InvocationAuditState(request_id=request_id, tool_name=tool_name, started_at=started_at)
+        try:
+            result = await self._invoke_authorized(
+                tool_name,
+                arguments,
+                context=context,
+                request_id=request_id,
+                started_at=started_at,
+                audit=audit,
+            )
+            audit.result_category = "SUCCESS"
+            return result
+        except asyncio.CancelledError:
+            audit.result_category = ErrorCode.CANCELLED.value
+            audit.cancelled = True
+            raise
+        except ApplicationError as exc:
+            audit.result_category = exc.code.value
+            audit.ambiguous = exc.code is ErrorCode.AMBIGUOUS_OUTCOME
+            audit.saturated = exc.code is ErrorCode.RATE_LIMITED and exc.message == "Server invocation capacity is full"
+            raise
+        finally:
+            emit_invocation_audit(audit)
+
+    async def _invoke_authorized(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        *,
+        context: InvocationContext | None,
+        request_id: str,
+        started_at: float,
+        audit: InvocationAuditState,
+    ) -> dict[str, Any]:
+        invocation_context = context
+        if invocation_context is None:
+            invocation_context = (
+                InvocationContext.unauthenticated_http()
+                if self._settings.streamable_http
+                else InvocationContext.local_stdio()
+            )
+        audit.principal = invocation_context.principal
+        audit.transport = invocation_context.transport
+        audit.authenticated = invocation_context.authenticated
+        audit.dependency_state = (
+            "unknown"
+            if self.cached_dependency_ready is None
+            else ("ready" if self.cached_dependency_ready else "unavailable")
+        )
+        if not invocation_context.authenticated:
+            audit.authorization_decision = "denied"
+            audit.authorization_reason = "principal is not authenticated"
+            raise ApplicationError(ErrorCode.AUTHENTICATION_FAILED, "Calling principal is not authenticated")
         if self._closed:
             raise ApplicationError(ErrorCode.DEPENDENCY_UNAVAILABLE, "Server is shutting down", retryable=True)
+
         manifest = TOOL_MANIFESTS.get(tool_name)
         operation = self._operations.get(tool_name)
         if manifest is None or operation is None:
             raise ApplicationError(ErrorCode.RESOURCE_NOT_FOUND, f"Unknown tool: {tool_name}")
-        invocation_context = context or current_invocation_context()
-        if invocation_context is None:
-            invocation_context = (
-                InvocationContext.configured_http(self._settings)
-                if self._settings.streamable_http
-                else InvocationContext.local_stdio()
+
+        decision = self._authorization.authorize(invocation_context, manifest, arguments)
+        self._bind_authorization_audit(audit, decision, phase="initial")
+        if not decision.allowed:
+            raise ApplicationError(
+                ErrorCode.AUTHORIZATION_FAILED,
+                "Calling principal is not authorized for this capability",
             )
-        if not invocation_context.authenticated:
-            raise ApplicationError(ErrorCode.AUTHENTICATION_FAILED, "Calling principal is not authenticated")
+
         projected = project_manifest(
             manifest,
             writes_enabled=self._settings.enable_write_operations,
@@ -216,31 +286,41 @@ class InvocationKernel:
                 "The configured Kontomierz dependency is not ready",
                 retryable=manifest.retryable,
             )
-        if manifest.requires_operator_write_gate and not self._settings.enable_write_operations:
-            raise ApplicationError(
-                ErrorCode.AUTHORIZATION_FAILED,
-                "Write operations are disabled by operator policy",
-                suggestion=(
-                    "Set ENABLE_WRITE_OPERATIONS=1 in the trusted server environment "
-                    "after reviewing the target and operation."
-                ),
-            )
+        if manifest.requires_operator_write_gate:
+            if not self._settings.enable_write_operations:
+                audit.operator_gate_decision = "denied"
+                raise ApplicationError(
+                    ErrorCode.AUTHORIZATION_FAILED,
+                    "Write operations are disabled by operator policy",
+                    suggestion=(
+                        "Set ENABLE_WRITE_OPERATIONS=1 in the trusted server environment "
+                        "after reviewing the target and operation."
+                    ),
+                )
+            audit.operator_gate_decision = "allowed"
         if manifest.requires_confirmation:
+            audit.authorization_decision = "denied"
+            audit.authorization_reason = "server-verified approval authority is not configured"
             raise ApplicationError(
                 ErrorCode.AUTHORIZATION_FAILED,
                 "This capability requires a server-verified approval record, but no approval authority is configured",
             )
 
-        request_id = uuid.uuid4().hex
-        started_at = time.monotonic()
         operation_started = False
         async with self._admission_slot():
             try:
                 async with asyncio.timeout(manifest.timeout_seconds):
                     async with self._execution_slot(manifest):
+                        revalidated = self._authorization.revalidate(decision, invocation_context, manifest, arguments)
+                        self._bind_authorization_audit(audit, revalidated, phase="pre-io")
+                        if not revalidated.allowed:
+                            raise ApplicationError(
+                                ErrorCode.AUTHORIZATION_FAILED,
+                                "Authorization binding changed before operation I/O",
+                            )
                         operation_started = True
                         data = (
-                            self.capability_document()
+                            self.capability_document(invocation_context)
                             if tool_name == _CAPABILITY_TOOL
                             else await self._run(operation, arguments)
                         )
@@ -282,6 +362,21 @@ class InvocationKernel:
                 "transport": invocation_context.transport,
             },
         }
+
+    @staticmethod
+    def _bind_authorization_audit(
+        audit: InvocationAuditState,
+        decision: AuthorizationDecision,
+        *,
+        phase: str,
+    ) -> None:
+        audit.capability_id = decision.capability_id
+        audit.capability_class = decision.capability_class
+        audit.target_identity = decision.target_identity
+        audit.argument_digest = decision.argument_digest
+        audit.policy_version = decision.policy_version
+        audit.authorization_decision = f"{phase}:{'allowed' if decision.allowed else 'denied'}"
+        audit.authorization_reason = decision.reason
 
     async def close(self) -> None:
         if self._closed:
