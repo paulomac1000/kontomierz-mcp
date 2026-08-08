@@ -6,9 +6,9 @@ A loopback-first MCP server for the Kontomierz personal-finance API. The server 
 
 The current candidate is **2.0.0** because it intentionally removes legacy HTTP+SSE and the unauthenticated REST bridge and changes public date, error, pagination, and update semantics. It is not presented as formally L2+ compliant yet. Formal adoption remains blocked on reviewed hash locks, completion of the machine-readable migration assessment with provider-backed independent approval, protected release-environment administration, and contract tests against a disposable real Kontomierz account.
 
-Financial reads are confidential. Every invocation is authenticated and then authorized server-side against the exact capability and immutable configured target. HTTP principals are read-only by default through `MCP_HTTP_ALLOWED_CAPABILITIES=read`. Mutations require both an explicitly allowed HTTP capability class (for HTTP callers) and `ENABLE_WRITE_OPERATIONS=1` from the trusted server operator. A model argument cannot establish identity, authorization, or write enablement.
+Financial reads are confidential. Every invocation is authenticated and then authorized server-side against the exact capability, immutable configured target, and invocation resource identity. HTTP principals are read-only by default through `MCP_HTTP_ALLOWED_CAPABILITIES=read`. Mutations require both an explicitly allowed HTTP capability class (for HTTP callers) and `ENABLE_WRITE_OPERATIONS=1` from the trusted server operator. Destructive HTTP access additionally requires exact capability IDs in `MCP_HTTP_ALLOWED_DESTRUCTIVE_CAPABILITIES` and exact resource IDs in `MCP_HTTP_ALLOWED_DESTRUCTIVE_RESOURCES`; a broad `destructive` class alone is rejected. A model argument cannot establish identity, authorization, or write enablement.
 
-The server does **not** advertise `requires_confirmation=true` because no independent server-side approval authority exists yet; any future confirmation claim must be backed by a trusted approval record rather than a model-controlled argument. A started mutation with an uninterpretable outcome is never declared safely retryable. Each invocation emits one structured server-side audit record with principal, exact capability, target identity, policy decision, operator-gate decision, dependency state, result category, cancellation/saturation state, and correlation ID; credentials and protected response bodies are excluded.
+The server does **not** advertise `requires_confirmation=true` because no independent server-side approval authority exists yet; any future confirmation claim must be backed by a trusted approval record rather than a model-controlled argument. A started mutation with an uninterpretable outcome is never declared safely retryable. Each invocation emits one structured server-side audit record with principal, exact capability, target identity, resource identity, policy decision, operator-gate decision, dependency state, result category, cancellation/saturation state, and correlation ID; credentials and protected response bodies are excluded. The audit logger owns an INFO-capable sink independent from `LOG_LEVEL`. Audit sink failures are result-preserving fail-open because an audit failure after a started mutation must not turn a completed write into a misleading retryable application failure; a minimal stderr failure signal is attempted instead.
 
 ## Install
 
@@ -40,11 +40,20 @@ MCP_HTTP_MAX_REQUEST_BODY_BYTES=1048576 \
 .venv/bin/kontomierz-mcp
 ```
 
-Every request to the MCP application must send `Authorization: Bearer <MCP_HTTP_AUTH_TOKEN>`. The token is mapped server-side to `MCP_HTTP_PRINCIPAL`, so the model cannot choose its own principal. The principal is then authorized against the exact tool, configured target, normalized argument digest, and capability policy. The policy is revalidated immediately before operation I/O.
+Every remote HTTP request except `/health/live` must send `Authorization: Bearer <MCP_HTTP_AUTH_TOKEN>`. The token is mapped server-side to `MCP_HTTP_PRINCIPAL`, so the model cannot choose its own principal. The principal is then authorized against the exact tool, configured target, resolved resource identity, normalized argument digest, and capability policy. The policy is revalidated immediately before operation I/O.
 
-The MCP endpoint is `/mcp`; liveness and readiness remain unauthenticated at `/health/live` and `/health/ready`. Non-loopback binding is rejected. The HTTP adapter explicitly configures Host and Origin policy, stateless mode, and a bounded request body instead of relying on SDK defaults.
+The MCP endpoint is `/mcp`; liveness remains public at `/health/live`. Readiness at `/health/ready` requires the same Bearer authentication because a cache miss may trigger a bounded upstream Kontomierz probe. Non-loopback binding is rejected. The HTTP adapter explicitly configures Host and Origin policy, stateless mode, and a bounded request body instead of relying on SDK defaults.
 
-To permit HTTP writes, add `write` (and, separately, `destructive` if required) to `MCP_HTTP_ALLOWED_CAPABILITIES` **and** enable `ENABLE_WRITE_OPERATIONS=1`. Authentication alone never grants write access.
+To permit ordinary HTTP writes, add `write` to `MCP_HTTP_ALLOWED_CAPABILITIES` **and** enable `ENABLE_WRITE_OPERATIONS=1`. To permit destructive HTTP operations, also add `destructive`, then explicitly allow each destructive capability and exact resource, for example:
+
+```bash
+MCP_HTTP_ALLOWED_CAPABILITIES=read,destructive
+MCP_HTTP_ALLOWED_DESTRUCTIVE_CAPABILITIES=destroy_wallet
+MCP_HTTP_ALLOWED_DESTRUCTIVE_RESOURCES=wallet:123
+ENABLE_WRITE_OPERATIONS=1
+```
+
+Wildcards are not accepted for destructive resources. Authentication alone never grants write access.
 
 ## Docker
 
