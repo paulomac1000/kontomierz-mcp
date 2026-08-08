@@ -52,16 +52,21 @@ Do not expose API keys, Bearer tokens, raw upstream bodies, protected tool data,
 
 ## Change discipline
 
-Update tests whenever behavior, manifests, public schemas, authentication, authorization, retry semantics, target binding, resource binding, audit records, HTTP policy, or release policy changes. Keep external Kontomierz assumptions conservative until a disposable real-account test proves them. Do not convert a deferred evidence item into a positive claim merely because the mock backend passes.
+Update tests whenever behavior, manifests, public schemas, authentication, authorization, retry semantics, target binding, resource binding, audit records, HTTP policy, dependency locks, or release policy changes. Keep external Kontomierz assumptions conservative until a disposable real-account test proves them. Do not convert a deferred evidence item into a positive claim merely because the mock backend passes.
+
+Runtime and development dependencies for supported Linux x64 Python 3.11, 3.12, and 3.13 lanes are committed as exact-wheel hash locks under `requirements/`; build tooling uses a separate shared hash lock. Acceptance workflows must install the selected locks with `--require-hashes --no-deps --only-binary=:all:` and run `pip check`. Do not fall back to unconstrained resolution in quality, compatibility, exact-artifact, Docker, or release paths.
 
 GitHub Actions must use immutable action revisions, explicit permissions, concrete runners, job timeouts, and the workflow profile declared in `.github/workflow-policy.yaml`. Trusted `ai-skills` validators must be checked out at the pinned immutable revision and moved outside the candidate tree before auditing it.
 
 ## Completion gate
 
-Create and activate a virtual environment before running repository commands. The commands below mirror executable CI gates and are the completion contract:
+Create and activate a virtual environment before running repository commands. The commands below mirror the Linux x64 executable CI gate and are the completion contract:
 
 ```bash
-python -m pip install -e ".[dev]"
+PYTAG="$(python -c 'import sys; print(f"py{sys.version_info.major}{sys.version_info.minor}")')"
+python -m pip install --no-deps --only-binary=:all: --require-hashes -r "requirements/dev-linux-x64-${PYTAG}.lock"
+python -m pip install --no-deps --only-binary=:all: --require-hashes -r requirements/build-linux-x64.lock
+python -m pip install --no-deps --no-build-isolation -e .
 python -m pip check
 python -m ruff check .
 python -m ruff format --check .
@@ -72,10 +77,10 @@ python -m pytest -m "not external" --cov=kontomierz_mcp --cov-branch --cov-repor
 python scripts/mock_smoke.py
 ```
 
-The hosted exact-artifact job additionally builds one application wheel, installs it without network access from the closed wheelhouse, runs official-client stdio and authenticated Streamable HTTP smoke tests, verifies Docker installation checksums, and smoke-tests the exact container before preserving the release archive.
+The hosted exact-artifact job additionally builds one application wheel, installs the Python 3.12 runtime lock without network resolution from the closed wheelhouse, runs official-client stdio and authenticated Streamable HTTP smoke tests on the runtime-only environment, runs the normal test suite against the installed wheel outside the source tree, verifies Docker installation checksums and the runtime lock, and smoke-tests the exact non-root container before preserving the release archive.
 
 Tests that require a disposable real Kontomierz account or provider/repository administration remain in the external evidence suite. They intentionally fail when selected until an authorized agent supplies the missing evidence. Do not convert them to unconditional skips or xfails merely to make CI green, and never run destructive external tests against a personal or non-disposable account. See the production-readiness guide under docs for the exact handoff.
 
 ## Documentation and release
 
-When public behavior changes, update README, changelog when release-visible, system architecture, tool contract, upstream assumptions, and the ai-skills gap assessment as appropriate. A structural migration assessment may record real evidence and unresolved blockers, but it cannot be used to claim approval. Do not claim formal L2+ adoption until the exact immutable revision has the required hosted evidence, reviewed dependency locks, provider-backed migration assessment, real-system evidence, protected release configuration, and independent approval.
+When public behavior changes, update README, changelog when release-visible, system architecture, tool contract, upstream assumptions, and the ai-skills gap assessment as appropriate. A structural migration assessment may record real evidence and unresolved blockers, but it cannot be used to claim approval. Do not claim formal L2+ adoption until the exact immutable revision has provider-backed migration assessment, real-system evidence, protected release configuration, provider-verifiable build provenance, and independent approval.
