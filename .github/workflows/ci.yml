@@ -58,7 +58,7 @@ jobs:
         run: >-
           python -m pytest -m "not external"
           --cov=kontomierz_mcp --cov-branch --cov-report=term-missing
-          --cov-report=xml --junitxml=pytest-junit.xml
+          --cov-report=xml
       - name: Mock all-tools smoke
         run: python scripts/mock_smoke.py
       - name: Upload quality evidence
@@ -68,7 +68,6 @@ jobs:
           name: quality-evidence-${{ env.CANDIDATE_SHA }}
           path: |
             coverage.xml
-            pytest-junit.xml
             requirements/*.lock
           if-no-files-found: warn
           retention-days: 14
