@@ -4,7 +4,7 @@ A loopback-first MCP server for the Kontomierz personal-finance API. The server 
 
 ## Security and migration status
 
-The current candidate is **2.0.0** because it intentionally removes legacy HTTP+SSE and the unauthenticated REST bridge and changes public date, error, pagination, and update semantics. It is not presented as formally L2+ compliant yet. Formal adoption remains blocked on reviewed hash locks, completion of the machine-readable migration assessment with provider-backed independent approval, protected release-environment administration, and contract tests against a disposable real Kontomierz account.
+The current candidate is **2.0.0** because it intentionally removes legacy HTTP+SSE and the unauthenticated REST bridge and changes public date, error, pagination, and update semantics. It is not presented as formally L2+ compliant yet. Formal adoption remains blocked on provider-backed migration assessment with independent approval, protected release-environment administration, provider-verifiable build provenance, and contract tests against a disposable real Kontomierz account.
 
 Financial reads are confidential. Every invocation is authenticated and then authorized server-side against the exact capability, immutable configured target, and invocation resource identity. HTTP principals are read-only by default through `MCP_HTTP_ALLOWED_CAPABILITIES=read`. Mutations require both an explicitly allowed HTTP capability class (for HTTP callers) and `ENABLE_WRITE_OPERATIONS=1` from the trusted server operator. Destructive HTTP access additionally requires exact capability IDs in `MCP_HTTP_ALLOWED_DESTRUCTIVE_CAPABILITIES` and exact resource IDs in `MCP_HTTP_ALLOWED_DESTRUCTIVE_RESOURCES`; a broad `destructive` class alone is rejected. A model argument cannot establish identity, authorization, or write enablement.
 
@@ -12,9 +12,15 @@ The server does **not** advertise `requires_confirmation=true` because no indepe
 
 ## Install
 
+The production/tested dependency locks target Linux x64 and Python 3.11, 3.12, or 3.13. Create a virtual environment and install the matching exact-wheel development graph plus the shared build graph before installing the project without dependency resolution:
+
 ```bash
 python3 -m venv .venv
-.venv/bin/python -m pip install -e ".[dev]"
+PYTAG="$(.venv/bin/python -c 'import sys; print(f"py{sys.version_info.major}{sys.version_info.minor}")')"
+.venv/bin/python -m pip install --no-deps --only-binary=:all: --require-hashes -r "requirements/dev-linux-x64-${PYTAG}.lock"
+.venv/bin/python -m pip install --no-deps --only-binary=:all: --require-hashes -r requirements/build-linux-x64.lock
+.venv/bin/python -m pip install --no-deps --no-build-isolation -e .
+.venv/bin/python -m pip check
 cp .env.example .env
 ```
 
@@ -55,14 +61,21 @@ ENABLE_WRITE_OPERATIONS=1
 
 Wildcards are not accepted for destructive resources. Authentication alone never grants write access.
 
+## Reproducible dependency graphs
+
+`requirements/` contains exact Linux x64 wheel locks for runtime and development on Python 3.11, 3.12, and 3.13, plus a shared build-tool lock. Each requirement is pinned to an exact version and SHA-256 wheel digest. CI installs these files with `--require-hashes --no-deps --only-binary=:all:` and then runs `pip check`, so acceptance paths cannot silently resolve undeclared transitive dependencies.
+
+The exact release artifact uses the Python 3.12 runtime lock. That lock and the build lock are copied into the release bundle and covered by its checksum manifest.
+
 ## Docker
 
-Docker consumes an already-built wheel and wheelhouse rather than resolving dependencies during the image build. The build verifies `dist/SHA256SUMS` before installing the wheel:
+Docker consumes an already-built wheel and the hash-locked runtime wheelhouse rather than resolving dependencies during the image build. The build verifies `dist/SHA256SUMS` and installs the exact runtime graph with `--require-hashes` before installing the application wheel:
 
 ```bash
 .venv/bin/python -m pip wheel --no-deps --no-build-isolation . --wheel-dir dist
 mkdir -p dist/wheelhouse
-.venv/bin/python -m pip download --dest dist/wheelhouse dist/kontomierz_mcp-*.whl
+.venv/bin/python -m pip download --no-deps --only-binary=:all: --require-hashes \
+  --dest dist/wheelhouse -r requirements/runtime-linux-x64-py312.lock
 (cd dist && find . -type f -name '*.whl' -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
 docker build -t kontomierz-mcp:local .
 ```
