@@ -11,16 +11,19 @@ verification: Run the normal completion gate, then run the external evidence sui
 
 ## Current boundary
 
-The repository is intended to be a production-quality candidate before real Kontomierz and repository-administration evidence is supplied. Runtime behavior, schemas, authentication, exact-resource authorization, audit, readiness, packaging, official MCP transports, and the closed release artifact are exercised by the normal automated gate.
+The repository is intended to be a production-quality candidate before real Kontomierz and repository-administration evidence is supplied. Runtime behavior, schemas, authentication, exact-resource authorization, audit, readiness, hash-locked dependency installation, packaging, official MCP transports, and the closed release artifact are exercised by the normal automated gate.
 
 The repository deliberately does not convert unavailable real-system or provider evidence into a passing claim. Those gaps are encoded as `external` tests that fail with `NOT IMPLEMENTED` when explicitly selected. An agent with the required disposable Kontomierz account or GitHub administration/reviewer access should implement those tests rather than delete, skip, or weaken them.
 
 ## Normal completion gate
 
-Run from an activated virtual environment:
+Run from an activated Linux x64 virtual environment on Python 3.11, 3.12, or 3.13:
 
 ```bash
-python -m pip install -e ".[dev]"
+PYTAG="$(python -c 'import sys; print(f"py{sys.version_info.major}{sys.version_info.minor}")')"
+python -m pip install --no-deps --only-binary=:all: --require-hashes -r "requirements/dev-linux-x64-${PYTAG}.lock"
+python -m pip install --no-deps --only-binary=:all: --require-hashes -r requirements/build-linux-x64.lock
+python -m pip install --no-deps --no-build-isolation -e .
 python -m pip check
 python -m ruff check .
 python -m ruff format --check .
@@ -31,7 +34,7 @@ python -m pytest -m "not external" --cov=kontomierz_mcp --cov-branch --cov-repor
 python scripts/mock_smoke.py
 ```
 
-Hosted CI must additionally pass the exact-artifact job for the same immutable SHA: build one wheel, install it without network resolution from the closed wheelhouse, run official-client stdio and authenticated Streamable HTTP smoke, verify the container install inputs, smoke the non-root image, and preserve the exact release bundle.
+Hosted CI additionally runs the same locked development graph on Python 3.11, 3.12, and 3.13. The exact-artifact job uses the Python 3.12 runtime lock to materialize the wheelhouse, installs a runtime-only exact-wheel environment without network resolution, runs official-client stdio and authenticated Streamable HTTP smoke, tests the installed wheel outside the source tree in a separate locked test environment, verifies the container install inputs and runtime lock, smoke-tests the non-root image, and preserves the exact release bundle. The runtime and build locks are included in the release bundle and covered by its checksum manifest.
 
 ## External evidence gate
 
@@ -62,7 +65,6 @@ Never run destructive external tests against a personal or non-disposable accoun
 
 `tests/external/test_production_evidence.py` requires trusted provider/repository access and must prove:
 
-- reviewed runtime and development dependency locks with hashes for every declared Python/platform lane, installed with `--require-hashes` and validated by `pip check`;
 - an existing protected GitHub `release` environment with required reviewers, self-review prevention, and protected-branch deployment policy;
 - a schema-valid provider-backed `migration-assessment.yaml` bound to the final immutable revision and a real independent GitHub review;
 - provider-verifiable build provenance for the read-only build in addition to promotion evidence.
@@ -73,11 +75,10 @@ Do not invent run IDs, artifact IDs, reviewer IDs, digests, or approval records.
 
 The candidate may be treated as fully production/adoption complete only when all of the following are true on one final immutable revision:
 
-1. the normal completion gate is green;
+1. the normal hash-locked completion gate is green;
 2. the hosted exact-artifact gate is green;
 3. every `external` placeholder has been replaced by executable verification and `python -m pytest -m external -q` is green;
-4. reviewed hash locks are committed and used by acceptance/install paths;
-5. the `release` environment is administratively protected;
-6. an independent reviewer has submitted the real review required by the canonical adoption schema;
-7. provider-backed migration assessment and build provenance verify against the same final revision;
-8. no documentation or manifest claims a stronger guarantee than those executable checks prove.
+4. the `release` environment is administratively protected;
+5. an independent reviewer has submitted the real review required by the canonical adoption schema;
+6. provider-backed migration assessment and build provenance verify against the same final revision;
+7. no documentation or manifest claims a stronger guarantee than those executable checks prove.
