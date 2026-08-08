@@ -26,8 +26,9 @@ All notable changes to kontomierz-mcp are recorded here.
 - Intentional Streamable HTTP Host/Origin policy, stateless mode, bounded request bodies, authenticated readiness, and adversarial pre-I/O tests.
 - Bounded admission, running concurrency, per-target write serialization, dependency-aware readiness, and conservative ambiguous-write handling.
 - Deterministic mock backend, all-tool smoke, official-client tests, and intentionally failing external evidence placeholders for real-system and provider-only acceptance work.
-- Exact-wheel and exact-image CI promotion, protected release environment, default-branch ancestry proof, registry digest comparison, and promotion attestation.
-- AFDS architecture, contract, upstream, migration, and standards-gap documentation plus root `AGENTS.md`.
+- Exact Linux x64 runtime/development wheel locks for Python 3.11, 3.12, and 3.13 plus a separate build-tool lock; acceptance installs use exact SHA-256 wheel hashes without dependency resolution.
+- Exact-wheel and exact-image CI promotion, locked runtime wheelhouse, protected release environment, default-branch ancestry proof, registry digest comparison, and promotion attestation.
+- AFDS architecture, contract, upstream, migration, production-readiness, and standards-gap documentation plus root `AGENTS.md`.
 
 ### Security
 
