@@ -104,7 +104,7 @@ jobs:
 
   standards:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
@@ -115,32 +115,30 @@ jobs:
         with:
           repository: paulomac1000/ai-skills
           ref: ${{ env.AI_SKILLS_REV }}
-          path: .trusted-ai-skills
+          path: .trusted/ai-skills
           persist-credentials: false
       - name: Move trusted verifier outside candidate tree
         run: |
-          rm -rf /tmp/trusted-ai-skills
-          mv .trusted-ai-skills /tmp/trusted-ai-skills
+          set -euo pipefail
+          mv .trusted/ai-skills "$RUNNER_TEMP/ai-skills"
+          rmdir .trusted
+          test "$(git -C "$RUNNER_TEMP/ai-skills" rev-parse HEAD)" = "$AI_SKILLS_REV"
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v6
         with:
           python-version: "3.12"
       - name: Install trusted validator lock
         run: >-
-          python -m pip install
-          --only-binary=:all:
-          --require-hashes
-          -r /tmp/trusted-ai-skills/requirements/validators.lock
+          python -m pip install --require-hashes
+          -r "$RUNNER_TEMP/ai-skills/requirements-dev-linux-x64-py312.lock"
       - name: Validate governed documents with trusted AFDS validator
-        run: python /tmp/trusted-ai-skills/skills/afds-standard/scripts/validate_afds.py .
+        run: python "$RUNNER_TEMP/ai-skills/skills/afds-doc-writer/validate.py" AGENTS.md docs
       - name: Audit AGENTS instructions from trusted revision
         run: >-
-          python /tmp/trusted-ai-skills/skills/agents-md-standard/scripts/audit_agents_instructions.py
-          . --ci-mode
+          python "$RUNNER_TEMP/ai-skills/skills/agents-md-architect/tools/audit_agents_md.py"
+          . --profile mcp-server --layout single --language en --strict
       - name: Audit workflows from trusted revision
         run: >-
-          python /tmp/trusted-ai-skills/skills/ci-cd/scripts/audit_workflows.py
-          --repo-root .
-          --policy .github/workflow-policy.yaml
+          python "$RUNNER_TEMP/ai-skills/skills/ci-cd-architect/tools/check_github_actions_policy.py" .
 
   exact-artifact:
     needs: [quality, compatibility, standards]
@@ -166,12 +164,14 @@ jobs:
             -r requirements/build-linux-x64.lock
       - name: Build exact application wheel
         run: |
+          set -euo pipefail
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           rm -rf dist build src/*.egg-info
           python -m pip wheel --no-deps --no-build-isolation . --wheel-dir dist
           test "$(find dist -maxdepth 1 -type f -name 'kontomierz_mcp-*.whl' | wc -l)" -eq 1
       - name: Materialize hash-locked runtime wheelhouse
         run: |
+          set -euo pipefail
           mkdir -p dist/wheelhouse
           python -m pip download \
             --no-deps \
@@ -182,10 +182,12 @@ jobs:
           (
             cd dist
             find . -type f -name '*.whl' -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+            sha256sum --check SHA256SUMS
           )
-      - name: Install exact wheel without network
+      - name: Install runtime-only exact wheel without network
         run: |
-          rm -rf .artifact-venv /tmp/kontomierz-wheel-test
+          set -euo pipefail
+          rm -rf .artifact-venv
           python -m venv .artifact-venv
           .artifact-venv/bin/python -m pip install \
             --no-index \
@@ -196,35 +198,50 @@ jobs:
             -r requirements/runtime-linux-x64-py312.lock
           .artifact-venv/bin/python -m pip install --no-index --no-deps dist/kontomierz_mcp-*.whl
           .artifact-venv/bin/python -m pip check
+          .artifact-venv/bin/python -c "import kontomierz_mcp; print(kontomierz_mcp.__version__)"
+          .artifact-venv/bin/python scripts/mock_smoke.py
+      - name: Test exact wheel outside source tree
+        run: |
+          set -euo pipefail
+          rm -rf .artifact-test-venv /tmp/kontomierz-wheel-test
+          python -m venv .artifact-test-venv
+          .artifact-test-venv/bin/python -m pip install \
+            --no-deps --only-binary=:all: --require-hashes \
+            -r requirements/dev-linux-x64-py312.lock
+          .artifact-test-venv/bin/python -m pip install --no-index --no-deps dist/kontomierz_mcp-*.whl
+          .artifact-test-venv/bin/python -m pip check
           mkdir -p /tmp/kontomierz-wheel-test
           cp -R tests scripts pyproject.toml /tmp/kontomierz-wheel-test/
           (
             cd /tmp/kontomierz-wheel-test
-            "$GITHUB_WORKSPACE/.artifact-venv/bin/python" -m pytest -m "not external" -q
+            "$GITHUB_WORKSPACE/.artifact-test-venv/bin/python" -m pytest -m "not external" -q
           )
-          .artifact-venv/bin/python scripts/mock_smoke.py
-      - name: Official Client stdio smoke from exact wheel
+      - name: Official Client stdio smoke from runtime-only exact wheel
         run: >-
           .artifact-venv/bin/python scripts/transport_smoke.py stdio
           --executable .artifact-venv/bin/kontomierz-mcp
-      - name: Official Client authenticated HTTP smoke from exact wheel
+      - name: Official Client authenticated HTTP smoke from runtime-only exact wheel
         run: >-
           .artifact-venv/bin/python scripts/transport_smoke.py streamable-http
           --executable .artifact-venv/bin/kontomierz-mcp
       - name: Build and smoke image from exact wheel
         run: |
-          docker build -t "kontomierz-mcp:${SOURCE_SHA}" .
-          docker run --rm "kontomierz-mcp:${SOURCE_SHA}" python -c \
+          set -euo pipefail
+          docker build --pull=false -t "kontomierz-mcp:${SOURCE_SHA}" .
+          docker run --rm --entrypoint python "kontomierz-mcp:${SOURCE_SHA}" -c \
             "import os, kontomierz_mcp; assert os.geteuid() != 0; print(kontomierz_mcp.__version__)"
-          docker save "kontomierz-mcp:${SOURCE_SHA}" | gzip -n > dist/kontomierz-mcp-image.tar.gz
       - name: Close release artifact set
         run: |
+          set -euo pipefail
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
-          (
-            cd dist
-            find . -maxdepth 1 -type f \( -name '*.whl' -o -name 'kontomierz-mcp-image.tar.gz' \) \
-              -print0 | sort -z | xargs -0 sha256sum > RELEASE_SHA256SUMS
-          )
+          IMAGE_ID="$(docker image inspect --format '{{.Id}}' "kontomierz-mcp:$SOURCE_SHA")"
+          WHEEL_SHA="$(sha256sum dist/kontomierz_mcp-*.whl | awk '{print $1}')"
+          python - "$SOURCE_SHA" "$IMAGE_ID" "$WHEEL_SHA" > dist/IMAGE_METADATA.json <<'PY'
+          import json
+          import sys
+          print(json.dumps({"source_sha": sys.argv[1], "image_id": sys.argv[2], "wheel_sha256": sys.argv[3]}, sort_keys=True))
+          PY
+          docker save "kontomierz-mcp:${SOURCE_SHA}" | gzip -n > dist/kontomierz-mcp-image.tar.gz
           cp requirements/runtime-linux-x64-py312.lock dist/
           cp requirements/build-linux-x64.lock dist/
           cat > dist/BUILD_METADATA <<EOF
@@ -233,6 +250,18 @@ jobs:
           RUNTIME_LOCK=requirements/runtime-linux-x64-py312.lock
           BUILD_LOCK=requirements/build-linux-x64.lock
           EOF
+          (
+            cd dist
+            find . -maxdepth 1 -type f \( \
+              -name 'kontomierz_mcp-*.whl' -o \
+              -name 'kontomierz-mcp-image.tar.gz' -o \
+              -name 'SHA256SUMS' -o \
+              -name 'IMAGE_METADATA.json' -o \
+              -name 'BUILD_METADATA' -o \
+              -name '*.lock' \
+            \) -print0 | sort -z | xargs -0 sha256sum > RELEASE_SHA256SUMS
+            sha256sum --check RELEASE_SHA256SUMS
+          )
       - name: Upload exact closed release bundle
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
@@ -243,6 +272,7 @@ jobs:
             dist/kontomierz-mcp-image.tar.gz
             dist/SHA256SUMS
             dist/RELEASE_SHA256SUMS
+            dist/IMAGE_METADATA.json
             dist/BUILD_METADATA
             dist/runtime-linux-x64-py312.lock
             dist/build-linux-x64.lock
