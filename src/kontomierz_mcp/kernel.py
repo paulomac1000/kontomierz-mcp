@@ -165,7 +165,7 @@ class InvocationKernel:
                 writes_enabled=self._settings.enable_write_operations,
                 dependency_ready=dependency_ready,
             )
-            if context is not None and not self._authorization.authorize(context, definition.manifest, {}).allowed:
+            if context is not None and not self._authorization.capability_allowed(context, definition.manifest):
                 selected = replace(selected, active_state="disabled")
             projected[name] = selected
         tools = {name: TOOL_DEFINITIONS[name].as_dict(manifest=projected[name]) for name in TOOL_DEFINITIONS}
@@ -183,7 +183,7 @@ class InvocationKernel:
             "profile": "authenticated-http" if self._settings.streamable_http else "local-process-principal",
             "dependency_state": dependency_state,
             "write_operations_enabled": self._settings.enable_write_operations,
-            "authorization_policy": "single-account-v1",
+            "authorization_policy": "single-account-resource-v2",
             "http_state_mode": "stateless" if self._settings.streamable_http else None,
             "http_allowed_capabilities": (
                 list(self._settings.http_allowed_capabilities) if self._settings.streamable_http else None
@@ -373,6 +373,7 @@ class InvocationKernel:
         audit.capability_id = decision.capability_id
         audit.capability_class = decision.capability_class
         audit.target_identity = decision.target_identity
+        audit.resource_identity = decision.resource_identity
         audit.argument_digest = decision.argument_digest
         audit.policy_version = decision.policy_version
         audit.authorization_decision = f"{phase}:{'allowed' if decision.allowed else 'denied'}"
