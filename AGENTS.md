@@ -14,7 +14,7 @@ verification:
 
 ## Scope and risk contract
 
-This repository is a financial MCP server. Reads can expose confidential financial or personal data. Writes can create, change, or delete persistent financial records. Treat target selection, authentication, authorization, write enablement, ambiguous outcomes, release permissions, and dependency identity as safety boundaries. Never weaken a fail-closed control merely to satisfy a test or validator.
+This repository is a financial MCP server. Reads can expose confidential financial or personal data. Writes can create, change, or delete persistent financial records. Treat target selection, authentication, authorization, resource identity, write enablement, ambiguous outcomes, release permissions, and dependency identity as safety boundaries. Never weaken a fail-closed control merely to satisfy a test or validator.
 
 These instructions use the single-repository MCP-server profile. The root file is the only AGENTS.md for the candidate tree.
 
@@ -22,8 +22,8 @@ These instructions use the single-repository MCP-server profile. The root file i
 
 - `src/kontomierz_mcp/config.py` owns immutable startup configuration and unsafe-configuration rejection.
 - `src/kontomierz_mcp/security.py` owns process-derived stdio identity and Streamable HTTP authentication context.
-- `src/kontomierz_mcp/authorization.py` owns server-side principal/capability/target authorization and pre-I/O revalidation.
-- `src/kontomierz_mcp/audit.py` owns bounded structured invocation audit events.
+- `src/kontomierz_mcp/authorization.py` owns server-side principal/capability/target/resource authorization and pre-I/O revalidation.
+- `src/kontomierz_mcp/audit.py` owns bounded structured invocation audit events and the audit-only logging sink.
 - `src/kontomierz_mcp/client.py` owns upstream HTTP behavior and typed dependency failures.
 - `src/kontomierz_mcp/operation_support.py` owns shared domain validation.
 - `src/kontomierz_mcp/operation_primary.py` and `src/kontomierz_mcp/operation_secondary.py` own transport-independent handlers.
@@ -40,19 +40,19 @@ Keep transports thin. Do not call the Kontomierz adapter directly from an MCP wr
 
 ## Safety invariants
 
-Stdio may use a process-derived local principal. Streamable HTTP must authenticate a request-scoped principal before MCP handling and remains loopback-only. Authentication is not authorization: every invocation must pass the application-owned principal/capability/target policy, and that binding must be revalidated immediately before operation I/O. Do not accept a principal, capability allowlist, write-enable flag, approval, target override, or credential from model-controlled tool arguments.
+Stdio may use a process-derived local principal. Streamable HTTP must authenticate a request-scoped principal before MCP handling or any readiness path that may contact the upstream dependency and remains loopback-only. The HTTP liveness route may remain public only because it performs no dependency I/O. Authentication is not authorization: every invocation must pass the application-owned principal/capability/target/resource policy, and that binding must be revalidated immediately before operation I/O. Do not accept a principal, capability allowlist, destructive resource allowlist, write-enable flag, approval, target override, or credential from model-controlled tool arguments.
 
-HTTP defaults to read-only authorization. Granting `write` or `destructive` through `MCP_HTTP_ALLOWED_CAPABILITIES` is a trusted deployment-policy change and does not replace the independent `ENABLE_WRITE_OPERATIONS` gate. Mutations require both applicable controls.
+HTTP defaults to read-only authorization. Granting `write` through `MCP_HTTP_ALLOWED_CAPABILITIES` is a trusted deployment-policy change and does not replace the independent `ENABLE_WRITE_OPERATIONS` gate. Granting `destructive` additionally requires narrow server-owned `MCP_HTTP_ALLOWED_DESTRUCTIVE_CAPABILITIES` and exact `MCP_HTTP_ALLOWED_DESTRUCTIVE_RESOURCES`; wildcard destructive resources are forbidden. Mutations require all applicable controls.
 
-The current server has no independent approval authority, so manifests must not claim confirmation. If a future manifest requires confirmation, invocation must remain fail-closed until a trusted approval record bound to principal, capability, target, and argument digest is verified server-side.
+The current server has no independent approval authority, so manifests must not claim confirmation. If a future manifest requires confirmation, invocation must remain fail-closed until a trusted approval record bound to principal, capability, target, resource, and argument digest is verified server-side.
 
 Never automatically retry mutations. A timeout, transport loss, malformed response after a successful HTTP mutation, or other ambiguous post-start failure must stay `AMBIGUOUS_OUTCOME` until exact target state is reconciled. Preserve per-target serialization for capabilities that are not concurrency-safe.
 
-Do not expose API keys, Bearer tokens, raw upstream bodies, protected tool data, or raw arguments in audit events. Principal identity belongs in server-side audit records but not model-visible tool results. Health endpoints may report bounded status only.
+Do not expose API keys, Bearer tokens, raw upstream bodies, protected tool data, or raw arguments in audit events. Principal and resource identity belong in server-side audit records but not model-visible tool results. The audit sink must not be disabled by ordinary `LOG_LEVEL`; its result-preserving fail-open policy exists to avoid converting a completed mutation into a misleading application failure after I/O. Health endpoints may report bounded status only.
 
 ## Change discipline
 
-Update tests whenever behavior, manifests, public schemas, authentication, authorization, retry semantics, target binding, audit records, HTTP policy, or release policy changes. Keep external Kontomierz assumptions conservative until a disposable real-account test proves them. Do not convert a deferred evidence item into a positive claim merely because the mock backend passes.
+Update tests whenever behavior, manifests, public schemas, authentication, authorization, retry semantics, target binding, resource binding, audit records, HTTP policy, or release policy changes. Keep external Kontomierz assumptions conservative until a disposable real-account test proves them. Do not convert a deferred evidence item into a positive claim merely because the mock backend passes.
 
 GitHub Actions must use immutable action revisions, explicit permissions, concrete runners, job timeouts, and the workflow profile declared in `.github/workflow-policy.yaml`. Trusted `ai-skills` validators must be checked out at the pinned immutable revision and moved outside the candidate tree before auditing it.
 
@@ -74,7 +74,7 @@ python scripts/mock_smoke.py
 
 The hosted exact-artifact job additionally builds one application wheel, installs it without network access from the closed wheelhouse, runs official-client stdio and authenticated Streamable HTTP smoke tests, verifies Docker installation checksums, and smoke-tests the exact container before preserving the release archive.
 
-Tests that require a disposable real Kontomierz account remain explicit external evidence. Do not run them against a personal or non-disposable account.
+Tests that require a disposable real Kontomierz account or provider/repository administration remain explicit `external` evidence. They intentionally fail with `NOT IMPLEMENTED` when selected until an authorized agent supplies the evidence. Do not convert them to unconditional skips or xfails merely to make CI green, and never run destructive external tests against a personal or non-disposable account. The exact handoff is documented in `docs/production-readiness.md`.
 
 ## Documentation and release
 
