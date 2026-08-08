@@ -78,9 +78,7 @@ def _csv_values(env: Mapping[str, str], name: str) -> tuple[str, ...]:
 def _destructive_capabilities(env: Mapping[str, str]) -> tuple[str, ...]:
     values = _csv_values(env, "MCP_HTTP_ALLOWED_DESTRUCTIVE_CAPABILITIES")
     invalid = [
-        value
-        for value in values
-        if _CAPABILITY_ID.fullmatch(value) is None or value not in _DESTRUCTIVE_CAPABILITIES
+        value for value in values if _CAPABILITY_ID.fullmatch(value) is None or value not in _DESTRUCTIVE_CAPABILITIES
     ]
     if invalid:
         raise ConfigurationError(

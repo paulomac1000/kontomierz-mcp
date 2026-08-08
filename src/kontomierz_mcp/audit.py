@@ -71,9 +71,7 @@ def configure_audit_sink(*, stream: TextIO | None = None, replace: bool = False)
 def _fallback_audit_failure() -> None:
     """Emit a minimal operational signal without changing the invocation result."""
     try:
-        sys.stderr.write(
-            '{"event":"mcp_audit_emission_failure","policy":"fail-open-result-preserving"}\n'
-        )
+        sys.stderr.write('{"event":"mcp_audit_emission_failure","policy":"fail-open-result-preserving"}\n')
         sys.stderr.flush()
     except Exception:
         return
