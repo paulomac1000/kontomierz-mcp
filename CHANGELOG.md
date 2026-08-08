@@ -13,24 +13,28 @@ All notable changes to kontomierz-mcp are recorded here.
 - Changed update inputs so `None` means omission and an empty string can intentionally clear supported text fields.
 - Replaced the synchronous dependency adapter with native asynchronous I/O.
 - Streamable HTTP authorization is read-only by default; write/destructive capability classes require explicit server-side opt-in in addition to the operator write gate.
+- Streamable HTTP readiness now requires Bearer authentication because a readiness cache miss may perform upstream network I/O; `/health/live` remains public.
 
 ### Added
 
 - One governed catalog for tool signatures, descriptions, schemas, versions, manifests, active state, and registration.
 - Complete multi-axis capability manifests and supported-versus-active capability discovery.
-- Explicit application-owned authorization binding principal, exact capability, immutable configured target, and normalized arguments, with pre-I/O revalidation.
-- One structured server-side audit event per invocation with principal, policy decision, target, result category, and correlation data without credentials or protected response bodies.
-- Intentional Streamable HTTP Host/Origin policy, stateless mode, and bounded request bodies with adversarial pre-I/O tests.
+- Explicit application-owned authorization binding principal, exact capability, immutable configured target, exact resource identity, and normalized arguments, with pre-I/O revalidation.
+- Narrow remote destructive authorization with explicit capability and exact-resource allowlists; broad `destructive` class access alone is rejected.
+- One structured server-side audit event per invocation with principal, policy decision, target, resource identity, result category, and correlation data without credentials or protected response bodies.
+- An audit-only INFO sink independent from ordinary `LOG_LEVEL`, with result-preserving fail-open behavior on sink failure.
+- Intentional Streamable HTTP Host/Origin policy, stateless mode, bounded request bodies, authenticated readiness, and adversarial pre-I/O tests.
 - Bounded admission, running concurrency, per-target write serialization, dependency-aware readiness, and conservative ambiguous-write handling.
-- Deterministic mock backend, all-tool smoke, official-client test scaffolding, and explicit real-system TODOs.
+- Deterministic mock backend, all-tool smoke, official-client tests, and intentionally failing external evidence placeholders for real-system and provider-only acceptance work.
 - Exact-wheel and exact-image CI promotion, protected release environment, default-branch ancestry proof, registry digest comparison, and promotion attestation.
 - AFDS architecture, contract, upstream, migration, and standards-gap documentation plus root `AGENTS.md`.
 
 ### Security
 
-- Non-loopback HTTP binding remains forbidden; loopback HTTP requires request-scoped Bearer authentication and explicit server-side capability/target authorization.
+- Non-loopback HTTP binding remains forbidden; loopback HTTP requires request-scoped Bearer authentication and explicit server-side capability/target/resource authorization.
 - Financial reads are classified as confidential; every mutation requires the trusted operator write gate and HTTP writes require an independently allowed capability class.
-- Missing or invalid credentials, Host/Origin policy violations, and oversized HTTP bodies are rejected before operation I/O.
+- HTTP destructive operations require both an explicitly allowlisted capability ID and the exact resource identity; wildcard resource grants are not accepted.
+- Missing or invalid credentials, Host/Origin policy violations, oversized HTTP bodies, and unauthenticated readiness requests are rejected before operation/dependency I/O.
 - Any uninterpretable successful response to a mutation is treated as a potentially completed write.
 - No mutation is declared replay-safe or automatically retryable without real-system evidence.
 
