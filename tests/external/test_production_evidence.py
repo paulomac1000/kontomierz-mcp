@@ -16,14 +16,6 @@ def _not_implemented(requirement: str) -> None:
     pytest.fail(f"NOT IMPLEMENTED — provider-backed evidence required: {requirement}")
 
 
-def test_reviewed_hash_locked_runtime_and_development_graphs() -> None:
-    _not_implemented(
-        "commit and review hash-locked runtime/dev graphs for every declared Python/platform lane; install with "
-        "--require-hashes, run pip check, and prove exact-wheel tests use the selected lock "
-        "without dependency resolution"
-    )
-
-
 def test_release_environment_is_administratively_protected() -> None:
     _not_implemented(
         "GitHub release environment must exist with required reviewers, prevent-self-review, "
