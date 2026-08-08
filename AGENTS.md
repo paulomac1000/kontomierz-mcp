@@ -74,7 +74,7 @@ python scripts/mock_smoke.py
 
 The hosted exact-artifact job additionally builds one application wheel, installs it without network access from the closed wheelhouse, runs official-client stdio and authenticated Streamable HTTP smoke tests, verifies Docker installation checksums, and smoke-tests the exact container before preserving the release archive.
 
-Tests that require a disposable real Kontomierz account or provider/repository administration remain explicit `external` evidence. They intentionally fail with `NOT IMPLEMENTED` when selected until an authorized agent supplies the evidence. Do not convert them to unconditional skips or xfails merely to make CI green, and never run destructive external tests against a personal or non-disposable account. The exact handoff is documented in `docs/production-readiness.md`.
+Tests that require a disposable real Kontomierz account or provider/repository administration remain in the external evidence suite. They intentionally fail when selected until an authorized agent supplies the missing evidence. Do not convert them to unconditional skips or xfails merely to make CI green, and never run destructive external tests against a personal or non-disposable account. See the production-readiness guide under docs for the exact handoff.
 
 ## Documentation and release
 
