@@ -55,7 +55,8 @@ markers = [
   "unit: deterministic unit tests",
   "integration: multi-component tests with the in-memory backend",
   "sdk: requires the official MCP SDK",
-  "external: requires a real Kontomierz account and must never run by default",
+  "external: requires disposable real-system or provider/repository evidence and must never run by default",
+  "evidence: requires provider/repository administration or independent review",
 ]
 
 [tool.coverage.run]
