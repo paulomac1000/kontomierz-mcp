@@ -24,7 +24,7 @@ def _fallback_audit_failure() -> None:
         return
 
 
-class _AuditStreamHandler(logging.StreamHandler):
+class _AuditStreamHandler(logging.StreamHandler[TextIO]):
     """Dedicated handler that makes sink failures observable without failing the tool call."""
 
     def handleError(self, record: logging.LogRecord) -> None:
