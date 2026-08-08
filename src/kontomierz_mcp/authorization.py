@@ -1,4 +1,4 @@
-"""Application-owned authorization policy for principals, capabilities, and targets."""
+"""Application-owned authorization policy for principals, capabilities, targets, and resources."""
 
 from __future__ import annotations
 
@@ -13,12 +13,57 @@ from .manifest_types import ToolManifest
 from .security import InvocationContext
 
 CapabilityClass = Literal["read", "write", "destructive"]
-_POLICY_VERSION = "single-account-v1"
+_POLICY_VERSION = "single-account-resource-v2"
+
+_RESOURCE_BINDINGS: dict[str, tuple[str, str | None]] = {
+    "list_accounts": ("account", None),
+    "create_wallet": ("wallet", None),
+    "update_wallet": ("wallet", "wallet_id"),
+    "destroy_wallet": ("wallet", "wallet_id"),
+    "list_transactions": ("transaction", None),
+    "get_transaction": ("transaction", "transaction_id"),
+    "create_transaction": ("transaction", None),
+    "update_transaction": ("transaction", "transaction_id"),
+    "delete_transaction": ("transaction", "transaction_id"),
+    "list_categories": ("category", None),
+    "list_tags": ("tag", None),
+    "list_currencies": ("currency", None),
+    "list_budgets": ("budget", None),
+    "create_budget": ("budget", None),
+    "update_budget": ("budget", "budget_id"),
+    "delete_budget": ("budget", "budget_id"),
+    "copy_budgets_from_last_month": ("budget", None),
+    "list_scheduled_transactions": ("schedule", None),
+    "get_schedule": ("schedule", "schedule_id"),
+    "create_schedule": ("schedule", None),
+    "update_schedule": ("schedule", "schedule_id"),
+    "delete_schedule": ("schedule", "schedule_id"),
+    "mark_schedule_paid": ("schedule", "schedule_id"),
+    "mark_schedule_unpaid": ("schedule", "schedule_id"),
+    "get_pie_chart": ("chart", None),
+    "list_wealth_points": ("wealth", None),
+    "describe_kontomierz_capabilities": ("server", None),
+}
+_CREATE_CAPABILITIES = frozenset({"create_wallet", "create_transaction", "create_budget", "create_schedule"})
+_COLLECTION_CAPABILITIES = frozenset(
+    {
+        "list_accounts",
+        "list_transactions",
+        "list_categories",
+        "list_tags",
+        "list_currencies",
+        "list_budgets",
+        "copy_budgets_from_last_month",
+        "list_scheduled_transactions",
+        "get_pie_chart",
+        "list_wealth_points",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
 class AuthorizationDecision:
-    """One server-side authorization decision bound to an exact target."""
+    """One server-side authorization decision bound to an exact target and resource."""
 
     allowed: bool
     reason: str
@@ -26,6 +71,7 @@ class AuthorizationDecision:
     capability_id: str
     capability_class: CapabilityClass
     target_identity: str
+    resource_identity: str
     argument_digest: str
 
 
@@ -52,6 +98,29 @@ class AuthorizationPolicy:
         return f"kontomierz:{self._settings.api_base_url}:credential-sha256:{fingerprint}"
 
     @staticmethod
+    def resource_identity(manifest: ToolManifest, arguments: dict[str, Any]) -> str:
+        """Resolve the primary resource or collection governed by one capability invocation."""
+        resource_kind, id_field = _RESOURCE_BINDINGS.get(manifest.name, ("capability", None))
+        if id_field is not None:
+            raw_id = arguments.get(id_field)
+            if type(raw_id) is int and raw_id > 0:
+                return f"{resource_kind}:{raw_id}"
+            return f"{resource_kind}:unresolved"
+        if manifest.name == "describe_kontomierz_capabilities":
+            return "server:catalog"
+        if manifest.name == "create_transaction":
+            correlation = arguments.get("client_assigned_id")
+            if isinstance(correlation, str) and correlation:
+                digest = hashlib.sha256(correlation.encode("utf-8")).hexdigest()[:16]
+                return f"transaction:new:client-assigned-sha256:{digest}"
+            return "transaction:new"
+        if manifest.name in _CREATE_CAPABILITIES:
+            return f"{resource_kind}:new"
+        if manifest.name in _COLLECTION_CAPABILITIES:
+            return f"{resource_kind}:collection"
+        return f"{resource_kind}:collection"
+
+    @staticmethod
     def _argument_digest(arguments: dict[str, Any]) -> str:
         encoded = json.dumps(
             arguments,
@@ -62,6 +131,59 @@ class AuthorizationPolicy:
         ).encode("utf-8")
         return f"sha256:{hashlib.sha256(encoded).hexdigest()}"
 
+    @staticmethod
+    def _decision(
+        allowed: bool,
+        reason: str,
+        manifest: ToolManifest,
+        capability_class: CapabilityClass,
+        target_identity: str,
+        resource_identity: str,
+        digest: str,
+    ) -> AuthorizationDecision:
+        return AuthorizationDecision(
+            allowed,
+            reason,
+            _POLICY_VERSION,
+            manifest.name,
+            capability_class,
+            target_identity,
+            resource_identity,
+            digest,
+        )
+
+    def _capability_policy(self, context: InvocationContext, manifest: ToolManifest) -> tuple[bool, str]:
+        capability_class = self.capability_class(manifest)
+        if manifest.name not in _RESOURCE_BINDINGS:
+            return False, "capability has no governed resource binding"
+        if not context.authenticated:
+            return False, "principal is not authenticated"
+
+        expected_transport = "streamable-http" if self._settings.streamable_http else "stdio"
+        if context.transport != expected_transport:
+            return False, "principal transport does not match the active deployment transport"
+
+        if context.transport == "streamable-http":
+            if not hmac.compare_digest(context.principal, self._settings.http_principal):
+                return False, "HTTP principal is not bound to this deployment"
+            if capability_class not in self._settings.http_allowed_capabilities:
+                return False, f"capability class {capability_class} is not allowed for the HTTP principal"
+            if (
+                capability_class == "destructive"
+                and manifest.name not in self._settings.http_allowed_destructive_capabilities
+            ):
+                return False, "destructive capability is not explicitly allowlisted for the HTTP principal"
+            return True, "principal and exact capability are authorized"
+
+        if not context.principal.startswith("local-user:"):
+            return False, "stdio principal is not process-derived"
+        return True, "local process principal and exact capability are authorized"
+
+    def capability_allowed(self, context: InvocationContext, manifest: ToolManifest) -> bool:
+        """Return whether the capability is discoverable before resource arguments are known."""
+        allowed, _reason = self._capability_policy(context, manifest)
+        return allowed
+
     def authorize(
         self,
         context: InvocationContext,
@@ -70,70 +192,43 @@ class AuthorizationPolicy:
     ) -> AuthorizationDecision:
         capability_class = self.capability_class(manifest)
         target_identity = self.target_identity(manifest)
+        resource_identity = self.resource_identity(manifest, arguments)
         digest = self._argument_digest(arguments)
 
-        if not context.authenticated:
-            return AuthorizationDecision(
+        capability_allowed, reason = self._capability_policy(context, manifest)
+        if not capability_allowed:
+            return self._decision(
                 False,
-                "principal is not authenticated",
-                _POLICY_VERSION,
-                manifest.name,
+                reason,
+                manifest,
                 capability_class,
                 target_identity,
+                resource_identity,
                 digest,
             )
 
-        expected_transport = "streamable-http" if self._settings.streamable_http else "stdio"
-        if context.transport != expected_transport:
-            return AuthorizationDecision(
+        if (
+            context.transport == "streamable-http"
+            and capability_class == "destructive"
+            and resource_identity not in self._settings.http_allowed_destructive_resources
+        ):
+            return self._decision(
                 False,
-                "principal transport does not match the active deployment transport",
-                _POLICY_VERSION,
-                manifest.name,
+                "destructive resource is not explicitly allowlisted for the HTTP principal",
+                manifest,
                 capability_class,
                 target_identity,
+                resource_identity,
                 digest,
             )
 
-        if context.transport == "streamable-http":
-            if not hmac.compare_digest(context.principal, self._settings.http_principal):
-                return AuthorizationDecision(
-                    False,
-                    "HTTP principal is not bound to this deployment",
-                    _POLICY_VERSION,
-                    manifest.name,
-                    capability_class,
-                    target_identity,
-                    digest,
-                )
-            if capability_class not in self._settings.http_allowed_capabilities:
-                return AuthorizationDecision(
-                    False,
-                    f"capability class {capability_class} is not allowed for the HTTP principal",
-                    _POLICY_VERSION,
-                    manifest.name,
-                    capability_class,
-                    target_identity,
-                    digest,
-                )
-        elif not context.principal.startswith("local-user:"):
-            return AuthorizationDecision(
-                False,
-                "stdio principal is not process-derived",
-                _POLICY_VERSION,
-                manifest.name,
-                capability_class,
-                target_identity,
-                digest,
-            )
-
-        return AuthorizationDecision(
+        return self._decision(
             True,
-            "principal, capability class, and configured target are authorized",
-            _POLICY_VERSION,
-            manifest.name,
+            "principal, capability, target, and exact resource are authorized",
+            manifest,
             capability_class,
             target_identity,
+            resource_identity,
             digest,
         )
 
@@ -151,6 +246,7 @@ class AuthorizationPolicy:
         if (
             current.capability_id != decision.capability_id
             or current.target_identity != decision.target_identity
+            or current.resource_identity != decision.resource_identity
             or current.capability_class != decision.capability_class
             or current.argument_digest != decision.argument_digest
         ):
@@ -161,6 +257,7 @@ class AuthorizationPolicy:
                 current.capability_id,
                 current.capability_class,
                 current.target_identity,
+                current.resource_identity,
                 current.argument_digest,
             )
         return current
