@@ -170,6 +170,48 @@ async def test_http_destructive_requires_exact_capability_and_resource_allowlist
 
 
 @pytest.mark.asyncio
+async def test_stdio_destructive_requires_exact_capability_and_resource_allowlists() -> None:
+    called: list[int] = []
+
+    async def destroy_wallet(wallet_id: int) -> dict[str, int]:
+        called.append(wallet_id)
+        return {"deleted": wallet_id}
+
+    denied_settings = Settings(api_key="", mock_data=True, enable_write_operations=True)
+    denied_kernel = InvocationKernel(
+        settings=denied_settings,
+        operations={"destroy_wallet": destroy_wallet},
+        dependency=Dependency(),
+    )
+    with pytest.raises(ApplicationError) as captured:
+        await denied_kernel.invoke("destroy_wallet", {"wallet_id": 123})
+    assert captured.value.code is ErrorCode.AUTHORIZATION_FAILED
+    assert called == []
+
+    allowed_settings = Settings(
+        api_key="",
+        mock_data=True,
+        enable_write_operations=True,
+        stdio_allowed_destructive_capabilities=("destroy_wallet",),
+        stdio_allowed_destructive_resources=("wallet:123",),
+    )
+    allowed_settings.validate()
+    allowed_kernel = InvocationKernel(
+        settings=allowed_settings,
+        operations={"destroy_wallet": destroy_wallet},
+        dependency=Dependency(),
+    )
+    with pytest.raises(ApplicationError) as wrong_resource:
+        await allowed_kernel.invoke("destroy_wallet", {"wallet_id": 124})
+    assert wrong_resource.value.code is ErrorCode.AUTHORIZATION_FAILED
+    assert called == []
+
+    result = await allowed_kernel.invoke("destroy_wallet", {"wallet_id": 123})
+    assert result["data"] == {"deleted": 123}
+    assert called == [123]
+
+
+@pytest.mark.asyncio
 async def test_authorization_is_revalidated_immediately_before_operation_io(monkeypatch: pytest.MonkeyPatch) -> None:
     called = False
 
@@ -227,7 +269,7 @@ async def test_stdio_principal_and_policy_decision_are_emitted_to_structured_aud
     assert event["principal"].startswith("local-user:")
     assert event["transport"] == "stdio"
     assert event["authorization_decision"] == "pre-io:allowed"
-    assert event["policy_version"] == "single-account-resource-v2"
+    assert event["policy_version"] == "single-account-resource-v3"
     assert event["capability_id"] == "list_accounts"
     assert event["capability_class"] == "read"
     assert event["target_identity"] == "kontomierz:mock-account"
@@ -235,7 +277,9 @@ async def test_stdio_principal_and_policy_decision_are_emitted_to_structured_aud
     assert event["audit_failure_policy"] == "fail-open-result-preserving"
     assert event["result_category"] == "SUCCESS"
     assert "principal" not in result["_meta"]
-    assert result["_meta"]["target"] == "kontomierz-account"
+    assert "target" not in result["_meta"]
+    assert result["_meta"]["target_scope"] == "kontomierz-account"
+    assert result["_meta"]["target_ref"].startswith("target:sha256:")
 
 
 def test_every_governed_tool_has_an_explicit_resource_binding() -> None:
