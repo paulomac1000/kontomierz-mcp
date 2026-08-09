@@ -5,7 +5,7 @@ type: system
 status: evolving
 rigor: normative
 owners: [repository-maintainers]
-verification: Run `python -m pytest -m "not external"` and the exact-artifact CI job.
+verification: Run `python -m pytest` and the exact-artifact CI job.
 ---
 # Kontomierz MCP system architecture
 
@@ -33,15 +33,15 @@ Stdio is the safe default and derives a principal from the local process boundar
 
 Authentication is not authorization. The application authorizes every invocation against the exact capability ID, its capability class, the immutable configured deployment target, an explicit primary resource identity, and a digest of normalized arguments. Existing resources are bound as stable identities such as `wallet:123`, `transaction:456`, `budget:789`, or `schedule:321`; create and collection operations receive bounded namespace identities, and transaction creation additionally binds a digest of `client_assigned_id` when present. The same authorization binding is revalidated inside the execution slot immediately before operation I/O.
 
-HTTP defaults to `read` only. Ordinary `write` requires explicit class policy plus the process-level `ENABLE_WRITE_OPERATIONS` gate. Remote `destructive` access is narrower: enabling the class is insufficient unless the exact capability ID is present in `MCP_HTTP_ALLOWED_DESTRUCTIVE_CAPABILITIES` and the exact resource identity is present in `MCP_HTTP_ALLOWED_DESTRUCTIVE_RESOURCES`. Wildcard destructive resources are not supported.
+Ordinary stdio writes require the process-level `ENABLE_WRITE_OPERATIONS` gate. Destructive stdio calls require an additional exact capability ID in `MCP_STDIO_ALLOWED_DESTRUCTIVE_CAPABILITIES` and exact resource identity in `MCP_STDIO_ALLOWED_DESTRUCTIVE_RESOURCES`; the write gate alone never authorizes deletion. HTTP defaults to `read` only. Ordinary HTTP `write` requires explicit class policy plus the process-level write gate. HTTP `destructive` is narrower again: enabling the class is insufficient unless the exact capability ID is present in `MCP_HTTP_ALLOWED_DESTRUCTIVE_CAPABILITIES` and the exact resource identity is present in `MCP_HTTP_ALLOWED_DESTRUCTIVE_RESOURCES`. Wildcard destructive resources are not supported on either transport.
 
 The current server has no independent approval authority, therefore governed manifests deliberately set `requires_confirmation=false`. If confirmation is introduced later, the kernel fails closed for any manifest that requests it until a trusted server-side approval record can be verified.
 
-Streamable HTTP explicitly configures the SDK transport security policy: intentional loopback Host values, same-loopback HTTP Origins, stateless mode, JSON request content, and `MCP_HTTP_MAX_REQUEST_BODY_BYTES` (1 MiB by default, 4 MiB hard maximum). Adversarial integration tests assert Host, Origin, credential, oversized-body, and readiness-authentication rejection before kernel or dependency I/O.
+Streamable HTTP explicitly configures the SDK transport security policy: intentional loopback Host values, same-loopback HTTP Origins, stateless mode, JSON MCP responses, and `MCP_HTTP_MAX_REQUEST_BODY_BYTES` (1 MiB by default, 4 MiB hard maximum). Adversarial integration tests assert Host, Origin, credential, oversized-body, and readiness-authentication rejection before kernel or dependency I/O.
 
 ## Audit and observability
 
-Every tool invocation emits one JSON audit event through the `kontomierz_mcp.audit` channel. That logger owns an INFO-capable handler and does not inherit application `LOG_LEVEL`, so raising ordinary verbosity to `WARNING`, `ERROR`, or `CRITICAL` does not suppress invocation audit events. The event records correlation/request ID, process- or request-derived principal, transport, exact capability ID/class, target identity, resource identity, normalized-argument digest, authorization and operator-gate decisions, dependency state, result category, duration, cancellation, saturation, and ambiguous-write state. API keys, Bearer tokens, model-visible protected data, and raw upstream response bodies are never included. Principal identity stays server-side and is not echoed in tool `_meta`.
+Every tool invocation emits one JSON audit event through the `kontomierz_mcp.audit` channel. That logger owns an INFO-capable handler and does not inherit application `LOG_LEVEL`, so raising ordinary verbosity to `WARNING`, `ERROR`, or `CRITICAL` does not suppress invocation audit events. The event records correlation/request ID, process- or request-derived principal, transport, exact capability ID/class, target identity, resource identity, normalized-argument digest, authorization and operator-gate decisions, dependency state, result category, duration, cancellation, saturation, and ambiguous-write state. API keys, Bearer tokens, model-visible protected data, and raw upstream response bodies are never included. Principal identity and the internal credential-derived target identity stay server-side; successful tool `_meta` exposes only an opaque `target_ref` plus `target_scope`.
 
 Audit emission uses a result-preserving fail-open policy. This is intentional because the event is emitted after invocation outcome is known; turning a successfully completed mutation into an application error because the audit sink failed could cause a dangerous retry or false ambiguity. A minimal `mcp_audit_emission_failure` signal is attempted on stderr when logger emission itself raises.
 
