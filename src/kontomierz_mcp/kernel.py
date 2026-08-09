@@ -183,10 +183,13 @@ class InvocationKernel:
             "profile": "authenticated-http" if self._settings.streamable_http else "local-process-principal",
             "dependency_state": dependency_state,
             "write_operations_enabled": self._settings.enable_write_operations,
-            "authorization_policy": "single-account-resource-v2",
+            "authorization_policy": "single-account-resource-v3",
             "http_state_mode": "stateless" if self._settings.streamable_http else None,
             "http_allowed_capabilities": (
                 list(self._settings.http_allowed_capabilities) if self._settings.streamable_http else None
+            ),
+            "stdio_allowed_destructive_capabilities": (
+                list(self._settings.stdio_allowed_destructive_capabilities) if not self._settings.streamable_http else None
             ),
             "http_max_request_body_bytes": (
                 self._settings.http_max_request_body_bytes if self._settings.streamable_http else None
@@ -307,6 +310,7 @@ class InvocationKernel:
             )
 
         operation_started = False
+        executed_decision = decision
         async with self._admission_slot():
             try:
                 async with asyncio.timeout(manifest.timeout_seconds):
@@ -318,6 +322,7 @@ class InvocationKernel:
                                 ErrorCode.AUTHORIZATION_FAILED,
                                 "Authorization binding changed before operation I/O",
                             )
+                        executed_decision = revalidated
                         operation_started = True
                         data = (
                             self.capability_document(invocation_context)
@@ -358,7 +363,8 @@ class InvocationKernel:
                 "tool_name": tool_name,
                 "duration_ms": int((time.monotonic() - started_at) * 1000),
                 "tool_version": manifest.version,
-                "target": manifest.target_scope,
+                "target_scope": manifest.target_scope,
+                "target_ref": AuthorizationPolicy.public_target_ref(executed_decision.target_identity),
                 "transport": invocation_context.transport,
             },
         }
