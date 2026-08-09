@@ -109,7 +109,7 @@ async def smoke_http(executable: Path) -> None:
     process = subprocess.Popen(
         [str(executable)],
         env=environment,
- stdout=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
         text=True,
     )
