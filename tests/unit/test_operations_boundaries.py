@@ -40,6 +40,23 @@ async def test_date_range_order_is_validated(operations) -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("tool", "arguments", "message"),
+    [
+        ("list_transactions", {"start_on": "02-08-2026"}, "start_on must be YYYY-MM-DD"),
+        ("create_schedule", {"direction": "withdrawal", "deadline_on": "31-12-2026", "holidays": 0, "description": "x", "currency_amount": "1", "currency_name": "PLN", "repeat": 1}, "deadline_on must be YYYY-MM-DD"),
+        ("list_budgets", {"month": "01-08-2026"}, "month must be YYYY-MM"),
+    ],
+)
+async def test_legacy_public_date_formats_are_rejected(operations, tool: str, arguments: dict[str, object], message: str) -> None:
+    ops, _ = operations
+    with pytest.raises(ApplicationError) as captured:
+        await ops[tool](**arguments)
+    assert captured.value.code is ErrorCode.INVALID_PARAMETER
+    assert captured.value.message == message
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("balance", ["0", "-100.25"])
 async def test_wallet_balance_allows_zero_and_debt(operations, balance: str) -> None:
     ops, _ = operations
