@@ -5,35 +5,25 @@ type: reference
 status: evolving
 rigor: operational
 owners: [repository-maintainers]
-verification: Run the external evidence suite against a live account (tests/external/test_real_kontomierz_contract.py); repeat the write round trips before claiming contract stability.
+verification: Run the explicitly opted-in external evidence suite against a disposable live account; repeat write round trips before claiming contract stability.
 ---
 # Kontomierz upstream API contract
 
 ## Verified contract (live-account evidence, 2026-08-08)
 
-The following was proven against a live account (`https://secure.kontomierz.pl/k4`) with
-read probes and minimal, cleaned-up write round trips. The evidence lives in
-`tests/external/test_real_kontomierz_contract.py`.
+The following was proven against a live account (`https://secure.kontomierz.pl/k4`) with read probes and minimal, cleaned-up write round trips. The evidence lives in `tests/external/test_real_kontomierz_contract.py`. That suite is excluded by default and requires both `KONTOMIERZ_EXTERNAL_TESTS=1` and `KONTOMIERZ_ALLOW_REAL_MUTATIONS=1` before it reads credentials or mutates the real service.
 
 ### Authentication
 
-Every request carries the credential as the `api_key` query parameter. Invalid
-credentials return 401/403.
+Every request carries the credential as the `api_key` query parameter. Invalid credentials return 401/403.
 
 ### Body encoding
 
-**All write endpoints require `application/x-www-form-urlencoded` bodies.** JSON-encoded
-bodies are rejected (observed: `POST schedules.json` JSON -> 401/422, `POST
-money_transactions.json` JSON -> 404). The adapter therefore defaults to form encoding
-(`KONTOMIERZ_BODY_MODE=form`); the `json` mode remains only as a compatibility knob.
+**All verified write endpoints require `application/x-www-form-urlencoded` bodies.** JSON-encoded bodies are rejected (observed: `POST schedules.json` JSON -> 401/422, `POST money_transactions.json` JSON -> 404). The adapter therefore uses form encoding for the real backend, and validated real-backend configuration rejects `KONTOMIERZ_BODY_MODE=json` rather than retaining a known-broken compatibility mode.
 
 ### Dates
 
-Write payload dates use `DD-MM-YYYY` (schedule `deadline_on`, `mark_as_payed` /
-`mark_as_unpayed` path dates, transaction `transaction_on`). ISO `YYYY-MM-DD` is rejected
-with `422 Nieprawidłowy parametr - termin płatności`. Responses contain ISO dates (for
-example `next_deadline_on`, and `transaction_on` in a created transaction). The public
-server surface still accepts ISO dates; conversion to `DD-MM-YYYY` happens internally.
+Write payload dates use `DD-MM-YYYY` (schedule `deadline_on`, `mark_as_payed` / `mark_as_unpayed` path dates, transaction `transaction_on`). ISO `YYYY-MM-DD` is rejected with `422 Nieprawidłowy parametr - termin płatności`. Responses contain ISO dates (for example `next_deadline_on`, and `transaction_on` in a created transaction). The public server surface accepts ISO dates only; conversion to `DD-MM-YYYY` happens internally after public validation.
 
 ### Verified endpoints
 
@@ -59,25 +49,15 @@ server surface still accepts ISO dates; conversion to `DD-MM-YYYY` happens inter
 
 ### Empty-body success handling
 
-Schedule and budget create/update responses are 201/200 with an **empty body** — the
-server does not return the created object (unlike transactions). The adapter treats an
-empty-body 200/201 as success, then best-effort reconciles by listing (schedule matched
-by description, budget by category/group) to return the created identity; when the record
-is not yet visible it returns a success marker (`{"created": True}`) instead of a false
-ambiguous failure.
+Schedule and budget create/update responses are 201/200 with an **empty body** — the server does not return the created object (unlike transactions). The adapter treats an empty-body 200/201 as success, then best-effort reconciles by listing (schedule matched by description, budget by category/group) to return the created identity; when the record is not yet visible it returns a success marker (`{"created": True}`) instead of a false ambiguous failure.
 
 ### Failure classification
 
-Read timeout, transport loss, 429, and 5xx errors may be retry-eligible for the caller.
-The server itself does not retry. For a started write, timeout, transport loss, invalid
-JSON, a missing response wrapper, or a wrong response shape after success status, and
-ambiguous 5xx are marked as potentially completed and normalized by the kernel to
-`AMBIGUOUS_OUTCOME`. Explicit 4xx rejections are not ambiguous.
+Read timeout, transport loss, 429, and 5xx errors may be retry-eligible for the caller. The server itself does not retry. For a started write, timeout, transport loss, invalid JSON, a missing response wrapper, or a wrong response shape after success status, and ambiguous 5xx are marked as potentially completed and normalized by the kernel to `AMBIGUOUS_OUTCOME`. Explicit 4xx rejections are not ambiguous.
 
 ## Remaining unverified
 
-- Wallet create/update (`user_accounts/create_wallet.json`, `.../update_wallet.json`)
-  response bodies were not exercised (they would mutate the evidence account).
+- Wallet create/update (`user_accounts/create_wallet.json`, `.../update_wallet.json`) response bodies were not exercised because they would mutate the evidence account.
 - `client_assigned_id` uniqueness/retention semantics for transactions.
 - Reconciliation after an intentionally interrupted create (post-timeout state checks).
 - Rate-limit behavior was deliberately not hammered on a personal account.
