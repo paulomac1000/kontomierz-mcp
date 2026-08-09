@@ -74,12 +74,10 @@ def parse_date(value: Any, name: str, *, optional: bool = False) -> date | None:
         return None
     if not raw:
         fail(f"{name} is required")
-    for pattern in ("%Y-%m-%d", "%d-%m-%Y"):
-        try:
-            return datetime.strptime(raw, pattern).date()
-        except ValueError:
-            pass
-    fail(f"{name} must be YYYY-MM-DD")
+    try:
+        return datetime.strptime(raw, "%Y-%m-%d").date()
+    except ValueError:
+        fail(f"{name} must be YYYY-MM-DD")
 
 
 def date_value(value: Any, name: str, *, optional: bool = False) -> str | None:
@@ -102,12 +100,10 @@ def month(value: Any) -> str:
     raw = str(value or "").strip()
     if not raw:
         return ""
-    for pattern in ("%Y-%m", "%d-%m-%Y"):
-        try:
-            return datetime.strptime(raw, pattern).strftime("01-%m-%Y")
-        except ValueError:
-            pass
-    fail("month must be YYYY-MM")
+    try:
+        return datetime.strptime(raw, "%Y-%m").strftime("01-%m-%Y")
+    except ValueError:
+        fail("month must be YYYY-MM")
 
 
 def page(value: Any) -> int:
