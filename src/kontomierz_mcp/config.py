@@ -201,9 +201,7 @@ class Settings:
             stdio_allowed_destructive_capabilities=_destructive_capabilities(
                 env, "MCP_STDIO_ALLOWED_DESTRUCTIVE_CAPABILITIES"
             ),
-            stdio_allowed_destructive_resources=_destructive_resources(
-                env, "MCP_STDIO_ALLOWED_DESTRUCTIVE_RESOURCES"
-            ),
+            stdio_allowed_destructive_resources=_destructive_resources(env, "MCP_STDIO_ALLOWED_DESTRUCTIVE_RESOURCES"),
             http_auth_token=env.get("MCP_HTTP_AUTH_TOKEN", "").strip(),
             http_principal=env.get("MCP_HTTP_PRINCIPAL", "").strip(),
             http_allowed_capabilities=_http_capabilities(env),
