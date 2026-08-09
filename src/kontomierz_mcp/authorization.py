@@ -13,7 +13,7 @@ from .manifest_types import ToolManifest
 from .security import InvocationContext
 
 CapabilityClass = Literal["read", "write", "destructive"]
-_POLICY_VERSION = "single-account-resource-v2"
+_POLICY_VERSION = "single-account-resource-v3"
 
 _RESOURCE_BINDINGS: dict[str, tuple[str, str | None]] = {
     "list_accounts": ("account", None),
@@ -98,6 +98,11 @@ class AuthorizationPolicy:
         return f"kontomierz:{self._settings.api_base_url}:credential-sha256:{fingerprint}"
 
     @staticmethod
+    def public_target_ref(target_identity: str) -> str:
+        digest = hashlib.sha256(target_identity.encode("utf-8")).hexdigest()[:16]
+        return f"target:sha256:{digest}"
+
+    @staticmethod
     def resource_identity(manifest: ToolManifest, arguments: dict[str, Any]) -> str:
         """Resolve the primary resource or collection governed by one capability invocation."""
         resource_kind, id_field = _RESOURCE_BINDINGS.get(manifest.name, ("capability", None))
@@ -177,6 +182,11 @@ class AuthorizationPolicy:
 
         if not context.principal.startswith("local-user:"):
             return False, "stdio principal is not process-derived"
+        if (
+            capability_class == "destructive"
+            and manifest.name not in self._settings.stdio_allowed_destructive_capabilities
+        ):
+            return False, "destructive capability is not explicitly allowlisted for the stdio principal"
         return True, "local process principal and exact capability are authorized"
 
     def capability_allowed(self, context: InvocationContext, manifest: ToolManifest) -> bool:
@@ -215,6 +225,20 @@ class AuthorizationPolicy:
             return self._decision(
                 False,
                 "destructive resource is not explicitly allowlisted for the HTTP principal",
+                manifest,
+                capability_class,
+                target_identity,
+                resource_identity,
+                digest,
+            )
+        if (
+            context.transport == "stdio"
+            and capability_class == "destructive"
+            and resource_identity not in self._settings.stdio_allowed_destructive_resources
+        ):
+            return self._decision(
+                False,
+                "destructive resource is not explicitly allowlisted for the stdio principal",
                 manifest,
                 capability_class,
                 target_identity,
