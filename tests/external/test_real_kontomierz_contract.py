@@ -304,11 +304,7 @@ def test_real_budget_write_round_trip() -> None:
         finally:
             try:
                 budgets = _get(client, key, "budgets.json").json()["budgets"]
-                created_ids.update(
-                    item["id"]
-                    for item in budgets
-                    if item.get("id") and item["id"] not in before
-                )
+                created_ids.update(item["id"] for item in budgets if item.get("id") and item["id"] not in before)
             except (httpx.HTTPError, ValueError, KeyError, TypeError):
                 pass
             for budget_id in sorted(created_ids):
