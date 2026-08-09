@@ -81,26 +81,48 @@ def _csv_values(env: Mapping[str, str], name: str) -> tuple[str, ...]:
     return tuple(dict.fromkeys(part.strip() for part in raw.split(",") if part.strip()))
 
 
-def _destructive_capabilities(env: Mapping[str, str]) -> tuple[str, ...]:
-    values = _csv_values(env, "MCP_HTTP_ALLOWED_DESTRUCTIVE_CAPABILITIES")
+def _destructive_capabilities(env: Mapping[str, str], name: str) -> tuple[str, ...]:
+    values = _csv_values(env, name)
     invalid = [
         value for value in values if _CAPABILITY_ID.fullmatch(value) is None or value not in _DESTRUCTIVE_CAPABILITIES
     ]
     if invalid:
-        raise ConfigurationError(
-            "MCP_HTTP_ALLOWED_DESTRUCTIVE_CAPABILITIES contains invalid capability IDs: " + ", ".join(sorted(invalid))
-        )
+        raise ConfigurationError(f"{name} contains invalid capability IDs: " + ", ".join(sorted(invalid)))
     return values
 
 
-def _destructive_resources(env: Mapping[str, str]) -> tuple[str, ...]:
-    values = _csv_values(env, "MCP_HTTP_ALLOWED_DESTRUCTIVE_RESOURCES")
+def _destructive_resources(env: Mapping[str, str], name: str) -> tuple[str, ...]:
+    values = _csv_values(env, name)
     invalid = [value for value in values if _DESTRUCTIVE_RESOURCE.fullmatch(value) is None]
     if invalid:
-        raise ConfigurationError(
-            "MCP_HTTP_ALLOWED_DESTRUCTIVE_RESOURCES must contain exact resource IDs such as wallet:123"
-        )
+        raise ConfigurationError(f"{name} must contain exact resource IDs such as wallet:123")
     return values
+
+
+def _validate_destructive_policy(
+    capabilities: tuple[str, ...],
+    resources: tuple[str, ...],
+    *,
+    capability_name: str,
+    resource_name: str,
+) -> None:
+    invalid_capabilities = sorted(set(capabilities) - _DESTRUCTIVE_CAPABILITIES)
+    invalid_resources = [resource for resource in resources if _DESTRUCTIVE_RESOURCE.fullmatch(resource) is None]
+    if invalid_capabilities:
+        raise ConfigurationError(f"{capability_name} contains invalid capability IDs")
+    if invalid_resources:
+        raise ConfigurationError(f"{resource_name} must use exact resource IDs")
+    if bool(capabilities) != bool(resources):
+        raise ConfigurationError("Destructive access requires both explicit capability and exact resource allowlists")
+    if not capabilities:
+        return
+    for capability in capabilities:
+        prefix = _DESTRUCTIVE_RESOURCE_PREFIX[capability]
+        if not any(resource.startswith(prefix) for resource in resources):
+            raise ConfigurationError("Each destructive capability must have at least one matching exact resource ID")
+    allowed_prefixes = {_DESTRUCTIVE_RESOURCE_PREFIX[capability] for capability in capabilities}
+    if any(not any(resource.startswith(prefix) for prefix in allowed_prefixes) for resource in resources):
+        raise ConfigurationError("Each destructive resource must match an explicitly allowed destructive capability")
 
 
 def _bounded_ascii_secret(value: str, name: str) -> str:
@@ -135,6 +157,8 @@ class Settings:
     max_pending_invocations: int = 16
     readiness_timeout_seconds: int = 5
     readiness_cache_seconds: int = 10
+    stdio_allowed_destructive_capabilities: tuple[str, ...] = ()
+    stdio_allowed_destructive_resources: tuple[str, ...] = ()
     http_auth_token: str = ""
     http_principal: str = ""
     http_allowed_capabilities: tuple[str, ...] = ("read",)
@@ -174,11 +198,19 @@ class Settings:
             max_pending_invocations=_positive_int(env, "MCP_MAX_PENDING_INVOCATIONS", 16),
             readiness_timeout_seconds=_positive_int(env, "MCP_READINESS_TIMEOUT", 5),
             readiness_cache_seconds=_positive_int(env, "MCP_READINESS_CACHE_SECONDS", 10),
+            stdio_allowed_destructive_capabilities=_destructive_capabilities(
+                env, "MCP_STDIO_ALLOWED_DESTRUCTIVE_CAPABILITIES"
+            ),
+            stdio_allowed_destructive_resources=_destructive_resources(
+                env, "MCP_STDIO_ALLOWED_DESTRUCTIVE_RESOURCES"
+            ),
             http_auth_token=env.get("MCP_HTTP_AUTH_TOKEN", "").strip(),
             http_principal=env.get("MCP_HTTP_PRINCIPAL", "").strip(),
             http_allowed_capabilities=_http_capabilities(env),
-            http_allowed_destructive_capabilities=_destructive_capabilities(env),
-            http_allowed_destructive_resources=_destructive_resources(env),
+            http_allowed_destructive_capabilities=_destructive_capabilities(
+                env, "MCP_HTTP_ALLOWED_DESTRUCTIVE_CAPABILITIES"
+            ),
+            http_allowed_destructive_resources=_destructive_resources(env, "MCP_HTTP_ALLOWED_DESTRUCTIVE_RESOURCES"),
             http_max_request_body_bytes=_positive_int(env, "MCP_HTTP_MAX_REQUEST_BODY_BYTES", 1024 * 1024),
         )
         settings.validate()
@@ -195,6 +227,12 @@ class Settings:
             raise ConfigurationError("MCP_TRANSPORT must be stdio, http, or streamable-http")
         if not 1 <= self.port <= 65535:
             raise ConfigurationError("MCP_PORT must be between 1 and 65535")
+        _validate_destructive_policy(
+            self.stdio_allowed_destructive_capabilities,
+            self.stdio_allowed_destructive_resources,
+            capability_name="MCP_STDIO_ALLOWED_DESTRUCTIVE_CAPABILITIES",
+            resource_name="MCP_STDIO_ALLOWED_DESTRUCTIVE_RESOURCES",
+        )
         if self.streamable_http:
             if self.host not in _LOOPBACK_HOSTS:
                 raise ConfigurationError("Remote HTTP is disabled; Streamable HTTP must use a loopback MCP_HOST")
@@ -210,40 +248,18 @@ class Settings:
             invalid_capabilities = sorted(set(self.http_allowed_capabilities) - _HTTP_CAPABILITY_CLASSES)
             if not self.http_allowed_capabilities or invalid_capabilities:
                 raise ConfigurationError("MCP_HTTP_ALLOWED_CAPABILITIES must contain only read, write, destructive")
-            invalid_destructive_capabilities = sorted(
-                set(self.http_allowed_destructive_capabilities) - _DESTRUCTIVE_CAPABILITIES
+            _validate_destructive_policy(
+                self.http_allowed_destructive_capabilities,
+                self.http_allowed_destructive_resources,
+                capability_name="MCP_HTTP_ALLOWED_DESTRUCTIVE_CAPABILITIES",
+                resource_name="MCP_HTTP_ALLOWED_DESTRUCTIVE_RESOURCES",
             )
-            invalid_destructive_resources = [
-                resource
-                for resource in self.http_allowed_destructive_resources
-                if _DESTRUCTIVE_RESOURCE.fullmatch(resource) is None
-            ]
-            if invalid_destructive_capabilities:
-                raise ConfigurationError("MCP_HTTP_ALLOWED_DESTRUCTIVE_CAPABILITIES contains invalid capability IDs")
-            if invalid_destructive_resources:
-                raise ConfigurationError("MCP_HTTP_ALLOWED_DESTRUCTIVE_RESOURCES must use exact resource IDs")
             if "destructive" in self.http_allowed_capabilities and (
                 not self.http_allowed_destructive_capabilities or not self.http_allowed_destructive_resources
             ):
                 raise ConfigurationError(
                     "HTTP destructive access requires explicit capability and exact resource allowlists"
                 )
-            if "destructive" in self.http_allowed_capabilities:
-                resources = self.http_allowed_destructive_resources
-                for capability in self.http_allowed_destructive_capabilities:
-                    prefix = _DESTRUCTIVE_RESOURCE_PREFIX[capability]
-                    if not any(resource.startswith(prefix) for resource in resources):
-                        raise ConfigurationError(
-                            "Each destructive capability must have at least one matching exact resource ID"
-                        )
-                allowed_prefixes = {
-                    _DESTRUCTIVE_RESOURCE_PREFIX[capability]
-                    for capability in self.http_allowed_destructive_capabilities
-                }
-                if any(not any(resource.startswith(prefix) for prefix in allowed_prefixes) for resource in resources):
-                    raise ConfigurationError(
-                        "Each destructive resource must match an explicitly allowed destructive capability"
-                    )
             if self.http_max_request_body_bytes > _MAX_HTTP_REQUEST_BODY_BYTES:
                 raise ConfigurationError(
                     f"MCP_HTTP_MAX_REQUEST_BODY_BYTES must not exceed {_MAX_HTTP_REQUEST_BODY_BYTES}"
@@ -252,5 +268,7 @@ class Settings:
             raise ConfigurationError("MCP_MAX_PENDING_INVOCATIONS must be at least MCP_MAX_CONCURRENCY")
         if self.body_mode not in {"json", "form"}:
             raise ConfigurationError("KONTOMIERZ_BODY_MODE must be json or form")
+        if self.body_mode == "json" and not self.mock_data:
+            raise ConfigurationError("The real Kontomierz write contract requires KONTOMIERZ_BODY_MODE=form")
         if self.log_level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
             raise ConfigurationError("LOG_LEVEL is invalid")
