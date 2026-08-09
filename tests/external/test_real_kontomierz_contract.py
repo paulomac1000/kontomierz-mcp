@@ -307,9 +307,7 @@ def test_real_budget_write_round_trip() -> None:
                 created_ids.update(
                     item["id"]
                     for item in budgets
-                    if item.get("id")
-                    and item["id"] not in before
-                    and item.get("category_group_id") == group_id
+                    if item.get("id") and item["id"] not in before and item.get("category_group_id") == group_id
                 )
             except (httpx.HTTPError, ValueError, KeyError, TypeError):
                 pass
