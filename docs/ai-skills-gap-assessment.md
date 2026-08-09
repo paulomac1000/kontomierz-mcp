@@ -30,7 +30,7 @@ Target technical alignment with the immutable `ai-skills` revision `c6dc6b13b2dd
 - Started write timeout, connection loss, response loss, malformed success shape, and ambiguous 5xx become non-retryable ambiguous outcomes.
 - One governed catalog owns signatures, descriptions, schema expectations, manifests, registration, versions, and active-state discovery.
 - Runtime manifests no longer claim automatic retry, replay-safe writes, or confirmation without executable enforcement.
-- Breaking transport, error, pagination, and input changes are versioned as `2.0.0`.
+- Breaking transport, error, pagination, and input changes are versioned as `1.2`.
 - MCP errors are explicit stable `CallToolResult` documents.
 - Readiness includes a bounded cached dependency probe behind the authenticated HTTP readiness boundary.
 - Linux x64 runtime and development dependency graphs are exact-wheel hash-locked separately for Python 3.11, 3.12, and 3.13; build tooling has its own hash lock. Acceptance paths install them with `--require-hashes --no-deps --only-binary=:all:` and verify completeness with `pip check`.

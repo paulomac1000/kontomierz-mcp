@@ -2,7 +2,18 @@
 
 All notable changes to kontomierz-mcp are recorded here.
 
-## 2.0.1 — Unreleased
+## 1.2 — Unreleased
+
+### Breaking changes
+
+- Replaced legacy HTTP+SSE and the unauthenticated REST bridge with stdio and loopback-only Streamable HTTP.
+- Changed public dates to ISO `YYYY-MM-DD` while retaining upstream conversion internally.
+- Replaced pagination certainty fields with `may_have_more` and `next_page_hint` because the upstream continuation contract is unverified.
+- Replaced SDK-generated exception text with explicit structured MCP error results.
+- Changed update inputs so `None` means omission and an empty string can intentionally clear supported text fields.
+- Replaced the synchronous dependency adapter with native asynchronous I/O.
+- Streamable HTTP authorization is read-only by default; write/destructive capability classes require explicit server-side opt-in in addition to the operator write gate.
+- Streamable HTTP readiness now requires Bearer authentication because a readiness cache miss may perform upstream network I/O; `/health/live` remains public.
 
 ### Fixed
 
@@ -32,32 +43,6 @@ All notable changes to kontomierz-mcp are recorded here.
 
 ### Added
 
-- Real external evidence tests (`tests/external/test_real_kontomierz_contract.py`)
-  proving read shapes, schedule/transaction/budget write round trips with cleanup,
-  pagination ordering and termination, money precision normalization, ISO-date rejection,
-  and form-encoding requirements against the live account.
-
-### Security
-
-- No control was weakened: form-encoding verification confirms the historical
-  form-based contract; ambiguous-write handling still applies to timeout, transport loss,
-  and malformed success responses.
-
-## 2.0.0 — Unreleased
-
-### Breaking changes
-
-- Replaced legacy HTTP+SSE and the unauthenticated REST bridge with stdio and loopback-only Streamable HTTP.
-- Changed public dates to ISO `YYYY-MM-DD` while retaining upstream conversion internally.
-- Replaced pagination certainty fields with `may_have_more` and `next_page_hint` because the upstream continuation contract is unverified.
-- Replaced SDK-generated exception text with explicit structured MCP error results.
-- Changed update inputs so `None` means omission and an empty string can intentionally clear supported text fields.
-- Replaced the synchronous dependency adapter with native asynchronous I/O.
-- Streamable HTTP authorization is read-only by default; write/destructive capability classes require explicit server-side opt-in in addition to the operator write gate.
-- Streamable HTTP readiness now requires Bearer authentication because a readiness cache miss may perform upstream network I/O; `/health/live` remains public.
-
-### Added
-
 - One governed catalog for tool signatures, descriptions, schemas, versions, manifests, active state, and registration.
 - Complete multi-axis capability manifests and supported-versus-active capability discovery.
 - Explicit application-owned authorization binding principal, exact capability, immutable configured target, exact resource identity, and normalized arguments, with pre-I/O revalidation.
@@ -70,9 +55,11 @@ All notable changes to kontomierz-mcp are recorded here.
 - Exact Linux x64 runtime/development wheel locks for Python 3.11, 3.12, and 3.13 plus a separate build-tool lock; acceptance installs use exact SHA-256 wheel hashes without dependency resolution.
 - Exact-wheel and exact-image CI promotion, locked runtime wheelhouse, protected release environment, default-branch ancestry proof, registry digest comparison, and promotion attestation.
 - AFDS architecture, contract, upstream, migration, production-readiness, and standards-gap documentation plus root `AGENTS.md`.
+- Real external evidence tests (`tests/external/test_real_kontomierz_contract.py`) proving read shapes, schedule/transaction/budget write round trips with cleanup, pagination ordering and termination, money precision normalization, ISO-date rejection, and form-encoding requirements against the live account.
 
 ### Security
 
+- No control was weakened: form-encoding verification confirms the historical form-based contract; ambiguous-write handling still applies to timeout, transport loss, and malformed success responses.
 - Non-loopback HTTP binding remains forbidden; loopback HTTP requires request-scoped Bearer authentication and explicit server-side capability/target/resource authorization.
 - Financial reads are classified as confidential; every mutation requires the trusted operator write gate and HTTP writes require an independently allowed capability class.
 - HTTP destructive operations require both an explicitly allowlisted capability ID and the exact resource identity; wildcard resource grants are not accepted.

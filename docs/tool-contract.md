@@ -53,4 +53,4 @@ The upstream has not provided a reliable total or continuation token. Results ex
 
 ## Versioning and compatibility
 
-These changes are released as `2.0.0` because this revision removes legacy SSE and the REST bridge, uses ISO public dates, switches the HTTP adapter to native async I/O, and makes clearing versus omission explicit.
+These changes are released as `1.2` because this revision removes legacy SSE and the REST bridge, uses ISO public dates, switches the HTTP adapter to native async I/O, and makes clearing versus omission explicit.

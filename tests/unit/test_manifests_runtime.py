@@ -47,7 +47,7 @@ def test_governed_catalog_has_one_complete_definition_per_tool() -> None:
 
 def test_manifest_claims_are_conservative_and_internally_consistent() -> None:
     for manifest in TOOL_MANIFESTS.values():
-        assert manifest.version.startswith("2.0.1")
+        assert manifest.version.startswith("1.2")
         assert manifest.timeout_ms > 0
         assert manifest.target_binding.fallback == "forbidden"
         assert manifest.automatic_retry is False

@@ -4,7 +4,7 @@ A loopback-first MCP server for the Kontomierz personal-finance API. The server 
 
 ## Security and migration status
 
-The current candidate is **2.0.1** because it removes legacy HTTP+SSE and the unauthenticated REST bridge, changes public date, error, pagination, and update semantics, and switches write bodies to the form encoding verified against the live Kontomierz API on 2026-08-08. It is not presented as formally L2+ compliant yet. Formal adoption remains blocked on provider-backed migration assessment with independent approval, protected release-environment administration, provider-verifiable build provenance, and independent approval of the immutable revision.
+The current candidate is **1.2** because it removes legacy HTTP+SSE and the unauthenticated REST bridge, changes public date, error, pagination, and update semantics, and switches write bodies to the form encoding verified against the live Kontomierz API on 2026-08-08. It is not presented as formally L2+ compliant yet. Formal adoption remains blocked on provider-backed migration assessment with independent approval, protected release-environment administration, provider-verifiable build provenance, and independent approval of the immutable revision.
 
 Financial reads are confidential. Every invocation is authenticated and then authorized server-side against the exact capability, immutable configured target, and invocation resource identity. HTTP principals are read-only by default through `MCP_HTTP_ALLOWED_CAPABILITIES=read`. Mutations require both an explicitly allowed HTTP capability class (for HTTP callers) and `ENABLE_WRITE_OPERATIONS=1` from the trusted server operator. Destructive HTTP access additionally requires exact capability IDs in `MCP_HTTP_ALLOWED_DESTRUCTIVE_CAPABILITIES` and exact resource IDs in `MCP_HTTP_ALLOWED_DESTRUCTIVE_RESOURCES`; a broad `destructive` class alone is rejected. A model argument cannot establish identity, authorization, or write enablement.
 
@@ -104,4 +104,4 @@ The default suite uses synthetic data. The official MCP SDK test is mandatory an
 
 ## Compatibility note
 
-Version 2.0.0 is intentionally incompatible with the 1.x transport and response surface. Public dates use ISO `YYYY-MM-DD`; budget months use `YYYY-MM`; pagination exposes only continuation hints; and update tools distinguish omission (`None`) from an explicit empty text value.
+Version 1.2 is intentionally incompatible with the legacy 1.0.x transport and response surface. Public dates use ISO `YYYY-MM-DD`; budget months use `YYYY-MM`; pagination exposes only continuation hints; and update tools distinguish omission (`None`) from an explicit empty text value.
