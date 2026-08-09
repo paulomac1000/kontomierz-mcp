@@ -4,9 +4,9 @@ A loopback-first MCP server for the Kontomierz personal-finance API. The server 
 
 ## Security and migration status
 
-The current candidate is **1.2** because it removes legacy HTTP+SSE and the unauthenticated REST bridge, changes public date, error, pagination, and update semantics, and switches write bodies to the form encoding verified against the live Kontomierz API on 2026-08-08. It is not presented as formally L2+ compliant yet. Formal adoption remains blocked on provider-backed migration assessment with independent approval, protected release-environment administration, provider-verifiable build provenance, and independent approval of the immutable revision.
+The current candidate is **2.0.0** because it removes legacy HTTP+SSE and the unauthenticated REST bridge, changes public date, error, pagination, and update semantics, and switches write bodies to the form encoding verified against the live Kontomierz API on 2026-08-08. It is not presented as formally L2+ compliant yet. Formal adoption remains blocked on provider-backed migration assessment with independent approval, protected release-environment administration, provider-verifiable build provenance, and independent approval of the immutable revision.
 
-Financial reads are confidential. Every invocation is authenticated and then authorized server-side against the exact capability, immutable configured target, and invocation resource identity. HTTP principals are read-only by default through `MCP_HTTP_ALLOWED_CAPABILITIES=read`. Mutations require both an explicitly allowed HTTP capability class (for HTTP callers) and `ENABLE_WRITE_OPERATIONS=1` from the trusted server operator. Destructive HTTP access additionally requires exact capability IDs in `MCP_HTTP_ALLOWED_DESTRUCTIVE_CAPABILITIES` and exact resource IDs in `MCP_HTTP_ALLOWED_DESTRUCTIVE_RESOURCES`; a broad `destructive` class alone is rejected. A model argument cannot establish identity, authorization, or write enablement.
+Financial reads are confidential. Every invocation is authenticated and then authorized server-side against the exact capability, immutable configured target, and invocation resource identity. HTTP principals are read-only by default through `MCP_HTTP_ALLOWED_CAPABILITIES=read`. Mutations require both an explicitly allowed HTTP capability class (for HTTP callers) and `ENABLE_WRITE_OPERATIONS=1` from the trusted server operator. Destructive operations are narrower on both transports: stdio requires exact capability IDs in `MCP_STDIO_ALLOWED_DESTRUCTIVE_CAPABILITIES` and exact resource IDs in `MCP_STDIO_ALLOWED_DESTRUCTIVE_RESOURCES`; HTTP additionally requires the corresponding `MCP_HTTP_ALLOWED_DESTRUCTIVE_*` allowlists. A model argument cannot establish identity, authorization, or write enablement.
 
 The server does **not** advertise `requires_confirmation=true` because no independent server-side approval authority exists yet; any future confirmation claim must be backed by a trusted approval record rather than a model-controlled argument. A started mutation with an uninterpretable outcome is never declared safely retryable. Each invocation emits one structured server-side audit record with principal, exact capability, target identity, resource identity, policy decision, operator-gate decision, dependency state, result category, cancellation/saturation state, and correlation ID; credentials and protected response bodies are excluded. The audit logger owns an INFO-capable sink independent from `LOG_LEVEL`. Audit sink failures are result-preserving fail-open because an audit failure after a started mutation must not turn a completed write into a misleading retryable application failure; a minimal stderr failure signal is attempted instead.
 
@@ -31,6 +31,16 @@ KONTOMIERZ_MOCK_DATA=1 .venv/bin/kontomierz-mcp
 ```
 
 The default transport is stdio. Configure an MCP host to execute `.venv/bin/kontomierz-mcp` with `KONTOMIERZ_API_KEY` in its trusted environment.
+
+Ordinary stdio writes still require `ENABLE_WRITE_OPERATIONS=1`. Destructive stdio operations additionally require an exact capability and exact resource allowlist, for example:
+
+```bash
+MCP_STDIO_ALLOWED_DESTRUCTIVE_CAPABILITIES=destroy_wallet
+MCP_STDIO_ALLOWED_DESTRUCTIVE_RESOURCES=wallet:123
+ENABLE_WRITE_OPERATIONS=1
+```
+
+Without both stdio destructive allowlists, destructive tools remain denied even when the global write gate is enabled.
 
 ## Authenticated loopback Streamable HTTP
 
@@ -61,16 +71,15 @@ ENABLE_WRITE_OPERATIONS=1
 
 Wildcards are not accepted for destructive resources. Authentication alone never grants write access.
 
-Write bodies use `application/x-www-form-urlencoded` encoding, matching the live API
-contract verified on 2026-08-08 (JSON-encoded write bodies are rejected upstream); dates
-in write payloads are converted internally to `DD-MM-YYYY`. `KONTOMIERZ_BODY_MODE=json`
-remains available only as a compatibility knob.
+Write bodies use `application/x-www-form-urlencoded` encoding, matching the live API contract verified on 2026-08-08; JSON-encoded write bodies are rejected upstream. Public tool dates accept ISO `YYYY-MM-DD` only and budget months accept `YYYY-MM` only. Localized upstream `DD-MM-YYYY` values are produced internally after public validation. Real-backend configuration rejects `KONTOMIERZ_BODY_MODE=json` instead of preserving a known-broken compatibility mode.
+
+Successful MCP responses expose an opaque `target_ref` plus `target_scope` in `_meta`; the internal credential-derived target identity is retained only for authorization and audit, not returned to the model.
 
 ## Reproducible dependency graphs
 
 `requirements/` contains exact Linux x64 wheel locks for runtime and development on Python 3.11, 3.12, and 3.13, plus a shared build-tool lock. Each requirement is pinned to an exact version and SHA-256 wheel digest. CI installs these files with `--require-hashes --no-deps --only-binary=:all:` and then runs `pip check`, so acceptance paths cannot silently resolve undeclared transitive dependencies.
 
-The exact release artifact uses the Python 3.12 runtime lock. That lock and the build lock are copied into the release bundle and covered by its checksum manifest.
+The exact release artifact uses the Python 3.12 runtime lock. That lock and the build lock are copied into the release bundle and covered by its checksum manifest. Package metadata pins the production MCP SDK to the tested `mcp==2.0.0` lane rather than claiming compatibility with untested future 2.x releases.
 
 ## Docker
 
@@ -89,11 +98,23 @@ The image runs as a non-root user and defaults to stdio. Hosted CI builds and sm
 
 ## Tests
 
+A plain pytest run excludes live/provider evidence by default:
+
 ```bash
-.venv/bin/python -m pytest -m "not external"
+.venv/bin/python -m pytest
 ```
 
-The default suite uses synthetic data. The official MCP SDK test is mandatory and fails collection when the SDK is absent; it is not silently skipped. Tests marked `external` are deliberate `NOT IMPLEMENTED` evidence gates for disposable real-system or provider-backed work and fail when explicitly selected until an authorized agent implements them. See [`docs/production-readiness.md`](docs/production-readiness.md) and [`AGENTS.md`](AGENTS.md) for the handoff and full gate.
+The default suite uses synthetic data. The official MCP SDK test is mandatory and fails collection when the SDK is absent; it is not silently skipped.
+
+The live Kontomierz contract suite is intentionally harder to start. It requires a repository `.env` containing the real API key **and both** explicit opt-ins, and should be run only against a disposable account after reviewing its write/delete behavior:
+
+```bash
+KONTOMIERZ_EXTERNAL_TESTS=1 \
+KONTOMIERZ_ALLOW_REAL_MUTATIONS=1 \
+.venv/bin/python -m pytest -o addopts='' -m external tests/external/test_real_kontomierz_contract.py
+```
+
+Those tests use unique descriptions and cleanup fallbacks so a failure after a successful create but before normal reconciliation still attempts to remove the test record. Provider/repository acceptance placeholders in `tests/external/test_production_evidence.py` remain intentionally failing until the corresponding external authority exists; they are not fabricated or silently skipped. See [`docs/production-readiness.md`](docs/production-readiness.md) and [`AGENTS.md`](AGENTS.md) for the handoff and full gate.
 
 ## Contracts and architecture
 
@@ -104,4 +125,4 @@ The default suite uses synthetic data. The official MCP SDK test is mandatory an
 
 ## Compatibility note
 
-Version 1.2 is intentionally incompatible with the legacy 1.0.x transport and response surface. Public dates use ISO `YYYY-MM-DD`; budget months use `YYYY-MM`; pagination exposes only continuation hints; and update tools distinguish omission (`None`) from an explicit empty text value.
+Version 2.0.0 is intentionally incompatible with the legacy 1.0.x transport and response surface. Public dates use ISO `YYYY-MM-DD`; budget months use `YYYY-MM`; pagination exposes only continuation hints; update tools distinguish omission (`None`) from an explicit empty text value; destructive stdio calls now require exact server-owned allowlists; and successful `_meta` identifies the authorized target through an opaque `target_ref` rather than exposing internal target identity.
