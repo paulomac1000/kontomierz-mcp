@@ -48,12 +48,15 @@ async def _assert_contract(client, *, http: bool) -> None:
     assert capabilities.is_error is False
     document = capabilities.structured_content["data"]
     assert document["schema_version"] == "3.0.0"
-    assert document["authorization_policy"] == "single-account-resource-v2"
+    assert document["authorization_policy"] == "single-account-resource-v3"
     assert set(document["tools"]) == set(TOOL_DEFINITIONS)
     assert document["tools"]["create_wallet"]["manifest"]["active_state"] == "disabled"
     if http:
         assert document["http_state_mode"] == "stateless"
         assert document["http_allowed_capabilities"] == ["read"]
+    else:
+        assert document["stdio_allowed_destructive_capabilities"] == []
+        assert document["tools"]["destroy_wallet"]["manifest"]["active_state"] == "disabled"
 
     result = await client.call_tool("list_accounts", {})
     assert result.is_error is False
@@ -106,7 +109,7 @@ async def smoke_http(executable: Path) -> None:
     process = subprocess.Popen(
         [str(executable)],
         env=environment,
-        stdout=subprocess.DEVNULL,
+ stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
         text=True,
     )
