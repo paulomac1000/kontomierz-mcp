@@ -133,13 +133,15 @@ def install_fake_sdk(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_every_registered_wrapper_delegates_to_the_kernel(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_every_registered_wrapper_delegates_to_the_kernel(
+    monkeypatch: pytest.MonkeyPatch,
+    write_settings: Settings,
+) -> None:
     install_fake_sdk(monkeypatch)
-    settings = Settings(api_key="", mock_data=True, enable_write_operations=True)
 
     for tool_name, arguments in SMOKE_SAMPLES.items():
-        kernel = build_kernel(settings, MockKontomierzClient())
-        server = build_server(settings, kernel)
+        kernel = build_kernel(write_settings, MockKontomierzClient())
+        server = build_server(write_settings, kernel)
         assert set(server.tools) == set(SMOKE_SAMPLES)
         result = await server.tools[tool_name](**arguments)
         assert result.is_error is False

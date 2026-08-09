@@ -189,7 +189,9 @@ class InvocationKernel:
                 list(self._settings.http_allowed_capabilities) if self._settings.streamable_http else None
             ),
             "stdio_allowed_destructive_capabilities": (
-                list(self._settings.stdio_allowed_destructive_capabilities) if not self._settings.streamable_http else None
+                list(self._settings.stdio_allowed_destructive_capabilities)
+                if not self._settings.streamable_http
+                else None
             ),
             "http_max_request_body_bytes": (
                 self._settings.http_max_request_body_bytes if self._settings.streamable_http else None

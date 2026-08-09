@@ -14,6 +14,20 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
+_MOCK_DESTRUCTIVE_CAPABILITIES = (
+    "destroy_wallet",
+    "delete_transaction",
+    "delete_budget",
+    "delete_schedule",
+)
+_MOCK_DESTRUCTIVE_RESOURCES = (
+    "wallet:102",
+    "transaction:1002",
+    "transaction:1003",
+    "budget:201",
+    "schedule:301",
+)
+
 
 @pytest.fixture
 def readonly_settings() -> Settings:
@@ -22,7 +36,15 @@ def readonly_settings() -> Settings:
 
 @pytest.fixture
 def write_settings() -> Settings:
-    return Settings(api_key="", mock_data=True, enable_write_operations=True)
+    settings = Settings(
+        api_key="",
+        mock_data=True,
+        enable_write_operations=True,
+        stdio_allowed_destructive_capabilities=_MOCK_DESTRUCTIVE_CAPABILITIES,
+        stdio_allowed_destructive_resources=_MOCK_DESTRUCTIVE_RESOURCES,
+    )
+    settings.validate()
+    return settings
 
 
 @pytest.fixture
