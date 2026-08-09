@@ -2,6 +2,47 @@
 
 All notable changes to kontomierz-mcp are recorded here.
 
+## 2.0.1 — Unreleased
+
+### Fixed
+
+- Write bodies now use `application/x-www-form-urlencoded` encoding by default, matching
+  the live Kontomierz API contract verified on 2026-08-08. JSON-encoded write bodies are
+  rejected by the upstream (401/404/422), so the previous JSON default broke real writes;
+  `KONTOMIERZ_BODY_MODE=json` remains only as a compatibility knob.
+- Empty-body success responses from schedule/budget create and update are no longer
+  reported as ambiguous failures. The adapter reconciles by listing (schedule by
+  description, budget by category/group) to return the created identity, falling back to
+  a success marker when the record is not yet visible.
+- Wealth points are unwrapped from their verified per-item `{"wealth_point": {...}}`
+  upstream shape.
+- Restored the full `repeat` (1=once … 6=biennial) and `holidays` (0/1/2) parameter
+  descriptions for `create_schedule`/`update_schedule`; a regression test now locks the
+  agent-facing ergonomics.
+- Streamable HTTP smoke now allows up to 60 seconds for server readiness on slow or
+  heavily loaded machines.
+
+### Changed
+
+- Mock backend response shapes now mirror the verified real API (account wrappers and
+  fields, `schedule_id`-based schedule list items, budget `kind`/`name`/`amount`, tags
+  without ids, `category_groups`, per-item wealth wrappers, realistic currencies).
+- The real upstream write/date/pagination contract is documented in
+  `docs/upstream-api.md` with live-account evidence from 2026-08-08.
+
+### Added
+
+- Real external evidence tests (`tests/external/test_real_kontomierz_contract.py`)
+  proving read shapes, schedule/transaction/budget write round trips with cleanup,
+  pagination ordering and termination, money precision normalization, ISO-date rejection,
+  and form-encoding requirements against the live account.
+
+### Security
+
+- No control was weakened: form-encoding verification confirms the historical
+  form-based contract; ambiguous-write handling still applies to timeout, transport loss,
+  and malformed success responses.
+
 ## 2.0.0 — Unreleased
 
 ### Breaking changes

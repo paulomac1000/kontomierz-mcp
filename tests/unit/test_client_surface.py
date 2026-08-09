@@ -37,11 +37,11 @@ def response_for(request: httpx.Request) -> httpx.Response:
     if "schedules" in path:
         return httpx.Response(200, json={"schedule": {"id": 4}})
     if path.endswith("wealth_points.json"):
-        return httpx.Response(200, json={"wealth_points": [{"id": 5}]})
+        return httpx.Response(200, json=[{"wealth_point": {"id": 5}}])
     raise AssertionError(f"Unhandled request: {method} {path}")
 
 
-def make_surface_client(*, body_mode: str = "json") -> KontomierzClient:
+def make_surface_client(*, body_mode: str = "form") -> KontomierzClient:
     return KontomierzClient(
         api_key="secret",
         base_url="https://example.test/k4",

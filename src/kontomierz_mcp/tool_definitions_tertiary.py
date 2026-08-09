@@ -20,11 +20,20 @@ TERTIARY_TOOL_DEFINITIONS: dict[str, ToolDefinition] = {
         (
             p("direction", "str", "withdrawal or deposit."),
             p("deadline_on", "str", "ISO date YYYY-MM-DD."),
-            p("holidays", "int", "Holiday behavior code: 0, 1, or 2."),
+            p(
+                "holidays",
+                "int",
+                "Holiday behavior: 0=no shift, 1=before weekend, 2=after weekend.",
+            ),
             p("description", "str", "Non-empty schedule description."),
             p("currency_amount", "str", "Positive finite decimal amount."),
             p("currency_name", "str", "Three-letter currency code."),
-            p("repeat", "int", "Repeat code from 1 through 9."),
+            p(
+                "repeat",
+                "int",
+                "Repeat code: 1=once, 8=weekly, 9=biweekly, 2=monthly, 7=bimonthly, "
+                "3=quarterly, 4=semiannual, 5=yearly, 6=biennial.",
+            ),
         ),
     ),
     "update_schedule": ToolDefinition(
@@ -34,11 +43,22 @@ TERTIARY_TOOL_DEFINITIONS: dict[str, ToolDefinition] = {
             p("schedule_id", "int", "Stable positive schedule ID."),
             p("direction", "str | None", "withdrawal or deposit; None omits the field.", None),
             p("deadline_on", "str | None", "ISO date YYYY-MM-DD; None omits the field.", None),
-            p("holidays", "int | None", "Holiday behavior code 0, 1, or 2; None omits it.", None),
+            p(
+                "holidays",
+                "int | None",
+                "Holiday behavior: 0=no shift, 1=before weekend, 2=after weekend; None omits it.",
+                None,
+            ),
             p("description", "str | None", "Description; empty string clears it and None omits it.", None),
             p("currency_amount", "str | None", "Positive finite decimal; None omits the field.", None),
             p("currency_name", "str | None", "Three-letter currency code; None omits the field.", None),
-            p("repeat", "int | None", "Repeat code 1 through 9; None omits the field.", None),
+            p(
+                "repeat",
+                "int | None",
+                "Repeat code: 1=once, 8=weekly, 9=biweekly, 2=monthly, 7=bimonthly, "
+                "3=quarterly, 4=semiannual, 5=yearly, 6=biennial; None omits the field.",
+                None,
+            ),
         ),
     ),
     "delete_schedule": ToolDefinition(

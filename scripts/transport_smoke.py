@@ -111,7 +111,7 @@ async def smoke_http(executable: Path) -> None:
         text=True,
     )
     try:
-        deadline = time.monotonic() + 15
+        deadline = time.monotonic() + 60
         ready_url = f"http://127.0.0.1:{port}/health/ready"
         ready_request = Request(ready_url, headers={"Authorization": f"Bearer {_HTTP_TOKEN}"})
         while time.monotonic() < deadline:

@@ -4,7 +4,7 @@ A loopback-first MCP server for the Kontomierz personal-finance API. The server 
 
 ## Security and migration status
 
-The current candidate is **2.0.0** because it intentionally removes legacy HTTP+SSE and the unauthenticated REST bridge and changes public date, error, pagination, and update semantics. It is not presented as formally L2+ compliant yet. Formal adoption remains blocked on provider-backed migration assessment with independent approval, protected release-environment administration, provider-verifiable build provenance, and contract tests against a disposable real Kontomierz account.
+The current candidate is **2.0.1** because it removes legacy HTTP+SSE and the unauthenticated REST bridge, changes public date, error, pagination, and update semantics, and switches write bodies to the form encoding verified against the live Kontomierz API on 2026-08-08. It is not presented as formally L2+ compliant yet. Formal adoption remains blocked on provider-backed migration assessment with independent approval, protected release-environment administration, provider-verifiable build provenance, and independent approval of the immutable revision.
 
 Financial reads are confidential. Every invocation is authenticated and then authorized server-side against the exact capability, immutable configured target, and invocation resource identity. HTTP principals are read-only by default through `MCP_HTTP_ALLOWED_CAPABILITIES=read`. Mutations require both an explicitly allowed HTTP capability class (for HTTP callers) and `ENABLE_WRITE_OPERATIONS=1` from the trusted server operator. Destructive HTTP access additionally requires exact capability IDs in `MCP_HTTP_ALLOWED_DESTRUCTIVE_CAPABILITIES` and exact resource IDs in `MCP_HTTP_ALLOWED_DESTRUCTIVE_RESOURCES`; a broad `destructive` class alone is rejected. A model argument cannot establish identity, authorization, or write enablement.
 
@@ -60,6 +60,11 @@ ENABLE_WRITE_OPERATIONS=1
 ```
 
 Wildcards are not accepted for destructive resources. Authentication alone never grants write access.
+
+Write bodies use `application/x-www-form-urlencoded` encoding, matching the live API
+contract verified on 2026-08-08 (JSON-encoded write bodies are rejected upstream); dates
+in write payloads are converted internally to `DD-MM-YYYY`. `KONTOMIERZ_BODY_MODE=json`
+remains available only as a compatibility knob.
 
 ## Reproducible dependency graphs
 

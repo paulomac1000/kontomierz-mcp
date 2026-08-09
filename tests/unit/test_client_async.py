@@ -7,7 +7,7 @@ from kontomierz_mcp.client import KontomierzClient
 from kontomierz_mcp.errors import ErrorCode, UpstreamError
 
 
-def make_client(handler, *, body_mode: str = "json") -> KontomierzClient:
+def make_client(handler, *, body_mode: str = "form") -> KontomierzClient:
     transport = httpx.MockTransport(handler)
     client = httpx.AsyncClient(transport=transport)
     return KontomierzClient(
@@ -80,7 +80,7 @@ async def test_write_429_is_not_ambiguous_and_preserves_retry_after() -> None:
 
 
 @pytest.mark.asyncio
-async def test_put_uses_json_and_preserves_empty_clear_value() -> None:
+async def test_put_uses_form_and_preserves_empty_clear_value() -> None:
     seen: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -91,8 +91,109 @@ async def test_put_uses_json_and_preserves_empty_clear_value() -> None:
     result = await client.update_wallet(1, user_name="")
     assert result["user_name"] == ""
     assert seen[0].method == "PUT"
+    assert seen[0].headers["content-type"].startswith("application/x-www-form-urlencoded")
+    assert "user_account%5Buser_name%5D=" in seen[0].content.decode()
+
+
+@pytest.mark.asyncio
+async def test_explicit_json_body_mode_remains_supported() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={"user_account": {"id": 1}})
+
+    client = make_client(handler, body_mode="json")
+    await client.update_wallet(1, user_name="x")
     assert seen[0].headers["content-type"].startswith("application/json")
-    assert b'"user_account[user_name]":""' in seen[0].content
+    assert b'"user_account[user_name]":"x"' in seen[0].content
+
+
+@pytest.mark.asyncio
+async def test_empty_create_body_is_success_not_ambiguous_and_reconciles() -> None:
+    calls: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        if request.method == "POST":
+            return httpx.Response(201)
+        return httpx.Response(
+            200,
+            json={"scheduled_transactions": [{"schedule_id": 42, "description": "Rent"}]},
+        )
+
+    client = make_client(handler)
+    result = await client.create_schedule(description="Rent", currency_amount="1.00")
+    assert result == {"schedule_id": 42, "description": "Rent"}
+    assert [call.method for call in calls] == ["POST", "GET"]
+
+
+@pytest.mark.asyncio
+async def test_empty_create_body_without_list_match_returns_created_marker() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST":
+            return httpx.Response(201)
+        return httpx.Response(200, json={"scheduled_transactions": []})
+
+    client = make_client(handler)
+    result = await client.create_schedule(description="Ghost")
+    assert result == {"created": True}
+
+
+@pytest.mark.asyncio
+async def test_empty_update_body_is_success_marker() -> None:
+    client = make_client(lambda _request: httpx.Response(200))
+    result = await client.update_schedule(7, description="x")
+    assert result == {"updated": True, "schedule_id": 7}
+
+
+@pytest.mark.asyncio
+async def test_empty_budget_create_reconciles_by_category() -> None:
+    calls: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        if request.method == "POST":
+            return httpx.Response(201)
+        return httpx.Response(
+            200,
+            json={
+                "budgets": [
+                    {"id": 9, "kind": "ordinary", "limit": "1.0", "category_id": 3},
+                    {"id": 10, "kind": "total", "limit": "1.0"},
+                ]
+            },
+        )
+
+    client = make_client(handler)
+    result = await client.create_budget("1.00", category_id=3)
+    assert result == {"id": 9, "kind": "ordinary", "limit": "1.0", "category_id": 3}
+    assert [call.method for call in calls] == ["POST", "GET"]
+
+
+@pytest.mark.asyncio
+async def test_empty_budget_update_is_success_marker() -> None:
+    client = make_client(lambda _request: httpx.Response(200))
+    result = await client.update_budget(9, "2.00")
+    assert result == {"updated": True}
+
+
+@pytest.mark.asyncio
+async def test_empty_transaction_create_is_success_marker() -> None:
+    client = make_client(lambda _request: httpx.Response(201))
+    result = await client.create_money_transaction(client_assigned_id="x")
+    assert result == {"created": True}
+
+
+@pytest.mark.asyncio
+async def test_wealth_points_unwrap_per_item_wrapper() -> None:
+    client = make_client(
+        lambda _request: httpx.Response(
+            200,
+            json=[{"wealth_point": {"id": 5, "date_on": "2026-08-01", "amount": "1.00", "notes": None}}],
+        )
+    )
+    assert await client.get_wealth_points() == [{"id": 5, "date_on": "2026-08-01", "amount": "1.00", "notes": None}]
 
 
 @pytest.mark.asyncio

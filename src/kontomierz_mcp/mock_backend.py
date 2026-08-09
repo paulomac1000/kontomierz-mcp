@@ -1,4 +1,8 @@
-"""Deterministic in-memory Kontomierz backend for development and tests."""
+"""Deterministic in-memory Kontomierz backend for development and tests.
+
+Response shapes mirror the real Kontomierz API contract verified on 2026-08-08
+against a live account (see docs/upstream-api.md).
+"""
 
 from __future__ import annotations
 
@@ -14,18 +18,44 @@ class MockKontomierzClient:
 
     def __init__(self) -> None:
         self.accounts = [
-            {"id": 101, "display_name": "Mock checking", "currency_name": "PLN", "currency_balance": "1250.50"},
-            {"id": 102, "display_name": "Mock wallet", "currency_name": "PLN", "currency_balance": "350.00"},
+            {
+                "id": 101,
+                "iban": "PL00 0000 0000 0000 0000 0000 0000",
+                "balance": "1250.50",
+                "iban_checksum": "XX",
+                "currency_balance": "1250.50",
+                "position": 1,
+                "plain_iban": None,
+                "currency_funds_available": None,
+                "display_name": "Mock checking",
+                "bank_name": "Portfel",
+                "bank_plugin_name": "Wallets",
+                "bank_position": 1,
+            },
+            {
+                "id": 102,
+                "iban": "PL00 0000 0000 0000 0000 0000 0001",
+                "balance": "350.00",
+                "iban_checksum": "XX",
+                "currency_balance": "350.00",
+                "position": 2,
+                "plain_iban": None,
+                "currency_funds_available": None,
+                "display_name": "Mock wallet",
+                "bank_name": "Portfel",
+                "bank_plugin_name": "Wallets",
+                "bank_position": 1,
+            },
         ]
         self.transactions = [
             {
                 "id": 1001,
                 "client_assigned_id": "mock-1001",
                 "description": "Mock groceries",
-                "currency_amount": "145.90",
+                "currency_amount": "-145.90",
                 "currency_name": "PLN",
                 "direction": "withdrawal",
-                "transaction_on": "01-08-2026",
+                "transaction_on": "2026-08-01",
             },
             {
                 "id": 1002,
@@ -34,11 +64,32 @@ class MockKontomierzClient:
                 "currency_amount": "8500.00",
                 "currency_name": "PLN",
                 "direction": "deposit",
-                "transaction_on": "31-07-2026",
+                "transaction_on": "2026-07-31",
             },
         ]
-        self.budgets = [{"id": 201, "limit": "600.00", "name": "Mock groceries", "category_id": 1}]
-        self.schedules = [{"id": 301, "description": "Mock rent", "currency_amount": "1200.00", "paid": False}]
+        self.budgets = [
+            {
+                "id": 201,
+                "kind": "ordinary",
+                "name": "Mock groceries",
+                "limit": "600.00",
+                "amount": "0.0",
+                "category_id": 1,
+            }
+        ]
+        self.schedules = [
+            {
+                "id": 301,
+                "description": "Mock rent",
+                "currency_amount": "1200.00",
+                "currency_name": "PLN",
+                "repeat": 2,
+                "repeat_description": "co miesiąc",
+                "holidays": "0",
+                "holidays_description": "nie przesuwaj",
+                "next_deadline_on": "2026-09-01",
+            }
+        ]
         self.closed = False
         self.available = True
 
@@ -60,7 +111,7 @@ class MockKontomierzClient:
         raise ApplicationError(ErrorCode.RESOURCE_NOT_FOUND, f"Resource {identifier} was not found")
 
     def get_user_accounts(self) -> list[dict[str, Any]]:
-        return deepcopy(self.accounts)
+        return [deepcopy(account) for account in self.accounts]
 
     def create_wallet(
         self,
@@ -71,10 +122,17 @@ class MockKontomierzClient:
     ) -> dict[str, Any]:
         item = {
             "id": self._next_id(self.accounts),
-            "display_name": "Mock wallet" if user_name is None else user_name,
+            "iban": "PL00 0000 0000 0000 0000 0000 0002",
+            "balance": currency_balance,
+            "iban_checksum": "XX",
             "currency_balance": currency_balance,
-            "currency_name": currency_name,
-            "liquid": liquid,
+            "position": len(self.accounts) + 1,
+            "plain_iban": None,
+            "currency_funds_available": None,
+            "display_name": "Mock wallet" if user_name is None else user_name,
+            "bank_name": "Portfel",
+            "bank_plugin_name": "Wallets",
+            "bank_position": 1,
         }
         self.accounts.append(item)
         return deepcopy(item)
@@ -128,13 +186,34 @@ class MockKontomierzClient:
         return True
 
     def get_categories(self, direction: str) -> list[dict[str, Any]]:
-        return [{"id": 1, "name": "Mock category", "direction": direction}]
+        return [
+            {
+                "id": 1,
+                "name": "Mock group",
+                "position": 1,
+                "color": "4169E1",
+                "categories": [
+                    {
+                        "category_group_id": 1,
+                        "id": 11,
+                        "name": "Mock category",
+                        "position": 1,
+                        "color": "5175e3",
+                        "spending": True,
+                    }
+                ],
+            }
+        ]
 
     def get_tags(self) -> list[dict[str, Any]]:
-        return [{"id": 1, "name": "mock"}]
+        return [{"name": "mock"}]
 
     def get_currencies(self) -> list[dict[str, Any]]:
-        return [{"id": 1, "name": "PLN", "importance": "major", "full_name": "Polish złoty"}]
+        return [
+            {"id": 1, "name": "PLN", "full_name": "Polish złoty", "importance": "major"},
+            {"id": 2, "name": "EUR", "full_name": "Euro", "importance": "major"},
+            {"id": 3, "name": "USD", "full_name": "US Dollar", "importance": "major"},
+        ]
 
     def get_budgets(self, month_on: str | None = None) -> list[dict[str, Any]]:
         return deepcopy(self.budgets)
@@ -148,11 +227,16 @@ class MockKontomierzClient:
     ) -> dict[str, Any]:
         item = {
             "id": self._next_id(self.budgets),
+            "kind": "ordinary",
+            "name": "Mock budget",
             "limit": limit,
-            "category_id": category_id,
-            "category_group_id": category_group_id,
+            "amount": "0.0",
             "month_on": month_on,
         }
+        if category_id is not None:
+            item["category_id"] = category_id
+        if category_group_id is not None:
+            item["category_group_id"] = category_group_id
         self.budgets.append(item)
         return deepcopy(item)
 
@@ -172,15 +256,36 @@ class MockKontomierzClient:
     def get_scheduled_transactions(self, **filters: Any) -> list[dict[str, Any]]:
         paid = filters.get("schedule_group_name") == "paid"
         values = [deepcopy(item) for item in self.schedules if bool(item.get("paid")) is paid]
-        page = int(filters.get("page", 1))
+        page_number = int(filters.get("page", 1))
         per_page = filters.get("per_page")
         if per_page:
-            start = (page - 1) * int(per_page)
+            start = (page_number - 1) * int(per_page)
             values = values[start : start + int(per_page)]
-        return values
+        return [
+            {
+                "schedule_id": item["id"],
+                "transaction_on": "01-09-2026",
+                "description": item["description"],
+                "currency_amount": item["currency_amount"],
+                "currency_name": item["currency_name"],
+                "paid": "false" if not item.get("paid") else "true",
+            }
+            for item in values
+        ]
 
     def get_schedule(self, schedule_id: int) -> dict[str, Any]:
-        return deepcopy(self._find(self.schedules, schedule_id))
+        item = self._find(self.schedules, schedule_id)
+        return {
+            "id": item["id"],
+            "next_deadline_on": item.get("next_deadline_on"),
+            "description": item["description"],
+            "currency_amount": item["currency_amount"],
+            "currency_name": item["currency_name"],
+            "repeat": item.get("repeat", 1),
+            "repeat_description": item.get("repeat_description", "tylko raz"),
+            "holidays": item.get("holidays", "0"),
+            "holidays_description": item.get("holidays_description", "nie przesuwaj"),
+        }
 
     def create_schedule(self, **fields: Any) -> dict[str, Any]:
         item = {"id": self._next_id(self.schedules), "paid": False, **fields}
@@ -208,7 +313,14 @@ class MockKontomierzClient:
         return True
 
     def get_wealth_points(self, start_on: str | None = None, end_on: str | None = None) -> list[dict[str, Any]]:
-        return [{"id": 1, "date_on": date(2026, 8, 1).isoformat(), "amount": "50000.00", "notes": "mock"}]
+        return [
+            {
+                "id": 1,
+                "date_on": date(2026, 8, 1).isoformat(),
+                "amount": "50000.00",
+                "notes": None,
+            }
+        ]
 
     def get_pie_chart(self, **filters: Any) -> dict[str, Any]:
-        return {"chart_kind": filters.get("chart_kind", "pie"), "data": [{"name": "Mock", "y": "145.90"}]}
+        return {"type": "incomes-vs-spendings", "data": [{"name": "Mock", "y": "145.90"}]}

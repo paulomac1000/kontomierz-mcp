@@ -43,7 +43,16 @@ Target technical alignment with the immutable `ai-skills` revision `c6dc6b13b2dd
 ## Deferred gaps
 
 - A schema-valid `migration-assessment.yaml` is still missing. The pinned schema requires a concrete GitHub `decision.reviewer` even for `request-changes`, and the validator requires that reviewer to be independent from every `prepared_by` identity. PR #7 currently has no submitted GitHub review, so no reviewer identity or review ID is fabricated.
-- Real upstream write method/body, pagination termination, `client_assigned_id` reconciliation, money precision, rate-limit, and credential-recovery contracts require a disposable Kontomierz account. These gaps are encoded as intentionally failing `external` tests rather than passing skips.
+- Real upstream write method/body, pagination termination, money precision, and date
+  contracts are now verified with live-account evidence collected on 2026-08-08: writes
+  require form-encoded bodies (JSON is rejected), write dates use `DD-MM-YYYY`, schedule
+  and budget creates return 201 with empty bodies (reconciled by listing), transactions
+  return the created object, `scheduled_transactions` pagination honors `page`/`per_page`
+  with stable ordering and terminates, and withdrawal amounts normalize to negative
+  strings. The evidence lives in `tests/external/test_real_kontomierz_contract.py`, which
+  cleans up every record it creates. `client_assigned_id` reconciliation semantics and
+  interrupted-create (post-timeout) reconciliation remain unproven and stay encoded as
+  external evidence gates.
 - Independent approval for the final immutable revision is still required.
 - Repository administrators must configure the `release` environment with required reviewers, self-review prevention, and protected-branch deployment policy. The publish verifier fails closed when that environment is missing or insufficiently protected, but repository administration still requires an external privileged action.
 - The current protected publish step emits a promotion attestation. A stronger provider-verifiable build provenance statement for the read-only CI build remains a separate evidence item.
@@ -51,4 +60,4 @@ Target technical alignment with the immutable `ai-skills` revision `c6dc6b13b2dd
 
 ## Approval condition
 
-Keep the PR draft until hosted quality, standards, Python compatibility, locked exact-wheel, authenticated stdio/HTTP smoke, adversarial HTTP security, and Docker gates pass on the same exact implementation SHA; real-system evidence is completed; release evidence is reviewed; the migration assessment is switched to provider-backed mode with real final evidence; the `release` environment is administratively protected; and an independent reviewer approves the immutable revision.
+Keep the PR draft until hosted quality, standards, Python compatibility, locked exact-wheel, authenticated stdio/HTTP smoke, adversarial HTTP security, and Docker gates pass on the same exact implementation SHA; release evidence is reviewed; the migration assessment is switched to provider-backed mode with real final evidence; the `release` environment is administratively protected; and an independent reviewer approves the immutable revision. Real-system read/write contract evidence for this revision was supplied on 2026-08-08 against the repository owner's live account; formal L2+ adoption still requires the remaining provider-backed and administrative items.

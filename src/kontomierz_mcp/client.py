@@ -21,7 +21,7 @@ class KontomierzClient:
         api_key: str,
         base_url: str,
         timeout_seconds: int,
-        body_mode: str = "json",
+        body_mode: str = "form",
         client: httpx.AsyncClient | None = None,
     ) -> None:
         self._api_key = api_key
@@ -54,7 +54,7 @@ class KontomierzClient:
         query: Mapping[str, Any] | None = None,
         body: Mapping[str, Any] | None = None,
         expect_json: bool = True,
-    ) -> Json | bool:
+    ) -> Json | bool | None:
         params = {"api_key": self._api_key}
         if query:
             params.update({key: value for key, value in query.items() if value is not None and value != ""})
@@ -127,6 +127,8 @@ class KontomierzClient:
 
         if not expect_json or response.status_code == 204:
             return True
+        if response.status_code in {200, 201} and not response.content.strip():
+            return None
         try:
             payload = response.json()
         except ValueError as exc:
@@ -144,9 +146,9 @@ class KontomierzClient:
         return payload
 
     @staticmethod
-    def _unwrap(payload: Json | bool, key: str) -> Any:
-        if payload is True:
-            return True
+    def _unwrap(payload: Json | bool | None, key: str) -> Any:
+        if payload is True or payload is None:
+            return payload
         if isinstance(payload, dict):
             return payload.get(key, payload)
         return payload
@@ -170,19 +172,17 @@ class KontomierzClient:
         }
         if user_name is not None:
             body["user_account[user_name]"] = user_name
-        return self._response_object(
-            await self._request("POST", "user_accounts/create_wallet.json", body=body),
-            "user_account",
-            write=True,
-        )
+        payload = await self._request("POST", "user_accounts/create_wallet.json", body=body)
+        if payload is None:
+            return {"created": True}
+        return self._response_object(payload, "user_account", write=True)
 
     async def update_wallet(self, wallet_id: int, **fields: Any) -> dict[str, Any]:
         body = {f"user_account[{key}]": value for key, value in fields.items() if value is not None}
-        return self._response_object(
-            await self._request("PUT", f"user_accounts/{wallet_id}/update_wallet.json", body=body),
-            "user_account",
-            write=True,
-        )
+        payload = await self._request("PUT", f"user_accounts/{wallet_id}/update_wallet.json", body=body)
+        if payload is None:
+            return {"updated": True, "wallet_id": wallet_id}
+        return self._response_object(payload, "user_account", write=True)
 
     async def destroy_wallet(self, wallet_id: int) -> bool:
         return bool(await self._request("DELETE", f"user_accounts/{wallet_id}/destroy_wallet.json", expect_json=False))
@@ -204,19 +204,17 @@ class KontomierzClient:
 
     async def create_money_transaction(self, **fields: Any) -> dict[str, Any]:
         body = {f"money_transaction[{key}]": value for key, value in fields.items() if value is not None}
-        return self._response_object(
-            await self._request("POST", "money_transactions.json", body=body),
-            "money_transaction",
-            write=True,
-        )
+        payload = await self._request("POST", "money_transactions.json", body=body)
+        if payload is None:
+            return {"created": True}
+        return self._response_object(payload, "money_transaction", write=True)
 
     async def update_money_transaction(self, transaction_id: int, **fields: Any) -> dict[str, Any]:
         body = {f"money_transaction[{key}]": value for key, value in fields.items() if value is not None}
-        return self._response_object(
-            await self._request("PUT", f"money_transactions/{transaction_id}.json", body=body),
-            "money_transaction",
-            write=True,
-        )
+        payload = await self._request("PUT", f"money_transactions/{transaction_id}.json", body=body)
+        if payload is None:
+            return {"updated": True, "transaction_id": transaction_id}
+        return self._response_object(payload, "money_transaction", write=True)
 
     async def delete_money_transaction(self, transaction_id: int) -> bool:
         return bool(await self._request("DELETE", f"money_transactions/{transaction_id}.json", expect_json=False))
@@ -271,7 +269,26 @@ class KontomierzClient:
             body["budget[category_group_id]"] = category_group_id
         if month_on:
             body["budget[month_on]"] = month_on
-        return self._response_object(await self._request(method, path, body=body), "budget", write=True)
+        payload = await self._request(method, path, body=body)
+        if payload is None:
+            if method == "PUT":
+                return {"updated": True}
+            return await self._reconcile_budget(category_id, category_group_id)
+        return self._response_object(payload, "budget", write=True)
+
+    async def _reconcile_budget(self, category_id: int | None, category_group_id: int | None) -> dict[str, Any]:
+        try:
+            items = self._expect_list(self._unwrap(await self._request("GET", "budgets.json"), "budgets"))
+        except UpstreamError:
+            return {"created": True}
+        for item in reversed(items):
+            if not isinstance(item, dict) or item.get("kind") != "ordinary":
+                continue
+            if category_id is not None and item.get("category_id") == category_id:
+                return item
+            if category_group_id is not None and item.get("category_group_id") == category_group_id:
+                return item
+        return {"created": True}
 
     async def delete_budget(self, budget_id: int) -> bool:
         return bool(await self._request("DELETE", f"budgets/{budget_id}.json", expect_json=False))
@@ -295,14 +312,36 @@ class KontomierzClient:
         )
 
     async def create_schedule(self, **fields: Any) -> dict[str, Any]:
-        return await self._schedule_write("POST", "schedules.json", fields)
+        payload = await self._schedule_write("POST", "schedules.json", fields)
+        if payload is None:
+            return await self._reconcile_schedule(fields)
+        return payload
 
     async def update_schedule(self, schedule_id: int, **fields: Any) -> dict[str, Any]:
-        return await self._schedule_write("PUT", f"schedules/{schedule_id}.json", fields)
+        payload = await self._schedule_write("PUT", f"schedules/{schedule_id}.json", fields)
+        if payload is None:
+            return {"updated": True, "schedule_id": schedule_id}
+        return payload
 
-    async def _schedule_write(self, method: str, path: str, fields: Mapping[str, Any]) -> dict[str, Any]:
+    async def _schedule_write(self, method: str, path: str, fields: Mapping[str, Any]) -> dict[str, Any] | None:
         body = {f"schedule[{key}]": value for key, value in fields.items() if value is not None}
-        return self._response_object(await self._request(method, path, body=body), "schedule", write=True)
+        payload = await self._request(method, path, body=body)
+        if payload is None:
+            return None
+        return self._response_object(payload, "schedule", write=True)
+
+    async def _reconcile_schedule(self, fields: Mapping[str, Any]) -> dict[str, Any]:
+        description = str(fields.get("description", ""))
+        try:
+            items = self._expect_list(
+                self._unwrap(await self._request("GET", "scheduled_transactions.json"), "scheduled_transactions")
+            )
+        except UpstreamError:
+            return {"created": True}
+        for item in reversed(items):
+            if isinstance(item, dict) and item.get("description") == description:
+                return item
+        return {"created": True}
 
     async def delete_schedule(self, schedule_id: int) -> bool:
         return bool(await self._request("DELETE", f"schedules/{schedule_id}.json", expect_json=False))
@@ -320,18 +359,22 @@ class KontomierzClient:
         )
 
     async def get_wealth_points(self, start_on: str | None = None, end_on: str | None = None) -> list[dict[str, Any]]:
-        return self._expect_list(
-            self._unwrap(
-                await self._request("GET", "wealth_points.json", query={"start_on": start_on, "end_on": end_on}),
-                "wealth_points",
-            )
-        )
+        payload = await self._request("GET", "wealth_points.json", query={"start_on": start_on, "end_on": end_on})
+        items = self._expect_list(payload)
+        # The upstream wraps every wealth point in a per-item "wealth_point" object.
+        return [item.get("wealth_point", item) for item in items]
 
     async def get_pie_chart(self, **filters: Any) -> dict[str, Any]:
         return self._expect_dict(await self._request("GET", "charts/money_transactions.json", query=filters))
 
     @staticmethod
-    def _response_object(payload: Json | bool, key: str, *, write: bool) -> dict[str, Any]:
+    def _response_object(payload: Json | bool | None, key: str, *, write: bool) -> dict[str, Any]:
+        if payload is None:
+            raise UpstreamError(
+                ErrorCode.UPSTREAM_FAILURE,
+                "Kontomierz returned an empty response",
+                write_outcome_ambiguous=write,
+            )
         if not isinstance(payload, dict) or key not in payload:
             raise UpstreamError(
                 ErrorCode.UPSTREAM_FAILURE,

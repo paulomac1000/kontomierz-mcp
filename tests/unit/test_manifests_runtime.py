@@ -47,7 +47,7 @@ def test_governed_catalog_has_one_complete_definition_per_tool() -> None:
 
 def test_manifest_claims_are_conservative_and_internally_consistent() -> None:
     for manifest in TOOL_MANIFESTS.values():
-        assert manifest.version.startswith("2.0.0")
+        assert manifest.version.startswith("2.0.1")
         assert manifest.timeout_ms > 0
         assert manifest.target_binding.fallback == "forbidden"
         assert manifest.automatic_retry is False
@@ -115,3 +115,14 @@ def test_active_projection_matches_dependency_and_operator_policy() -> None:
     assert project_manifest(read, writes_enabled=True, dependency_ready=None).active_state == "degraded"
     assert project_manifest(read, writes_enabled=True, dependency_ready=True).active_state == "active"
     assert project_manifest(local, writes_enabled=False, dependency_ready=False).active_state == "active"
+
+
+def test_schedule_parameter_descriptions_keep_agent_ergonomics() -> None:
+    repeat = "1=once, 8=weekly, 9=biweekly, 2=monthly, 7=bimonthly, 3=quarterly, 4=semiannual, 5=yearly, 6=biennial"
+    holidays = "0=no shift, 1=before weekend, 2=after weekend"
+    for name in ("create_schedule", "update_schedule"):
+        parameters = {p.name: p.description for p in TOOL_DEFINITIONS[name].parameters}
+        assert "1=once" in parameters["repeat"]
+        assert repeat in parameters["repeat"]
+        assert "0=no shift" in parameters["holidays"]
+        assert holidays in parameters["holidays"]

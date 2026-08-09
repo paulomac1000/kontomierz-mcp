@@ -124,7 +124,7 @@ class Settings:
     api_key: str
     api_base_url: str = _DEFAULT_API_BASE_URL
     api_timeout_seconds: int = 30
-    body_mode: str = "json"
+    body_mode: str = "form"
     transport: str = "stdio"
     host: str = "127.0.0.1"
     port: int = 9101
@@ -163,7 +163,7 @@ class Settings:
             api_key=env.get("KONTOMIERZ_API_KEY", "").strip(),
             api_base_url=env.get("KONTOMIERZ_API_BASE_URL", _DEFAULT_API_BASE_URL).rstrip("/"),
             api_timeout_seconds=_positive_int(env, "KONTOMIERZ_API_TIMEOUT", 30),
-            body_mode=env.get("KONTOMIERZ_BODY_MODE", "json").strip().lower(),
+            body_mode=env.get("KONTOMIERZ_BODY_MODE", "form").strip().lower(),
             transport=env.get("MCP_TRANSPORT", "stdio").strip().lower(),
             host=env.get("MCP_HOST", "127.0.0.1").strip(),
             port=_positive_int(env, "MCP_PORT", 9101),
