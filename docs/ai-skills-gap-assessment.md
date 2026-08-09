@@ -5,21 +5,21 @@ type: decision
 status: evolving
 rigor: operational
 owners: [repository-maintainers]
-verification: Compare the exact SHA with ai-skills revision `c6dc6b13b2dd40b6e087140cd071b45067d75b39`, run hosted CI, and complete provider-backed evidence.
+verification: Compare the exact SHA with ai-skills revision `b54fc6b27ea80b36a70d5de73445970e17f55789`, run hosted CI, and complete provider-backed evidence.
 ---
 # AI Skills gap assessment
 
 ## Decision
 
-Target technical alignment with the immutable `ai-skills` revision `c6dc6b13b2dd40b6e087140cd071b45067d75b39` while withholding a formal L2+ claim. A newer branch head may exist in `ai-skills`, but this assessment remains intentionally pinned to the immutable revision whose normative MCP contract, adoption schema, validator, rule catalog, and AFDS validator were previously verified for this migration. Updating that authority requires a separate exact-revision evidence run rather than a floating branch reference.
+Target technical alignment with the immutable `ai-skills` revision `b54fc6b27ea80b36a70d5de73445970e17f55789`, the current head of `fix/unified-contract-release-hardening` used for this review, while withholding a formal L2+ claim. CI and this document pin the exact revision rather than a floating branch reference. Any later authority update requires a new exact-revision evidence run.
 
 ## Closed or materially reduced gaps
 
-- Configuration precedes dependency creation and rejects invalid TCP ports and unsafe HTTP policy values.
+- Configuration precedes dependency creation and rejects invalid TCP ports, unsafe HTTP policy values, and the known-broken JSON write mode for the real Kontomierz backend.
 - One kernel owns policy, bounded admission, concurrency, deadlines, readiness, error mapping, and metadata.
 - Authentication and authorization are separate: every invocation is bound server-side to an exact capability ID, capability class, immutable configured target, explicit resource identity, and normalized-argument digest, then revalidated immediately before I/O.
 - Streamable HTTP is fail-closed without request-scoped Bearer authentication and defaults to read-only authorization; write capability classes require explicit server-owned policy in addition to the operator write gate.
-- Remote destructive access is narrower than a capability class: `destructive` is rejected unless exact capability IDs and exact resource identities are configured in independent allowlists.
+- Destructive access is narrower than a capability class on both transports. Stdio requires exact capability IDs and exact resource identities through `MCP_STDIO_ALLOWED_DESTRUCTIVE_*`; HTTP requires its own exact `MCP_HTTP_ALLOWED_DESTRUCTIVE_*` lists in addition to the HTTP capability class. The global write gate alone never authorizes deletion.
 - Local stdio uses a process-derived principal and the principal is included in structured server-side audit records rather than model-visible output.
 - Each invocation emits one bounded JSON audit event containing correlation, principal, capability/target/resource policy decision, operator-gate decision, dependency state, result category, duration, cancellation, saturation, and ambiguous state without credentials or protected result bodies.
 - The audit channel owns an INFO-capable sink independent from ordinary `LOG_LEVEL`; sink failure is explicitly result-preserving fail-open to avoid turning a completed mutation into a misleading post-I/O application failure.
@@ -30,29 +30,24 @@ Target technical alignment with the immutable `ai-skills` revision `c6dc6b13b2dd
 - Started write timeout, connection loss, response loss, malformed success shape, and ambiguous 5xx become non-retryable ambiguous outcomes.
 - One governed catalog owns signatures, descriptions, schema expectations, manifests, registration, versions, and active-state discovery.
 - Runtime manifests no longer claim automatic retry, replay-safe writes, or confirmation without executable enforcement.
-- Breaking transport, error, pagination, and input changes are versioned as `1.2`.
+- Breaking transport, error, pagination, metadata, authorization, and input changes are versioned as `2.0.0`, consistent with the current ai-skills major-version rule for incompatible tool contracts.
+- Public dates accept ISO `YYYY-MM-DD` only and budget months accept `YYYY-MM` only; localized `DD-MM-YYYY` is an internal upstream representation rather than an undocumented public compatibility path.
 - MCP errors are explicit stable `CallToolResult` documents.
+- Successful response metadata exposes an opaque `target_ref` plus `target_scope`; credential-derived target identity remains internal to authorization and audit.
 - Readiness includes a bounded cached dependency probe behind the authenticated HTTP readiness boundary.
 - Linux x64 runtime and development dependency graphs are exact-wheel hash-locked separately for Python 3.11, 3.12, and 3.13; build tooling has its own hash lock. Acceptance paths install them with `--require-hashes --no-deps --only-binary=:all:` and verify completeness with `pip check`.
+- Production package metadata pins `mcp==2.0.0`, matching the exact tested SDK lane instead of claiming unverified future 2.x compatibility.
 - Exact-artifact CI materializes the Python 3.12 runtime wheelhouse from the committed lock, tests a runtime-only installed wheel without network resolution, and includes the runtime/build locks in the checksummed release bundle.
-- Workflow policy profiles are explicit and trusted validators are pinned to the reviewed assessed ai-skills revision.
+- Plain `pytest` excludes external/provider evidence by default. Live-account contract tests require two explicit opt-ins before credentials are read or mutations are attempted, and cleanup uses ID plus description/snapshot reconciliation fallbacks.
+- Workflow policy profiles are explicit and trusted validators are pinned to the exact reviewed ai-skills revision above.
 - Read-only release validation proves the source SHA is reachable from the trusted default branch before accepting the closed CI artifact.
 - Protected publishing does not execute candidate source after release write permissions are granted and uses a full 40-character SHA tag.
 - The Docker build verifies the exact wheel/wheelhouse checksum manifest and installs the committed runtime lock with `--require-hashes` before the application wheel.
 
 ## Deferred gaps
 
-- A schema-valid `migration-assessment.yaml` is still missing. The pinned schema requires a concrete GitHub `decision.reviewer` even for `request-changes`, and the validator requires that reviewer to be independent from every `prepared_by` identity. PR #7 currently has no submitted GitHub review, so no reviewer identity or review ID is fabricated.
-- Real upstream write method/body, pagination termination, money precision, and date
-  contracts are now verified with live-account evidence collected on 2026-08-08: writes
-  require form-encoded bodies (JSON is rejected), write dates use `DD-MM-YYYY`, schedule
-  and budget creates return 201 with empty bodies (reconciled by listing), transactions
-  return the created object, `scheduled_transactions` pagination honors `page`/`per_page`
-  with stable ordering and terminates, and withdrawal amounts normalize to negative
-  strings. The evidence lives in `tests/external/test_real_kontomierz_contract.py`, which
-  cleans up every record it creates. `client_assigned_id` reconciliation semantics and
-  interrupted-create (post-timeout) reconciliation remain unproven and stay encoded as
-  external evidence gates.
+- A provider-backed, independently reviewed migration/adoption assessment for the final immutable candidate is still missing. No reviewer identity, provider review ID, or approval evidence is fabricated while PR #7 has no independent submitted review.
+- Real upstream write method/body, pagination termination, money precision, and date contracts are verified with live-account evidence collected on 2026-08-08: writes require form-encoded bodies, upstream write dates use `DD-MM-YYYY`, schedule and budget creates return 201 with empty bodies (reconciled by listing), transactions return the created object, `scheduled_transactions` pagination honors `page`/`per_page` with stable ordering and terminates, and withdrawal amounts normalize to negative strings. The evidence lives in `tests/external/test_real_kontomierz_contract.py`. `client_assigned_id` uniqueness/reconciliation semantics and interrupted-create post-timeout reconciliation remain unproven and stay external evidence gates.
 - Independent approval for the final immutable revision is still required.
 - Repository administrators must configure the `release` environment with required reviewers, self-review prevention, and protected-branch deployment policy. The publish verifier fails closed when that environment is missing or insufficiently protected, but repository administration still requires an external privileged action.
 - The current protected publish step emits a promotion attestation. A stronger provider-verifiable build provenance statement for the read-only CI build remains a separate evidence item.
@@ -60,4 +55,4 @@ Target technical alignment with the immutable `ai-skills` revision `c6dc6b13b2dd
 
 ## Approval condition
 
-Keep the PR draft until hosted quality, standards, Python compatibility, locked exact-wheel, authenticated stdio/HTTP smoke, adversarial HTTP security, and Docker gates pass on the same exact implementation SHA; release evidence is reviewed; the migration assessment is switched to provider-backed mode with real final evidence; the `release` environment is administratively protected; and an independent reviewer approves the immutable revision. Real-system read/write contract evidence for this revision was supplied on 2026-08-08 against the repository owner's live account; formal L2+ adoption still requires the remaining provider-backed and administrative items.
+Keep the PR draft until hosted quality, latest-pinned standards, Python compatibility, locked exact-wheel, authenticated stdio/HTTP smoke, adversarial HTTP security, and Docker gates pass on the same exact implementation SHA; release evidence is reviewed; the migration/adoption assessment is provider-backed with real final evidence; the `release` environment is administratively protected; and an independent reviewer approves the immutable revision. Real-system read/write contract evidence for this revision was supplied on 2026-08-08 against the repository owner's live account; formal L2+ adoption still requires the remaining provider-backed and administrative items.
