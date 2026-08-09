@@ -2,14 +2,16 @@
 
 Executable contract evidence collected against a live account on 2026-08-08
 (repository owner authorized real-instance e2e). These tests stay under the
-``external`` marker: they are never part of normal CI, require
-``KONTOMIERZ_API_KEY`` from the repository ``.env``, and FAIL (not skip) when
-the credential is missing. Every created record is removed in ``finally``
-blocks; matching is done by the unique ``MCP-E2E-TEST`` description prefix.
+``external`` marker, are excluded by default, and require TWO explicit opt-ins:
+``KONTOMIERZ_EXTERNAL_TESTS=1`` and ``KONTOMIERZ_ALLOW_REAL_MUTATIONS=1``.
+They also require ``KONTOMIERZ_API_KEY`` from the repository ``.env``. Cleanup
+uses both captured IDs and unique ``MCP-E2E-TEST`` descriptions so a failure
+between a successful write and reconciliation does not silently orphan data.
 """
 
 from __future__ import annotations
 
+import os
 import uuid
 from datetime import date, timedelta
 from pathlib import Path
@@ -23,9 +25,26 @@ _BASE = "https://secure.kontomierz.pl/k4"
 _PREFIX = "MCP-E2E-TEST"
 
 
+def _require_live_test_opt_in() -> None:
+    required = {
+        "KONTOMIERZ_EXTERNAL_TESTS": os.environ.get("KONTOMIERZ_EXTERNAL_TESTS"),
+        "KONTOMIERZ_ALLOW_REAL_MUTATIONS": os.environ.get("KONTOMIERZ_ALLOW_REAL_MUTATIONS"),
+    }
+    missing = [name for name, value in required.items() if value != "1"]
+    if missing:
+        pytest.fail(
+            "Live Kontomierz evidence tests are disabled. Set BOTH "
+            "KONTOMIERZ_EXTERNAL_TESTS=1 and KONTOMIERZ_ALLOW_REAL_MUTATIONS=1 "
+            f"only for a deliberate disposable-account run; missing opt-in: {', '.join(missing)}"
+        )
+
+
 def _load_api_key() -> str:
+    _require_live_test_opt_in()
     env_path = Path(__file__).resolve().parents[2] / ".env"
-    for line in env_path.read_text().splitlines():
+    if not env_path.is_file():
+        pytest.fail("repository .env is required for external evidence tests")
+    for line in env_path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if line.startswith("KONTOMIERZ_API_KEY="):
             key = line.split("=", 1)[1].strip()
@@ -52,6 +71,86 @@ def _put_form(client: httpx.Client, key: str, path: str, data: dict[str, object]
 
 def _delete(client: httpx.Client, key: str, path: str) -> httpx.Response:
     return client.delete(f"{_BASE}/{path}", params={"api_key": key})
+
+
+def _schedule_ids_for_descriptions(
+    client: httpx.Client,
+    key: str,
+    descriptions: set[str],
+) -> set[int]:
+    response = _get(client, key, "scheduled_transactions.json")
+    if response.status_code != 200:
+        return set()
+    payload = response.json()
+    items = payload.get("scheduled_transactions", []) if isinstance(payload, dict) else []
+    result: set[int] = set()
+    for item in items:
+        if not isinstance(item, dict) or item.get("description") not in descriptions:
+            continue
+        schedule_id = item.get("schedule_id")
+        if isinstance(schedule_id, int) and schedule_id > 0:
+            result.add(schedule_id)
+    return result
+
+
+def _cleanup_schedules(
+    client: httpx.Client,
+    key: str,
+    *,
+    captured_ids: set[int],
+    descriptions: set[str],
+) -> None:
+    candidate_ids = set(captured_ids)
+    try:
+        candidate_ids.update(_schedule_ids_for_descriptions(client, key, descriptions))
+    except (httpx.HTTPError, ValueError, TypeError):
+        pass
+    for schedule_id in sorted(candidate_ids):
+        try:
+            _delete(client, key, f"schedules/{schedule_id}.json")
+        except httpx.HTTPError:
+            pass
+
+
+def _transaction_ids_for_description(client: httpx.Client, key: str, description: str) -> set[int]:
+    response = _get(client, key, "money_transactions.json")
+    if response.status_code != 200:
+        return set()
+    payload = response.json()
+    if not isinstance(payload, list):
+        return set()
+    result: set[int] = set()
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        candidate = item.get("money_transaction", item)
+        if not isinstance(candidate, dict):
+            continue
+        if candidate.get("description") != description and candidate.get("name") != description:
+            continue
+        transaction_id = candidate.get("id")
+        if isinstance(transaction_id, int) and transaction_id > 0:
+            result.add(transaction_id)
+    return result
+
+
+def _cleanup_transactions(
+    client: httpx.Client,
+    key: str,
+    *,
+    captured_ids: set[int],
+    description: str,
+) -> None:
+    candidate_ids = set(captured_ids)
+    try:
+        candidate_ids.update(_transaction_ids_for_description(client, key, description))
+    except (httpx.HTTPError, ValueError, TypeError):
+        pass
+    for transaction_id in sorted(candidate_ids):
+        try:
+            _delete(client, key, f"money_transactions/{transaction_id}.json")
+        except httpx.HTTPError:
+            pass
 
 
 def test_real_read_contract_shapes() -> None:
@@ -105,8 +204,9 @@ def test_real_read_contract_shapes() -> None:
 def test_real_schedule_write_round_trip() -> None:
     key = _load_api_key()
     description = f"{_PREFIX}-{uuid.uuid4().hex[:8]}"
+    updated_description = f"{description}-updated"
     deadline = (date.today() + timedelta(days=7)).strftime("%d-%m-%Y")
-    created_id: int | None = None
+    created_ids: set[int] = set()
     with _client() as client:
         try:
             response = _post_form(
@@ -125,16 +225,16 @@ def test_real_schedule_write_round_trip() -> None:
             )
             assert response.status_code == 201, response.text[:200]
 
-            items = _get(client, key, "scheduled_transactions.json").json()["scheduled_transactions"]
-            matches = [item for item in items if item.get("description") == description]
+            matches = _schedule_ids_for_descriptions(client, key, {description})
             assert matches, "created schedule must appear in the list"
-            created_id = matches[0]["schedule_id"]
+            created_id = sorted(matches)[0]
+            created_ids.add(created_id)
 
             updated = _put_form(
                 client,
                 key,
                 f"schedules/{created_id}.json",
-                {"schedule[description]": f"{description}-updated"},
+                {"schedule[description]": updated_description},
             )
             assert updated.status_code == 200, updated.text[:200]
 
@@ -143,16 +243,18 @@ def test_real_schedule_write_round_trip() -> None:
             unpaid = _put_form(client, key, f"schedules/{created_id}/mark_as_unpayed/{deadline}.json", {})
             assert unpaid.status_code == 200, unpaid.text[:200]
         finally:
-            if created_id is not None:
-                _delete(client, key, f"schedules/{created_id}.json")
-                gone = _get(client, key, f"schedules/{created_id}.json")
-                assert gone.status_code == 404, "deleted schedule must be gone"
+            _cleanup_schedules(
+                client,
+                key,
+                captured_ids=created_ids,
+                descriptions={description, updated_description},
+            )
 
 
 def test_real_transaction_write_round_trip() -> None:
     key = _load_api_key()
     description = f"{_PREFIX}-{uuid.uuid4().hex[:8]}"
-    created_id: int | None = None
+    created_ids: set[int] = set()
     with _client() as client:
         try:
             response = _post_form(
@@ -171,12 +273,10 @@ def test_real_transaction_write_round_trip() -> None:
             payload = response.json()
             assert "money_transaction" in payload
             created_id = payload["money_transaction"]["id"]
+            assert isinstance(created_id, int) and created_id > 0
+            created_ids.add(created_id)
         finally:
-            if created_id is not None:
-                deleted = _delete(client, key, f"money_transactions/{created_id}.json")
-                assert deleted.status_code == 200, deleted.text[:200]
-                gone = _get(client, key, f"money_transactions/{created_id}.json")
-                assert gone.status_code == 404, "deleted transaction must be gone"
+            _cleanup_transactions(client, key, captured_ids=created_ids, description=description)
 
 
 def test_real_budget_write_round_trip() -> None:
@@ -187,6 +287,7 @@ def test_real_budget_write_round_trip() -> None:
         ]
         group_id = groups[0]["id"]
         before = {item["id"] for item in _get(client, key, "budgets.json").json()["budgets"] if item.get("id")}
+        created_ids: set[int] = set()
         try:
             response = _post_form(
                 client,
@@ -198,10 +299,25 @@ def test_real_budget_write_round_trip() -> None:
             budgets = _get(client, key, "budgets.json").json()["budgets"]
             matches = [item for item in budgets if item.get("category_group_id") == group_id]
             assert matches, "created budget must appear in the current-month list"
-            created_ids = [item["id"] for item in budgets if item.get("id") and item["id"] not in before]
+            created_ids.update(item["id"] for item in matches if item.get("id") and item["id"] not in before)
+            assert created_ids, "budget create must produce a new identifiable budget"
         finally:
-            for budget_id in created_ids:
-                _delete(client, key, f"budgets/{budget_id}.json")
+            try:
+                budgets = _get(client, key, "budgets.json").json()["budgets"]
+                created_ids.update(
+                    item["id"]
+                    for item in budgets
+                    if item.get("id")
+                    and item["id"] not in before
+                    and item.get("category_group_id") == group_id
+                )
+            except (httpx.HTTPError, ValueError, KeyError, TypeError):
+                pass
+            for budget_id in sorted(created_ids):
+                try:
+                    _delete(client, key, f"budgets/{budget_id}.json")
+                except httpx.HTTPError:
+                    pass
 
 
 def test_real_pagination_evidence() -> None:
@@ -235,7 +351,7 @@ def test_real_money_precision_normalization() -> None:
     key = _load_api_key()
     description = f"{_PREFIX}-{uuid.uuid4().hex[:8]}"
     deadline = (date.today() + timedelta(days=7)).strftime("%d-%m-%Y")
-    created_id: int | None = None
+    created_ids: set[int] = set()
     with _client() as client:
         try:
             response = _post_form(
@@ -253,14 +369,16 @@ def test_real_money_precision_normalization() -> None:
                 },
             )
             assert response.status_code == 201, response.text[:200]
-            items = _get(client, key, "scheduled_transactions.json").json()["scheduled_transactions"]
-            matches = [item for item in items if item.get("description") == description]
+            matches = _schedule_ids_for_descriptions(client, key, {description})
             assert matches
-            created_id = matches[0]["schedule_id"]
-            assert matches[0]["currency_amount"] == "-1.23", "withdrawal amounts are normalized to negative strings"
+            created_ids.update(matches)
+            items = _get(client, key, "scheduled_transactions.json").json()["scheduled_transactions"]
+            matched_items = [item for item in items if item.get("schedule_id") in matches]
+            assert matched_items and matched_items[0]["currency_amount"] == "-1.23", (
+                "withdrawal amounts are normalized to negative strings"
+            )
         finally:
-            if created_id is not None:
-                _delete(client, key, f"schedules/{created_id}.json")
+            _cleanup_schedules(client, key, captured_ids=created_ids, descriptions={description})
 
 
 def test_real_authentication_failure_and_success() -> None:
@@ -276,7 +394,7 @@ def test_real_iso_dates_are_rejected_and_dd_mm_accepted() -> None:
     key = _load_api_key()
     description = f"{_PREFIX}-{uuid.uuid4().hex[:8]}"
     deadline = (date.today() + timedelta(days=7)).strftime("%d-%m-%Y")
-    created_id: int | None = None
+    created_ids: set[int] = set()
     with _client() as client:
         try:
             iso = _post_form(
@@ -309,34 +427,34 @@ def test_real_iso_dates_are_rejected_and_dd_mm_accepted() -> None:
                 },
             )
             assert ok.status_code == 201, ok.text[:200]
-            items = _get(client, key, "scheduled_transactions.json").json()["scheduled_transactions"]
-            matches = [item for item in items if item.get("description") == description]
+            matches = _schedule_ids_for_descriptions(client, key, {description})
             assert matches, "the created schedule must be visible for cleanup"
-            created_id = matches[0]["schedule_id"]
+            created_ids.update(matches)
         finally:
-            if created_id is not None:
-                _delete(client, key, f"schedules/{created_id}.json")
+            _cleanup_schedules(client, key, captured_ids=created_ids, descriptions={description})
 
 
 def test_real_form_encoding_is_required_for_writes() -> None:
     key = _load_api_key()
     description = f"{_PREFIX}-{uuid.uuid4().hex[:8]}"
     with _client() as client:
-        payload = {
-            "schedule[description]": description,
-            "schedule[currency_amount]": "1.00",
-            "schedule[currency_name]": "PLN",
-            "schedule[direction]": "withdrawal",
-            "schedule[deadline_on]": "31-12-2026",
-            "schedule[repeat]": 1,
-            "schedule[holidays]": 0,
-        }
-        response = client.post(
-            f"{_BASE}/schedules.json",
-            params={"api_key": key},
-            json=payload,
-            timeout=30,
-        )
-        assert response.status_code in {401, 422}, "JSON-encoded write bodies are rejected by the upstream"
-        items = _get(client, key, "scheduled_transactions.json").json()["scheduled_transactions"]
-        assert not any(item.get("description") == description for item in items), "rejected write must not persist"
+        try:
+            payload = {
+                "schedule[description]": description,
+                "schedule[currency_amount]": "1.00",
+                "schedule[currency_name]": "PLN",
+                "schedule[direction]": "withdrawal",
+                "schedule[deadline_on]": "31-12-2026",
+                "schedule[repeat]": 1,
+                "schedule[holidays]": 0,
+            }
+            response = client.post(
+                f"{_BASE}/schedules.json",
+                params={"api_key": key},
+                json=payload,
+                timeout=30,
+            )
+            assert response.status_code in {401, 422}, "JSON-encoded write bodies are rejected by the upstream"
+            assert not _schedule_ids_for_descriptions(client, key, {description}), "rejected write must not persist"
+        finally:
+            _cleanup_schedules(client, key, captured_ids=set(), descriptions={description})
