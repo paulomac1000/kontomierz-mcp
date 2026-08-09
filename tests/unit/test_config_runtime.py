@@ -59,6 +59,19 @@ def test_http_destructive_settings_load_exact_allowlists() -> None:
     assert settings.http_allowed_destructive_resources == ("wallet:123", "transaction:456")
 
 
+def test_stdio_destructive_settings_load_exact_allowlists() -> None:
+    settings = Settings.from_env(
+        {
+            "KONTOMIERZ_MOCK_DATA": "1",
+            "MCP_STDIO_ALLOWED_DESTRUCTIVE_CAPABILITIES": "destroy_wallet,delete_budget",
+            "MCP_STDIO_ALLOWED_DESTRUCTIVE_RESOURCES": "wallet:123,budget:456",
+        },
+        env_file=None,
+    )
+    assert settings.stdio_allowed_destructive_capabilities == ("destroy_wallet", "delete_budget")
+    assert settings.stdio_allowed_destructive_resources == ("wallet:123", "budget:456")
+
+
 def test_pending_limit_cannot_be_smaller_than_running_limit() -> None:
     with pytest.raises(ConfigurationError, match="MCP_MAX_PENDING_INVOCATIONS"):
         Settings(api_key="", mock_data=True, max_concurrency=4, max_pending_invocations=3).validate()
@@ -80,6 +93,7 @@ def test_pending_limit_cannot_be_smaller_than_running_limit() -> None:
             "Remote HTTP",
         ),
         ({"KONTOMIERZ_MOCK_DATA": "1", "KONTOMIERZ_BODY_MODE": "xml"}, "KONTOMIERZ_BODY_MODE"),
+        ({"KONTOMIERZ_API_KEY": "real-key", "KONTOMIERZ_BODY_MODE": "json"}, "requires KONTOMIERZ_BODY_MODE=form"),
         ({"KONTOMIERZ_MOCK_DATA": "1", "LOG_LEVEL": "TRACE"}, "LOG_LEVEL"),
         ({"KONTOMIERZ_MOCK_DATA": "1", "MCP_PORT": "x"}, "MCP_PORT"),
         ({"KONTOMIERZ_MOCK_DATA": "1", "MCP_PORT": "0"}, "MCP_PORT"),
@@ -138,6 +152,20 @@ def test_pending_limit_cannot_be_smaller_than_running_limit() -> None:
                 "MCP_HTTP_MAX_REQUEST_BODY_BYTES": str(4 * 1024 * 1024 + 1),
             },
             "MCP_HTTP_MAX_REQUEST_BODY_BYTES",
+        ),
+        (
+            {
+                "KONTOMIERZ_MOCK_DATA": "1",
+                "MCP_STDIO_ALLOWED_DESTRUCTIVE_CAPABILITIES": "destroy_wallet",
+            },
+            "Destructive access requires both",
+        ),
+        (
+            {
+                "KONTOMIERZ_MOCK_DATA": "1",
+                "MCP_STDIO_ALLOWED_DESTRUCTIVE_RESOURCES": "wallet:123",
+            },
+            "Destructive access requires both",
         ),
     ],
 )
