@@ -22,6 +22,20 @@ from .operations import build_operations
 from .security import BearerPrincipalMiddleware, current_invocation_context
 
 _logger = logging.getLogger(__name__)
+_SENSITIVE_HTTP_LOGGERS = ("httpx", "httpcore")
+
+
+def configure_application_logging(settings: Settings) -> None:
+    """Configure app logging without allowing dependency request URLs to expose credentials."""
+    logging.basicConfig(
+        level=getattr(logging, settings.log_level),
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    )
+    # Kontomierz requires the API key in the query string. httpx/httpcore request
+    # diagnostics can include the full URL, so their INFO/DEBUG output must never
+    # inherit the application's verbosity and disclose that credential.
+    for logger_name in _SENSITIVE_HTTP_LOGGERS:
+        logging.getLogger(logger_name).setLevel(logging.WARNING)
 
 
 def build_kernel(settings: Settings, dependency: Any | None = None) -> InvocationKernel:
@@ -166,10 +180,7 @@ def create_http_app(settings: Settings, kernel: InvocationKernel | None = None) 
 
 def main() -> None:
     settings = Settings.from_env()
-    logging.basicConfig(
-        level=getattr(logging, settings.log_level),
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
-    )
+    configure_application_logging(settings)
     configure_audit_sink()
     kernel = build_kernel(settings)
     if settings.transport == "stdio":
