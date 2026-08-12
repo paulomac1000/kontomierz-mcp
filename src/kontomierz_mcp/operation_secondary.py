@@ -30,14 +30,14 @@ async def dispatch_secondary(name: str, a: dict[str, Any], client: Any) -> Any:
         return {"items": items, "items_in_page": len(items), "month": a.get("month") or None}
     if name == "create_budget":
         category = identifier(a.get("category_id"), "category_id", optional=True)
-        group = identifier(a.get("category_group_id"), "category_group_id", optional=True)
-        if (category is None) == (group is None):
+        budget_group = identifier(a.get("category_group_id"), "category_group_id", optional=True)
+        if (category is None) == (budget_group is None):
             fail("provide exactly one of category_id or category_group_id")
         return await resolve(
             client.create_budget(
                 money(a["limit"], "limit", positive=True),
                 category,
-                group,
+                budget_group,
                 month(a.get("month", "")),
             )
         )
@@ -56,20 +56,20 @@ async def dispatch_secondary(name: str, a: dict[str, Any], client: Any) -> Any:
         await resolve(client.copy_budgets_from_last_month())
         return {"copied": True}
     if name == "list_scheduled_transactions":
-        group = bounded_text(
+        schedule_group = bounded_text(
             a.get("schedule_group_name", "unpaid"),
             "schedule_group_name",
             max_bytes=16,
             allow_empty=False,
             strip=True,
         )
-        if group not in {"paid", "unpaid"}:
+        if schedule_group not in {"paid", "unpaid"}:
             fail("schedule_group_name must be paid or unpaid")
         number, limit = page(a.get("page", 1)), page_limit(a.get("per_page", 0))
         start, end = date_range(a.get("start_on", ""), a.get("end_on", ""))
         items = await resolve(
             client.get_scheduled_transactions(
-                schedule_group_name=group,
+                schedule_group_name=schedule_group,
                 page=number,
                 per_page=limit,
                 start_on=start,
