@@ -24,6 +24,10 @@ SECONDARY_TOOL_DEFINITIONS: dict[str, ToolDefinition] = {
             ),
             p("month", "str", "Optional month in YYYY-MM format.", ""),
         ),
+        usage_notes=(
+            "The verified upstream returns an empty success body; the result therefore marks reconciliation_required "
+            "and list_budgets must be used to obtain the created stable ID"
+        ),
     ),
     "update_budget": ToolDefinition(
         write_manifest("update_budget"),
