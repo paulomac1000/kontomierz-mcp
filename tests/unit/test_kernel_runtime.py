@@ -160,6 +160,43 @@ async def test_started_write_cancellation_is_audited_as_ambiguous(monkeypatch: p
 
 
 @pytest.mark.asyncio
+async def test_oversized_read_response_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def read() -> dict[str, str]:
+        return {"payload": "x" * 2048}
+
+    monkeypatch.setitem(
+        TOOL_MANIFESTS,
+        "list_accounts",
+        replace(TOOL_MANIFESTS["list_accounts"], max_response_bytes=512),
+    )
+    kernel = InvocationKernel(settings=settings(), operations={"list_accounts": read}, dependency=Dependency())
+    with pytest.raises(ApplicationError) as captured:
+        await kernel.invoke("list_accounts", {})
+    assert captured.value.code is ErrorCode.UPSTREAM_FAILURE
+    assert captured.value.retryable is False
+    assert captured.value.details == {"max_response_bytes": 512}
+
+
+@pytest.mark.asyncio
+async def test_oversized_write_response_returns_small_completion_marker(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def write() -> dict[str, str]:
+        return {"payload": "x" * 2048}
+
+    monkeypatch.setitem(
+        TOOL_MANIFESTS,
+        "create_wallet",
+        replace(TOOL_MANIFESTS["create_wallet"], max_response_bytes=512),
+    )
+    kernel = InvocationKernel(settings=settings(), operations={"create_wallet": write}, dependency=Dependency())
+    result = await kernel.invoke("create_wallet", {})
+    assert result["data"] == {
+        "completed": True,
+        "response_omitted": True,
+        "reconciliation_required": True,
+    }
+
+
+@pytest.mark.asyncio
 async def test_readiness_checks_and_caches_dependency() -> None:
     dependency = Dependency()
     kernel = InvocationKernel(
