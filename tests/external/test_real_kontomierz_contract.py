@@ -6,8 +6,8 @@ Executable contract evidence collected against a live account on 2026-08-08
 ``KONTOMIERZ_EXTERNAL_TESTS=1`` and ``KONTOMIERZ_ALLOW_REAL_MUTATIONS=1``.
 They also require ``KONTOMIERZ_API_KEY`` from the repository ``.env``. Cleanup
 uses captured IDs plus bounded full pagination of unique ``MCP-E2E-TEST``
-descriptions so a failure between a successful write and normal reconciliation
-does not silently orphan data outside the first upstream page.
+descriptions across both paid and unpaid schedule groups so a failure between a
+successful write and normal reconciliation does not silently orphan data.
 """
 
 from __future__ import annotations
@@ -26,6 +26,7 @@ _BASE = "https://secure.kontomierz.pl/k4"
 _PREFIX = "MCP-E2E-TEST"
 _EVIDENCE_PAGE_SIZE = 100
 _MAX_EVIDENCE_PAGES = 100
+_SCHEDULE_GROUPS = ("unpaid", "paid")
 
 
 def _require_live_test_opt_in() -> None:
@@ -78,24 +79,26 @@ def _delete(client: httpx.Client, key: str, path: str) -> httpx.Response:
 
 def _all_schedule_items(client: httpx.Client, key: str) -> list[dict[str, object]]:
     result: list[dict[str, object]] = []
-    for page_number in range(1, _MAX_EVIDENCE_PAGES + 1):
-        response = _get(
-            client,
-            key,
-            "scheduled_transactions.json",
-            page=page_number,
-            per_page=_EVIDENCE_PAGE_SIZE,
-        )
-        if response.status_code != 200:
-            break
-        payload = response.json()
-        page_items = payload.get("scheduled_transactions", []) if isinstance(payload, dict) else []
-        if not isinstance(page_items, list):
-            break
-        typed = [item for item in page_items if isinstance(item, dict)]
-        result.extend(typed)
-        if len(page_items) < _EVIDENCE_PAGE_SIZE:
-            break
+    for group in _SCHEDULE_GROUPS:
+        for page_number in range(1, _MAX_EVIDENCE_PAGES + 1):
+            response = _get(
+                client,
+                key,
+                "scheduled_transactions.json",
+                schedule_group_name=group,
+                page=page_number,
+                per_page=_EVIDENCE_PAGE_SIZE,
+            )
+            if response.status_code != 200:
+                break
+            payload = response.json()
+            page_items = payload.get("scheduled_transactions", []) if isinstance(payload, dict) else []
+            if not isinstance(page_items, list):
+                break
+            typed = [item for item in page_items if isinstance(item, dict)]
+            result.extend(typed)
+            if len(page_items) < _EVIDENCE_PAGE_SIZE:
+                break
     return result
 
 
