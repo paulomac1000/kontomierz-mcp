@@ -36,7 +36,7 @@ All notable changes to kontomierz-mcp are recorded here.
 
 - Mock backend response shapes mirror verified real API shapes rather than convenient synthetic substitutes.
 - The real upstream write/date/pagination contract is documented in `docs/upstream-api.md` and machine-readable `upstream-contract.yaml` with live-account evidence from 2026-08-08.
-- Standards authority is canonicalized in `trusted-executable-sources.lock.yaml` at exact `ai-skills` revision `32b699c75eaf4edac00982fea181daebaba40114` (`mcp-server-architect` 1.3.0), with SHA-256 bindings for every trusted executable used by CI.
+- Standards authority is canonicalized in `trusted-executable-sources.lock.yaml`; `mcp-server-architect` 1.3.0 governs this migration and the lock contains the reviewed exact `ai-skills` revision plus SHA-256 bindings for every trusted executable used by CI.
 - Standards CI validates the canonical trust lock and runs consumer-trust hygiene, repository discovery, upstream/live-backend contracts, AFDS, AGENTS, and workflow-policy checks from the trusted checkout.
 - Release promotion is split into read-only artifact verification, unprivileged isolated-registry quarantine/smoke, and protected registry-to-registry production promotion. The privileged publisher never loads or executes candidate content.
 
