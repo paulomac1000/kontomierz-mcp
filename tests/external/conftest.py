@@ -14,8 +14,7 @@ _DELETE_OK = {200, 404}
 
 def _live_opted_in() -> bool:
     return (
-        os.environ.get("KONTOMIERZ_EXTERNAL_TESTS") == "1"
-        and os.environ.get("KONTOMIERZ_ALLOW_REAL_MUTATIONS") == "1"
+        os.environ.get("KONTOMIERZ_EXTERNAL_TESTS") == "1" and os.environ.get("KONTOMIERZ_ALLOW_REAL_MUTATIONS") == "1"
     )
 
 
