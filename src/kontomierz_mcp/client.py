@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from typing import Any
 
@@ -10,6 +11,7 @@ import httpx
 from .errors import ErrorCode, UpstreamError
 
 Json = dict[str, Any] | list[Any]
+_MAX_UPSTREAM_RESPONSE_BYTES = 4 * 1024 * 1024
 
 
 class KontomierzClient:
@@ -46,6 +48,72 @@ class KontomierzClient:
             return False
         return True
 
+    @staticmethod
+    async def _bounded_content(response: httpx.Response, *, write: bool) -> bytes:
+        declared = response.headers.get("Content-Length")
+        if declared:
+            try:
+                declared_bytes = int(declared)
+            except ValueError:
+                declared_bytes = -1
+            if declared_bytes > _MAX_UPSTREAM_RESPONSE_BYTES:
+                raise UpstreamError(
+                    ErrorCode.UPSTREAM_FAILURE,
+                    "Kontomierz response exceeded the safe size limit",
+                    retryable=False,
+                    details={"max_response_bytes": _MAX_UPSTREAM_RESPONSE_BYTES},
+                    write_outcome_ambiguous=write,
+                )
+
+        content = bytearray()
+        async for chunk in response.aiter_bytes():
+            if len(content) + len(chunk) > _MAX_UPSTREAM_RESPONSE_BYTES:
+                raise UpstreamError(
+                    ErrorCode.UPSTREAM_FAILURE,
+                    "Kontomierz response exceeded the safe size limit",
+                    retryable=False,
+                    details={"max_response_bytes": _MAX_UPSTREAM_RESPONSE_BYTES},
+                    write_outcome_ambiguous=write,
+                )
+            content.extend(chunk)
+        return bytes(content)
+
+    @staticmethod
+    def _raise_status(response: httpx.Response, *, write: bool) -> None:
+        if response.status_code in {401, 403}:
+            raise UpstreamError(ErrorCode.AUTHENTICATION_FAILED, "Kontomierz rejected the API credentials")
+        if response.status_code == 404:
+            raise UpstreamError(ErrorCode.RESOURCE_NOT_FOUND, "Kontomierz resource was not found")
+        if response.status_code in {409, 422}:
+            raise UpstreamError(
+                ErrorCode.CONFLICT,
+                "Kontomierz rejected the requested state change",
+                details={"status": response.status_code},
+            )
+        if response.status_code == 429:
+            retry_after = response.headers.get("Retry-After")
+            details = {"retry_after": retry_after} if retry_after else None
+            raise UpstreamError(
+                ErrorCode.RATE_LIMITED,
+                "Kontomierz rate limit exceeded",
+                retryable=not write,
+                details=details,
+            )
+        if response.status_code >= 500:
+            raise UpstreamError(
+                ErrorCode.DEPENDENCY_UNAVAILABLE,
+                "Kontomierz service failed",
+                retryable=not write,
+                details={"status": response.status_code},
+                write_outcome_ambiguous=write,
+            )
+        if response.status_code >= 400:
+            raise UpstreamError(
+                ErrorCode.UPSTREAM_FAILURE,
+                "Kontomierz rejected the request",
+                details={"status": response.status_code},
+            )
+
     async def _request(
         self,
         method: str,
@@ -69,7 +137,15 @@ class KontomierzClient:
             kwargs[body_key] = dict(body)
         is_write = method.upper() not in {"GET", "HEAD", "OPTIONS"}
         try:
-            response = await self._client.request(**kwargs)
+            async with self._client.stream(**kwargs) as response:
+                self._raise_status(response, write=is_write)
+                if not expect_json or response.status_code == 204:
+                    return True
+                content = await self._bounded_content(response, write=is_write)
+                if response.status_code in {200, 201} and not content.strip():
+                    return None
+        except UpstreamError:
+            raise
         except httpx.TimeoutException as exc:
             raise UpstreamError(
                 ErrorCode.TIMEOUT,
@@ -91,47 +167,9 @@ class KontomierzClient:
                 write_outcome_ambiguous=is_write,
             ) from exc
 
-        if response.status_code in {401, 403}:
-            raise UpstreamError(ErrorCode.AUTHENTICATION_FAILED, "Kontomierz rejected the API credentials")
-        if response.status_code == 404:
-            raise UpstreamError(ErrorCode.RESOURCE_NOT_FOUND, "Kontomierz resource was not found")
-        if response.status_code in {409, 422}:
-            raise UpstreamError(
-                ErrorCode.CONFLICT,
-                "Kontomierz rejected the requested state change",
-                details={"status": response.status_code},
-            )
-        if response.status_code == 429:
-            retry_after = response.headers.get("Retry-After")
-            details = {"retry_after": retry_after} if retry_after else None
-            raise UpstreamError(
-                ErrorCode.RATE_LIMITED,
-                "Kontomierz rate limit exceeded",
-                retryable=not is_write,
-                details=details,
-            )
-        if response.status_code >= 500:
-            raise UpstreamError(
-                ErrorCode.DEPENDENCY_UNAVAILABLE,
-                "Kontomierz service failed",
-                retryable=not is_write,
-                details={"status": response.status_code},
-                write_outcome_ambiguous=is_write,
-            )
-        if response.status_code >= 400:
-            raise UpstreamError(
-                ErrorCode.UPSTREAM_FAILURE,
-                "Kontomierz rejected the request",
-                details={"status": response.status_code},
-            )
-
-        if not expect_json or response.status_code == 204:
-            return True
-        if response.status_code in {200, 201} and not response.content.strip():
-            return None
         try:
-            payload = response.json()
-        except ValueError as exc:
+            payload = json.loads(content)
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise UpstreamError(
                 ErrorCode.UPSTREAM_FAILURE,
                 "Kontomierz returned invalid JSON",
