@@ -4,11 +4,13 @@ A loopback-first MCP server for the Kontomierz personal-finance API. The server 
 
 ## Security and migration status
 
-The current candidate is **2.0.0** because it removes legacy HTTP+SSE and the unauthenticated REST bridge, changes public date, error, pagination, and update semantics, and switches write bodies to the form encoding verified against the live Kontomierz API on 2026-08-08. It is not presented as formally L2+ compliant yet. Formal adoption remains blocked on provider-backed migration assessment with independent approval, protected release-environment administration, provider-verifiable build provenance, and independent approval of the immutable revision.
+The current candidate is **2.0.0** because it removes legacy HTTP+SSE and the unauthenticated REST bridge, changes public date, error, pagination, response-bound, and update semantics, and switches write bodies to the form encoding verified against the live Kontomierz API on 2026-08-08. It is not presented as formally L2+ compliant yet. Formal adoption remains blocked on provider-backed migration assessment with independent approval, protected release-environment administration, provider-verifiable build provenance, and independent approval of the immutable revision.
 
 Financial reads are confidential. Every invocation is authenticated and then authorized server-side against the exact capability, immutable configured target, and invocation resource identity. HTTP principals are read-only by default through `MCP_HTTP_ALLOWED_CAPABILITIES=read`. Mutations require both an explicitly allowed HTTP capability class (for HTTP callers) and `ENABLE_WRITE_OPERATIONS=1` from the trusted server operator. Destructive operations are narrower on both transports: stdio requires exact capability IDs in `MCP_STDIO_ALLOWED_DESTRUCTIVE_CAPABILITIES` and exact resource IDs in `MCP_STDIO_ALLOWED_DESTRUCTIVE_RESOURCES`; HTTP additionally requires the corresponding `MCP_HTTP_ALLOWED_DESTRUCTIVE_*` allowlists. A model argument cannot establish identity, authorization, or write enablement.
 
 The server does **not** advertise `requires_confirmation=true` because no independent server-side approval authority exists yet; any future confirmation claim must be backed by a trusted approval record rather than a model-controlled argument. A started mutation with an uninterpretable outcome is never declared safely retryable. Each invocation emits one structured server-side audit record with principal, exact capability, target identity, resource identity, policy decision, operator-gate decision, dependency state, result category, cancellation/saturation state, and correlation ID; credentials and protected response bodies are excluded. The audit logger owns an INFO-capable sink independent from `LOG_LEVEL`. Audit sink failures are result-preserving fail-open because an audit failure after a started mutation must not turn a completed write into a misleading retryable application failure; a minimal stderr failure signal is attempted instead.
+
+Public text inputs have UTF-8 byte limits before upstream I/O. Successful upstream bodies are streamed with a 4 MiB decoded-body limit, and every tool manifest has a final response budget (1 MiB by default). Oversized reads fail closed; a completed mutation whose representation exceeds the tool budget returns a small reconciliation marker instead of a retry-provoking error.
 
 ## Install
 
@@ -32,12 +34,12 @@ KONTOMIERZ_MOCK_DATA=1 .venv/bin/kontomierz-mcp
 
 The default transport is stdio. Configure an MCP host to execute `.venv/bin/kontomierz-mcp` with `KONTOMIERZ_API_KEY` in its trusted environment.
 
-Ordinary stdio writes still require `ENABLE_WRITE_OPERATIONS=1`. Destructive stdio operations additionally require an exact capability and exact resource allowlist, for example:
+Ordinary stdio writes still require `ENABLE_WRITE_OPERATIONS=1`. Destructive stdio operations additionally require an exact capability and exact resource allowlist. For shell setup before starting the server, export the policy variables so the child process inherits them:
 
 ```bash
-MCP_STDIO_ALLOWED_DESTRUCTIVE_CAPABILITIES=destroy_wallet
-MCP_STDIO_ALLOWED_DESTRUCTIVE_RESOURCES=wallet:123
-ENABLE_WRITE_OPERATIONS=1
+export MCP_STDIO_ALLOWED_DESTRUCTIVE_CAPABILITIES=destroy_wallet
+export MCP_STDIO_ALLOWED_DESTRUCTIVE_RESOURCES=wallet:123
+export ENABLE_WRITE_OPERATIONS=1
 ```
 
 Without both stdio destructive allowlists, destructive tools remain denied even when the global write gate is enabled.
@@ -45,7 +47,7 @@ Without both stdio destructive allowlists, destructive tools remain denied even 
 ## Authenticated loopback Streamable HTTP
 
 ```bash
-export MCP_HTTP_AUTH_TOKEN="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
+export MCP_HTTP_AUTH_TOKEN="$(.venv/bin/python -c 'import secrets; print(secrets.token_urlsafe(32))')"
 export MCP_HTTP_PRINCIPAL="local-operator"
 KONTOMIERZ_MOCK_DATA=1 \
 MCP_TRANSPORT=streamable-http \
@@ -63,15 +65,15 @@ The MCP endpoint is `/mcp`; liveness remains public at `/health/live`. Readiness
 To permit ordinary HTTP writes, add `write` to `MCP_HTTP_ALLOWED_CAPABILITIES` **and** enable `ENABLE_WRITE_OPERATIONS=1`. To permit destructive HTTP operations, also add `destructive`, then explicitly allow each destructive capability and exact resource, for example:
 
 ```bash
-MCP_HTTP_ALLOWED_CAPABILITIES=read,destructive
-MCP_HTTP_ALLOWED_DESTRUCTIVE_CAPABILITIES=destroy_wallet
-MCP_HTTP_ALLOWED_DESTRUCTIVE_RESOURCES=wallet:123
-ENABLE_WRITE_OPERATIONS=1
+export MCP_HTTP_ALLOWED_CAPABILITIES=read,destructive
+export MCP_HTTP_ALLOWED_DESTRUCTIVE_CAPABILITIES=destroy_wallet
+export MCP_HTTP_ALLOWED_DESTRUCTIVE_RESOURCES=wallet:123
+export ENABLE_WRITE_OPERATIONS=1
 ```
 
 Wildcards are not accepted for destructive resources. Authentication alone never grants write access.
 
-Write bodies use `application/x-www-form-urlencoded` encoding, matching the live API contract verified on 2026-08-08; JSON-encoded write bodies are rejected upstream. Public tool dates accept ISO `YYYY-MM-DD` only and budget months accept `YYYY-MM` only. Localized upstream `DD-MM-YYYY` values are produced internally after public validation. Real-backend configuration rejects `KONTOMIERZ_BODY_MODE=json` instead of preserving a known-broken compatibility mode.
+Write bodies use `application/x-www-form-urlencoded` encoding, matching the live API contract verified on 2026-08-08; JSON-encoded write bodies are rejected upstream. Public tool dates accept ISO `YYYY-MM-DD` only and budget months accept `YYYY-MM` only. Localized upstream `DD-MM-YYYY` values are produced internally after public validation. Real-backend configuration rejects `KONTOMIERZ_BODY_MODE=json` instead of preserving a known-broken compatibility mode. A non-mock API target must be an absolute HTTPS URL.
 
 Successful MCP responses expose an opaque `target_ref` plus `target_scope` in `_meta`; the internal credential-derived target identity is retained only for authorization and audit, not returned to the model.
 
@@ -83,14 +85,20 @@ The exact release artifact uses the Python 3.12 runtime lock. That lock and the 
 
 ## Docker
 
-Docker consumes an already-built wheel and the hash-locked runtime wheelhouse rather than resolving dependencies during the image build. The build verifies `dist/SHA256SUMS` and installs the exact runtime graph with `--require-hashes` before installing the application wheel:
+Docker consumes an already-built wheel, the hash-locked runtime wheelhouse, and the same copied runtime lock that CI verifies before the image build. `dist/SHA256SUMS` covers the wheelhouse, application wheel, and `dist/runtime-linux-x64-py312.lock`; the Dockerfile verifies that manifest and installs that exact copied lock with `--require-hashes` before installing the application wheel:
 
 ```bash
 .venv/bin/python -m pip wheel --no-deps --no-build-isolation . --wheel-dir dist
 mkdir -p dist/wheelhouse
 .venv/bin/python -m pip download --no-deps --only-binary=:all: --require-hashes \
   --dest dist/wheelhouse -r requirements/runtime-linux-x64-py312.lock
-(cd dist && find . -type f -name '*.whl' -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
+cp requirements/runtime-linux-x64-py312.lock dist/
+(
+  cd dist
+  find . -type f \( -name '*.whl' -o -name 'runtime-linux-x64-py312.lock' \) \
+    -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+  sha256sum --check SHA256SUMS
+)
 docker build -t kontomierz-mcp:local .
 ```
 
