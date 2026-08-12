@@ -348,6 +348,8 @@ class InvocationKernel:
                     ),
                 ) from exc
             except asyncio.CancelledError:
+                if operation_started and manifest.side_effects in {"write", "destructive"}:
+                    audit.ambiguous = True
                 raise
             except ApplicationError as exc:
                 normalized = self._normalize_error(manifest, exc)
