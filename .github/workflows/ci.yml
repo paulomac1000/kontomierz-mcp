@@ -17,7 +17,7 @@ concurrency:
 
 env:
   CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-  AI_SKILLS_REV: 5868fcdf0d8cb55c6ff4082ee5945ee52888bab4
+  AI_SKILLS_REV: b7c7a41555537b982b012f0bc30899cb3b4b2279
 
 jobs:
   quality:
@@ -122,6 +122,18 @@ jobs:
           mv .trusted/ai-skills "$RUNNER_TEMP/ai-skills"
           rmdir .trusted
           test "$(git -C "$RUNNER_TEMP/ai-skills" rev-parse HEAD)" = "$AI_SKILLS_REV"
+      - name: Report trusted executable SHA-256 values
+        run: |
+          set -euo pipefail
+          sha256sum \
+            "$RUNNER_TEMP/ai-skills/skills/afds-doc-writer/validate.py" \
+            "$RUNNER_TEMP/ai-skills/skills/agents-md-architect/tools/audit_agents_md.py" \
+            "$RUNNER_TEMP/ai-skills/skills/ci-cd-architect/tools/check_github_actions_policy.py" \
+            "$RUNNER_TEMP/ai-skills/skills/ci-cd-architect/tools/check_consumer_trust_hygiene.py" \
+            "$RUNNER_TEMP/ai-skills/skills/mcp-server-architect/tools/inspect_existing_project.py" \
+            "$RUNNER_TEMP/ai-skills/contracts/validate_upstream_contract.py" \
+            "$RUNNER_TEMP/ai-skills/contracts/validate_live_backend_test_policy.py" \
+            "$RUNNER_TEMP/ai-skills/contracts/validate_trusted_executable_sources.py"
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v6
         with:
           python-version: "3.12"
@@ -138,6 +150,9 @@ jobs:
       - name: Audit workflows from trusted revision
         run: >-
           python "$RUNNER_TEMP/ai-skills/skills/ci-cd-architect/tools/check_github_actions_policy.py" .
+      - name: Audit consumer trust hygiene from trusted revision
+        run: >-
+          python "$RUNNER_TEMP/ai-skills/skills/ci-cd-architect/tools/check_consumer_trust_hygiene.py" .
       - name: Inspect existing MCP project from trusted revision
         run: >-
           python "$RUNNER_TEMP/ai-skills/skills/mcp-server-architect/tools/inspect_existing_project.py"
