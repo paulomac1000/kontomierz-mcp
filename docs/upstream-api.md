@@ -15,7 +15,7 @@ The following was proven against a live account (`https://secure.kontomierz.pl/k
 
 ### Authentication
 
-Every request carries the credential as the `api_key` query parameter. Invalid credentials return 401/403.
+Every request carries the credential as the `api_key` query parameter. Invalid credentials return 401/403. Because that legacy transport puts the secret in the URL, production logging suppresses `httpx`/`httpcore` request diagnostics that could otherwise emit the credential-bearing query string.
 
 ### Body encoding
 
@@ -49,11 +49,11 @@ Write payload dates use `DD-MM-YYYY` (schedule `deadline_on`, `mark_as_payed` / 
 
 ### Empty-body success handling
 
-Schedule and budget create/update responses are 201/200 with an **empty body** — the server does not return the created object (unlike transactions). The adapter treats an empty-body 200/201 as success, then best-effort reconciles by listing (schedule matched by description, budget by category/group) to return the created identity; when the record is not yet visible it returns a success marker (`{"created": True}`) instead of a false ambiguous failure.
+Schedule and budget create/update responses are 201/200 with an **empty body** — the upstream does not identify the created object (unlike transactions). Empty 200/201 therefore remains a known HTTP success, but a create without an upstream identity returns `{"created": true, "reconciliation_required": true}`. The adapter deliberately does not infer a stable ID by matching a schedule description or budget category after the write because those attributes are not proven unique and could identify an older or concurrent record. Consumers must reconcile through `list_scheduled_transactions` or `list_budgets` before a dependent mutation or retry. Empty updates can safely return an update marker because the stable target ID was supplied by the caller.
 
 ### Failure classification
 
-Read timeout, transport loss, 429, and 5xx errors may be retry-eligible for the caller. The server itself does not retry. For a started write, timeout, transport loss, invalid JSON, a missing response wrapper, or a wrong response shape after success status, and ambiguous 5xx are marked as potentially completed and normalized by the kernel to `AMBIGUOUS_OUTCOME`. Explicit 4xx rejections are not ambiguous.
+Read timeout, transport loss, 429, and 5xx errors may be retry-eligible for the caller. The server itself does not retry. For a started write, timeout, transport loss, invalid JSON, a missing response wrapper, or a wrong response shape after success status, and ambiguous 5xx are marked as potentially completed and normalized by the kernel to `AMBIGUOUS_OUTCOME`. A cancellation after mutation execution starts also remains ambiguous in the server-side audit record. Explicit 4xx rejections are not ambiguous.
 
 ## Remaining unverified
 
