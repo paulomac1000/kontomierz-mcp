@@ -5,64 +5,44 @@ type: decision
 status: evolving
 rigor: operational
 owners: [repository-maintainers]
-verification: Compare the exact SHA with ai-skills revision `5868fcdf0d8cb55c6ff4082ee5945ee52888bab4`, run hosted CI, and complete provider-backed evidence.
+verification: Compare the exact SHA with the authority in `trusted-executable-sources.lock.yaml`, run hosted CI, and complete provider-backed evidence.
 ---
 # AI Skills gap assessment
 
 ## Decision
 
-Target technical alignment with immutable `ai-skills` revision `5868fcdf0d8cb55c6ff4082ee5945ee52888bab4`, the current reviewed head of `fix/unified-contract-release-hardening` and `mcp-server-architect` 1.3.0, while withholding a formal L2+ claim. CI and this document pin the exact revision rather than a floating branch reference. The 1.3.0 authority adds discovery-first migration, an observed upstream contract, and a machine-readable live-backend safety policy; those controls are implemented and validated from the trusted checkout. Any later authority update requires a new exact-revision evidence run.
+Target technical alignment with the immutable `ai-skills` authority declared in `trusted-executable-sources.lock.yaml`, currently revision `32b699c75eaf4edac00982fea181daebaba40114` on `fix/unified-contract-release-hardening` with `mcp-server-architect` 1.3.0, while withholding a formal L2+ claim. The authority is not duplicated in workflow constants: CI resolves repository/revision from the canonical lock, independently checks out that exact revision, verifies trusted executable SHA-256 values, and then runs the standards checks. Any later authority update requires a new exact-revision evidence run.
 
 ## Closed or materially reduced gaps
 
-- Configuration precedes dependency creation and rejects invalid TCP ports, unsafe HTTP policy values, non-visible HTTP credential/principal bytes, and the known-broken JSON write mode for the real Kontomierz backend.
-- A trusted read-only `ai-skills` inspector now classifies this repository before formal adoption checks. Standards CI asserts the official Python MCP SDK profile, external-upstream discovery, default exclusion of external tests, presence of the observed upstream contract, presence of the live-backend policy, and zero unresolved discovery unknowns.
-- `upstream-contract.yaml` records observed/recorded Kontomierz method, endpoint, encoding, date, pagination, success-body, credential-placement, and identity semantics without storing credential values. Trusted 1.3.0 validation runs with `--require-observed`.
-- `live-backend-test-policy.yaml` declares default exclusion, two independent mutation opt-ins, credential access only after opt-in, a unique test namespace, ID capture, marker reconciliation, and mandatory reporting of unconfirmed cleanup. A final autouse guard pre-cleans the namespace, snapshots budget IDs, traverses both paid and unpaid schedule groups, reconciles transactions, deletes test resources, and fails the live run when cleanup cannot be verified.
-- One kernel owns policy, bounded admission, concurrency, deadlines, readiness, error mapping, response-size enforcement, and metadata.
-- Public text and decimal-string values are bounded by UTF-8 byte budgets before upstream I/O, including multibyte input cases; dates, months, directions, chart kinds, search text, labels, descriptions, correlation IDs, and money strings all have explicit application limits.
-- Every governed manifest declares `max_response_bytes`; the current default is 1 MiB and the final serialized `data` plus `_meta` document is measured before return. Oversized reads fail closed; a mutation whose operation completed but whose representation is too large returns a small completion/reconciliation marker instead of a retry-provoking error.
-- Upstream successful JSON bodies are streamed and bounded to 4 MiB before decoding. Oversized read bodies fail safely; oversized successful mutation bodies preserve ambiguous-write classification. Error statuses are mapped before raw error bodies are read.
-- Authentication and authorization are separate: every invocation is bound server-side to an exact capability ID, capability class, immutable configured target, explicit resource identity, and normalized-argument digest, then revalidated immediately before I/O.
-- Streamable HTTP is fail-closed without request-scoped Bearer authentication and defaults to read-only authorization; write capability classes require explicit server-owned policy in addition to the operator write gate.
-- Destructive access is narrower than a capability class on both transports. Stdio requires exact capability IDs and exact resource identities through `MCP_STDIO_ALLOWED_DESTRUCTIVE_*`; HTTP requires its own exact `MCP_HTTP_ALLOWED_DESTRUCTIVE_*` lists in addition to the HTTP capability class. The global write gate alone never authorizes deletion.
-- Local stdio uses a process-derived principal and the principal is included in structured server-side audit records rather than model-visible output.
-- Each invocation emits one bounded JSON audit event containing correlation, principal, capability/target/resource policy decision, operator-gate decision, dependency state, result category, duration, cancellation, saturation, and ambiguous state without credentials or protected result bodies.
-- A cancellation after a mutation has entered its operation body remains a cancellation at the protocol/runtime boundary but is explicitly audited as an ambiguous write outcome, preserving the reconciliation requirement instead of implying the mutation is known not to have happened.
-- The audit channel owns an INFO-capable sink independent from ordinary `LOG_LEVEL`; sink failure is explicitly result-preserving fail-open to avoid turning a completed mutation into a misleading post-I/O application failure.
-- `httpx` and `httpcore` request diagnostics are held at WARNING or above even when application logging is DEBUG, preventing the query-string API credential required by Kontomierz from being emitted through dependency request logs.
-- Streamable HTTP has intentional SDK Host and Origin allowlists, explicit stateless mode, and an application-configured request-body bound; adversarial tests prove rejection before kernel I/O.
-- `/health/live` is public and dependency-free. `/health/ready` requires Bearer authentication before `InvocationKernel.readiness()` can run, so an unauthenticated remote request cannot cause upstream network I/O.
-- The dependency adapter is natively asynchronous; cancellation no longer leaves executor workers running.
-- Unsafe writes are serialized per target scope.
-- Started write timeout, connection loss, response loss, malformed or oversized success shape, and ambiguous 5xx become non-retryable ambiguous outcomes.
-- Empty-body create success never guesses an object identity by matching non-unique descriptions, categories, or groups. It returns a reconciliation-required marker and leaves stable-ID recovery to an explicit list/reconcile step.
-- One governed catalog owns signatures, descriptions, schema expectations, manifests, registration, versions, and active-state discovery.
-- Runtime manifests no longer claim automatic retry, replay-safe writes, or confirmation without executable enforcement.
-- Breaking transport, error, pagination, metadata, authorization, and input changes are versioned as `2.0.0`, consistent with the ai-skills major-version rule for incompatible tool contracts.
-- Public dates accept ISO `YYYY-MM-DD` only and budget months accept `YYYY-MM` only; localized `DD-MM-YYYY` is an internal upstream representation rather than an undocumented public compatibility path.
-- MCP errors are explicit stable `CallToolResult` documents.
-- Successful response metadata exposes an opaque `target_ref` plus `target_scope`; credential-derived target identity remains internal to authorization and audit.
-- Readiness includes a bounded cached dependency probe behind the authenticated HTTP readiness boundary.
-- Linux x64 runtime and development dependency graphs are exact-wheel hash-locked separately for Python 3.11, 3.12, and 3.13; build tooling has its own hash lock. Acceptance paths install them with `--require-hashes --no-deps --only-binary=:all:` and verify completeness with `pip check`.
-- Production package metadata pins `mcp==2.0.0`, matching the exact tested SDK lane instead of claiming unverified future 2.x compatibility.
-- Exact-artifact CI materializes the Python 3.12 runtime wheelhouse from the committed lock, tests a runtime-only installed wheel without network resolution, and includes the runtime/build locks in the checksummed release bundle.
-- Plain `pytest` excludes external/provider evidence by default. Live-account contract tests require two explicit opt-ins before credentials are read or mutations are attempted.
-- Workflow policy profiles are explicit and trusted validators are pinned to the exact reviewed ai-skills revision above.
-- Read-only release validation proves the source SHA is reachable from the trusted default branch before accepting the closed CI artifact.
-- Protected publishing does not execute candidate source after release write permissions are granted and uses a full 40-character SHA tag.
-- The Docker build verifies the exact wheel/wheelhouse checksum manifest and installs the committed runtime lock with `--require-hashes` before the application wheel.
+- Configuration is validated before dependency creation and rejects unsafe transport, credential, URL, request-size, and real-backend body-mode values.
+- A trusted read-only `ai-skills` inspector classifies the repository before formal adoption checks. Standards CI asserts the official Python MCP SDK profile, external-upstream discovery, default exclusion of external tests, observed upstream contract, declared live-backend policy, and no unresolved discovery unknowns.
+- `upstream-contract.yaml` records observed/recorded Kontomierz method, endpoint, encoding, date, pagination, success-body, credential-placement, and identity semantics without credential values.
+- `live-backend-test-policy.yaml` declares two independent mutation opt-ins, credential access only after opt-in, unique namespace, ID capture, marker reconciliation, and mandatory reporting of unconfirmed cleanup. The final guard pre-cleans, snapshots budgets, traverses paid/unpaid schedules, reconciles transactions, and fails when cleanup cannot be verified.
+- One kernel owns policy, bounded admission/concurrency, deadlines, readiness, error mapping, response-size enforcement, and metadata.
+- Public model-controlled strings and decimals have UTF-8 byte budgets before upstream I/O. Successful upstream JSON is bounded before decoding, and manifests enforce final response budgets.
+- Authentication and authorization are distinct. Every invocation binds principal, exact capability, immutable target, explicit resource identity, and normalized-argument digest, then revalidates immediately before I/O.
+- Streamable HTTP is authenticated, loopback-only, read-only by default, and applies independent HTTP capability policy plus the operator write gate.
+- Destructive access on both transports requires exact server-owned capability and resource allowlists; the global write gate alone never authorizes deletion.
+- Each invocation emits one bounded server-side audit event without credentials/protected result bodies. HTTP dependency request logging is held at WARNING+ to avoid query-string API-key leakage.
+- Started mutation timeout, transport loss, malformed/oversized success, cancellation-after-start audit state, and ambiguous 5xx preserve non-retryable reconciliation semantics.
+- Empty-body create success does not guess an identity from non-unique fields.
+- Public dates are ISO-only (`YYYY-MM-DD`) and budget months `YYYY-MM`; `DD-MM-YYYY` is internal upstream representation.
+- Production metadata pins `mcp==2.0.0`, matching the exact tested SDK lane.
+- Exact Linux x64 wheel locks cover runtime/development Python 3.11–3.13 plus build tools; exact artifact CI tests the installed wheel outside the source tree and official MCP clients on stdio/authenticated HTTP.
+- `trusted-executable-sources.lock.yaml` is the single authority coordinate and binds every trusted executable used by acceptance to a SHA-256 digest. The trusted validator checks that lock before the other standards tools execute, and consumer-trust hygiene detects candidate-controlled trust bypasses.
+- The exact image is built with the full source revision as an OCI label and smoke-tested before it enters release handling.
+- Release privilege is separated into three stages: read-only artifact verification; an unprivileged quarantine lane that loads/smokes then pushes to an isolated non-GHCR registry and re-smokes an immutable digest; and a protected production publisher that performs registry-to-registry promotion only. The privileged publisher does not checkout, download, load, or run candidate content.
 
 ## Deferred gaps
 
-- A provider-backed, independently reviewed migration/adoption assessment for the final immutable candidate is still missing. The canonical schema requires a concrete reviewer record, so no reviewer identity, provider review ID, or approval evidence is fabricated while PR #7 has no independent submitted review.
-- Real upstream write method/body, pagination termination, money precision, and date contracts are verified with live-account evidence collected on 2026-08-08: writes require form-encoded bodies, upstream write dates use `DD-MM-YYYY`, schedule and budget creates return 201 with empty bodies, transactions return the created object, `scheduled_transactions` pagination honors `page`/`per_page` with stable ordering and terminates, and withdrawal amounts normalize to negative strings. `client_assigned_id` uniqueness/reconciliation semantics and interrupted-create post-timeout reconciliation remain unproven and stay external evidence gates.
-- Wallet mutation response behavior, transaction pagination termination, real rate-limit behavior, and budget-copy semantics remain explicitly unverified rather than being promoted from assumptions.
-- Independent approval for the final immutable revision is still required.
-- Repository administrators must configure the `release` environment with required reviewers, self-review prevention, and protected-branch deployment policy. The publish verifier fails closed when that environment is missing or insufficiently protected, but repository administration still requires an external privileged action.
-- The current protected publish step emits a promotion attestation. A stronger provider-verifiable build provenance statement for the read-only CI build remains a separate evidence item.
-- Public non-loopback hosting and multi-tenant authorization remain unsupported. Resource decisions are explicit only inside the one immutable configured credential scope; L4-style cross-tenant isolation is not claimed.
+- A provider-backed, independently reviewed migration/adoption assessment for the final immutable candidate is missing. No reviewer identity, provider review ID, or approval evidence is fabricated while PR #7 lacks an independent submitted review.
+- Repository administrators must configure the protected GitHub `release` environment with required reviewers, self-review prevention, and protected-branch policy.
+- Repository administrators must provision `QUARANTINE_REGISTRY`, `QUARANTINE_REPOSITORY`, `QUARANTINE_USERNAME`, and `QUARANTINE_TOKEN`. The workflow structurally rejects production GHCR as the quarantine registry, but provider-backed evidence must still prove the real quarantine credential cannot mutate the production package.
+- Provider-verifiable provenance for the original read-only CI build remains separate from the promotion attestation.
+- Real evidence still does not prove `client_assigned_id` uniqueness/replay/reconciliation, post-send interrupted-create reconciliation, real 429/`Retry-After`, wallet mutation response behavior, populated transaction pagination termination, or budget-copy semantics.
+- Public non-loopback hosting and multi-tenant authorization remain unsupported and are not claimed.
 
 ## Approval condition
 
-Keep the PR draft until hosted quality, latest-pinned standards, Python compatibility, locked exact-wheel, authenticated stdio/HTTP smoke, adversarial HTTP security, and Docker gates pass on the same exact implementation SHA; release evidence is reviewed; the migration/adoption assessment is provider-backed with real final evidence; the `release` environment is administratively protected; and an independent reviewer approves the immutable revision. Real-system read/write contract evidence for this migration was supplied on 2026-08-08 against the repository owner's live account; formal L2+ adoption still requires the remaining provider-backed and administrative items.
+Keep PR #7 draft until quality, exact-artifact, latest-pinned standards, Python compatibility, official stdio/HTTP smoke, adversarial security, and Docker gates all pass on one immutable implementation SHA; live evidence supports every claimed real-backend behavior; the provider/repository placeholders are implemented from real authority; the release and quarantine administration is verified; provider-backed migration/adoption and build-provenance evidence matches the same SHA; and an independent reviewer approves it. Formal L2+ adoption is intentionally not claimed before those conditions hold.

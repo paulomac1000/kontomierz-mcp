@@ -4,11 +4,11 @@ A loopback-first MCP server for the Kontomierz personal-finance API. The server 
 
 ## Security and migration status
 
-The current candidate is **2.0.0** because it removes legacy HTTP+SSE and the unauthenticated REST bridge, changes public date, error, pagination, response-bound, and update semantics, and switches write bodies to the form encoding verified against the live Kontomierz API on 2026-08-08. It is not presented as formally L2+ compliant yet. Formal adoption remains blocked on provider-backed migration assessment with independent approval, protected release-environment administration, provider-verifiable build provenance, and independent approval of the immutable revision.
+The current candidate is **2.0.0** because it removes legacy HTTP+SSE and the unauthenticated REST bridge, changes public date, error, pagination, response-bound, authorization, and update semantics, and switches writes to the form encoding verified against the live Kontomierz API on 2026-08-08. It is not presented as formally L2+ compliant yet. Formal adoption remains blocked on provider-backed migration assessment with independent review, repository/release administration, quarantine-credential isolation evidence, and provider-verifiable build provenance.
 
 Financial reads are confidential. Every invocation is authenticated and then authorized server-side against the exact capability, immutable configured target, and invocation resource identity. HTTP principals are read-only by default through `MCP_HTTP_ALLOWED_CAPABILITIES=read`. Mutations require both an explicitly allowed HTTP capability class (for HTTP callers) and `ENABLE_WRITE_OPERATIONS=1` from the trusted server operator. Destructive operations are narrower on both transports: stdio requires exact capability IDs in `MCP_STDIO_ALLOWED_DESTRUCTIVE_CAPABILITIES` and exact resource IDs in `MCP_STDIO_ALLOWED_DESTRUCTIVE_RESOURCES`; HTTP additionally requires the corresponding `MCP_HTTP_ALLOWED_DESTRUCTIVE_*` allowlists. A model argument cannot establish identity, authorization, or write enablement.
 
-The server does **not** advertise `requires_confirmation=true` because no independent server-side approval authority exists yet; any future confirmation claim must be backed by a trusted approval record rather than a model-controlled argument. A started mutation with an uninterpretable outcome is never declared safely retryable. Each invocation emits one structured server-side audit record with principal, exact capability, target identity, resource identity, policy decision, operator-gate decision, dependency state, result category, cancellation/saturation state, and correlation ID; credentials and protected response bodies are excluded. The audit logger owns an INFO-capable sink independent from `LOG_LEVEL`. Audit sink failures are result-preserving fail-open because an audit failure after a started mutation must not turn a completed write into a misleading retryable application failure; a minimal stderr failure signal is attempted instead.
+The server does **not** advertise `requires_confirmation=true` because no independent server-side approval authority exists yet. A started mutation with an uninterpretable outcome is never declared safely retryable. Each invocation emits one structured server-side audit record containing principal, exact capability, target identity, resource identity, policy decision, operator-gate decision, dependency state, result category, cancellation/saturation state, and correlation ID; credentials and protected response bodies are excluded. The audit logger owns an INFO-capable sink independent from `LOG_LEVEL` and follows an explicit result-preserving fail-open policy.
 
 Public text inputs have UTF-8 byte limits before upstream I/O. Successful upstream bodies are streamed with a 4 MiB decoded-body limit, and every tool manifest has a final response budget (1 MiB by default). Oversized reads fail closed; a completed mutation whose representation exceeds the tool budget returns a small reconciliation marker instead of a retry-provoking error.
 
@@ -34,7 +34,7 @@ KONTOMIERZ_MOCK_DATA=1 .venv/bin/kontomierz-mcp
 
 The default transport is stdio. Configure an MCP host to execute `.venv/bin/kontomierz-mcp` with `KONTOMIERZ_API_KEY` in its trusted environment.
 
-Ordinary stdio writes still require `ENABLE_WRITE_OPERATIONS=1`. Destructive stdio operations additionally require an exact capability and exact resource allowlist. For shell setup before starting the server, export the policy variables so the child process inherits them:
+Ordinary stdio writes require `ENABLE_WRITE_OPERATIONS=1`. Destructive stdio operations additionally require exact capability and resource allowlists:
 
 ```bash
 export MCP_STDIO_ALLOWED_DESTRUCTIVE_CAPABILITIES=destroy_wallet
@@ -58,11 +58,11 @@ MCP_HTTP_MAX_REQUEST_BODY_BYTES=1048576 \
 .venv/bin/kontomierz-mcp
 ```
 
-Every remote HTTP request except `/health/live` must send `Authorization: Bearer <MCP_HTTP_AUTH_TOKEN>`. The token is mapped server-side to `MCP_HTTP_PRINCIPAL`, so the model cannot choose its own principal. The principal is then authorized against the exact tool, configured target, resolved resource identity, normalized argument digest, and capability policy. The policy is revalidated immediately before operation I/O.
+Every remote HTTP request except `/health/live` must send `Authorization: Bearer <MCP_HTTP_AUTH_TOKEN>`. The token is mapped server-side to `MCP_HTTP_PRINCIPAL`, so the model cannot choose its own principal. The principal is authorized against the exact tool, configured target, resolved resource identity, normalized argument digest, and capability policy, then revalidated immediately before operation I/O.
 
-The MCP endpoint is `/mcp`; liveness remains public at `/health/live`. Readiness at `/health/ready` requires the same Bearer authentication because a cache miss may trigger a bounded upstream Kontomierz probe. Non-loopback binding is rejected. The HTTP adapter explicitly configures Host and Origin policy, stateless mode, and a bounded request body instead of relying on SDK defaults.
+The MCP endpoint is `/mcp`; liveness remains public at `/health/live`. Readiness at `/health/ready` requires the same Bearer authentication because a cache miss may trigger a bounded upstream probe. Non-loopback binding is rejected. The HTTP adapter explicitly configures Host and Origin policy, stateless mode, and a bounded request body.
 
-To permit ordinary HTTP writes, add `write` to `MCP_HTTP_ALLOWED_CAPABILITIES` **and** enable `ENABLE_WRITE_OPERATIONS=1`. To permit destructive HTTP operations, also add `destructive`, then explicitly allow each destructive capability and exact resource, for example:
+To permit ordinary HTTP writes, add `write` to `MCP_HTTP_ALLOWED_CAPABILITIES` **and** enable `ENABLE_WRITE_OPERATIONS=1`. To permit destructive HTTP operations, also add `destructive`, then explicitly allow each destructive capability and exact resource:
 
 ```bash
 export MCP_HTTP_ALLOWED_CAPABILITIES=read,destructive
@@ -73,36 +73,27 @@ export ENABLE_WRITE_OPERATIONS=1
 
 Wildcards are not accepted for destructive resources. Authentication alone never grants write access.
 
-Write bodies use `application/x-www-form-urlencoded` encoding, matching the live API contract verified on 2026-08-08; JSON-encoded write bodies are rejected upstream. Public tool dates accept ISO `YYYY-MM-DD` only and budget months accept `YYYY-MM` only. Localized upstream `DD-MM-YYYY` values are produced internally after public validation. Real-backend configuration rejects `KONTOMIERZ_BODY_MODE=json` instead of preserving a known-broken compatibility mode. A non-mock API target must be an absolute HTTPS URL.
+Write bodies use `application/x-www-form-urlencoded`, matching the live API contract verified on 2026-08-08; JSON-encoded writes are rejected upstream. Public tool dates accept ISO `YYYY-MM-DD` only and budget months accept `YYYY-MM` only. Localized upstream `DD-MM-YYYY` values are produced internally after public validation. Real-backend configuration rejects `KONTOMIERZ_BODY_MODE=json`. A non-mock API target must be an absolute HTTPS URL without embedded credentials, query, or fragment.
 
-Successful MCP responses expose an opaque `target_ref` plus `target_scope` in `_meta`; the internal credential-derived target identity is retained only for authorization and audit, not returned to the model.
+Successful MCP responses expose an opaque `target_ref` plus `target_scope` in `_meta`; the internal credential-derived target identity is retained only for authorization and audit.
 
 ## Reproducible dependency graphs
 
-`requirements/` contains exact Linux x64 wheel locks for runtime and development on Python 3.11, 3.12, and 3.13, plus a shared build-tool lock. Each requirement is pinned to an exact version and SHA-256 wheel digest. CI installs these files with `--require-hashes --no-deps --only-binary=:all:` and then runs `pip check`, so acceptance paths cannot silently resolve undeclared transitive dependencies.
+`requirements/` contains exact Linux x64 wheel locks for runtime and development on Python 3.11, 3.12, and 3.13, plus a shared build-tool lock. Each requirement is pinned to an exact version and SHA-256 wheel digest. CI installs these files with `--require-hashes --no-deps --only-binary=:all:` and runs `pip check`.
 
-The exact release artifact uses the Python 3.12 runtime lock. That lock and the build lock are copied into the release bundle and covered by its checksum manifest. Package metadata pins the production MCP SDK to the tested `mcp==2.0.0` lane rather than claiming compatibility with untested future 2.x releases.
+The exact release artifact uses the Python 3.12 runtime lock. That lock and the build lock are included in the checksummed release bundle. Package metadata pins the production MCP SDK to the tested `mcp==2.0.0` lane instead of claiming compatibility with untested future 2.x releases.
 
-## Docker
+## Docker and release promotion
 
-Docker consumes an already-built wheel, the hash-locked runtime wheelhouse, and the same copied runtime lock that CI verifies before the image build. `dist/SHA256SUMS` covers the wheelhouse, application wheel, and `dist/runtime-linux-x64-py312.lock`; the Dockerfile verifies that manifest and installs that exact copied lock with `--require-hashes` before installing the application wheel:
+Docker consumes the already-built application wheel, hash-locked runtime wheelhouse, and copied runtime lock that CI verifies before the image build. The image runs as non-root and is built with `org.opencontainers.image.revision=<full source SHA>`; CI verifies that label and smokes the exact image before archiving it.
 
-```bash
-.venv/bin/python -m pip wheel --no-deps --no-build-isolation . --wheel-dir dist
-mkdir -p dist/wheelhouse
-.venv/bin/python -m pip download --no-deps --only-binary=:all: --require-hashes \
-  --dest dist/wheelhouse -r requirements/runtime-linux-x64-py312.lock
-cp requirements/runtime-linux-x64-py312.lock dist/
-(
-  cd dist
-  find . -type f \( -name '*.whl' -o -name 'runtime-linux-x64-py312.lock' \) \
-    -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
-  sha256sum --check SHA256SUMS
-)
-docker build -t kontomierz-mcp:local .
-```
+Release publication uses three distinct trust stages:
 
-The image runs as a non-root user and defaults to stdio. Hosted CI builds and smoke-tests the exact image archive under read-only permissions. The protected publish workflow verifies that the candidate SHA is reachable from the trusted default branch and refuses to continue unless the repository `release` environment already has required deployment reviewers, self-review prevention, and protected-branch deployment policy. It then only verifies, loads, tags, and pushes the closed archive; it does not execute candidate source after release write permissions are granted.
+1. `verify-artifact` is read-only. It proves default-branch ancestry, checks the protected `release` environment configuration, downloads the closed CI bundle, and verifies checksums/source identity without executing candidate content.
+2. `quarantine` remains unprivileged with respect to production. It loads and smokes the exact CI image, then pushes it to an **isolated non-GHCR quarantine registry**, resolves an immutable digest, pulls that exact digest, rechecks the source-revision label, and smokes it again.
+3. `publish` runs behind the protected `release` environment. It does not checkout candidate code, download the CI archive, `docker load`, or `docker run` candidate content. It promotes only the immutable quarantine digest to production GHCR with registry tooling, verifies the production digest, and emits a promotion attestation.
+
+Repository administrators must provide `QUARANTINE_REGISTRY` and `QUARANTINE_REPOSITORY` variables plus `QUARANTINE_USERNAME`/`QUARANTINE_TOKEN` secrets. The quarantine registry must not be `ghcr.io`, and its credential must be scoped so it cannot mutate the production package. That last credential-scope property requires provider/administrator evidence and remains an explicit external gate rather than a source-code assertion.
 
 ## Tests
 
@@ -112,9 +103,9 @@ A plain pytest run excludes live/provider evidence by default:
 .venv/bin/python -m pytest
 ```
 
-The default suite uses synthetic data. The official MCP SDK test is mandatory and fails collection when the SDK is absent; it is not silently skipped.
+The default suite uses synthetic data. The official MCP SDK test is mandatory and fails collection when the SDK is absent.
 
-The live Kontomierz contract suite is intentionally harder to start. It requires a repository `.env` containing the real API key **and both** explicit opt-ins, and should be run only against a disposable account after reviewing its write/delete behavior:
+The live Kontomierz contract suite requires a repository `.env` containing the real API key **and both** explicit opt-ins, and should be run only against a disposable account:
 
 ```bash
 KONTOMIERZ_EXTERNAL_TESTS=1 \
@@ -122,17 +113,21 @@ KONTOMIERZ_ALLOW_REAL_MUTATIONS=1 \
 .venv/bin/python -m pytest -o addopts='' -m external tests/external/test_real_kontomierz_contract.py
 ```
 
-Those tests use unique descriptions, captured IDs, bounded reconciliation over both paid and unpaid schedule groups, and a final safety guard. The run fails if schedule/transaction namespace cleanup or the budget ID-snapshot cleanup cannot be confirmed; an unverified cleanup is never silently converted into success. Provider/repository acceptance placeholders in `tests/external/test_production_evidence.py` remain intentionally failing until the corresponding external authority exists; they are not fabricated or silently skipped. See [`docs/production-readiness.md`](docs/production-readiness.md) and [`AGENTS.md`](AGENTS.md) for the handoff and full gate.
+Those tests use unique descriptions, captured IDs, bounded reconciliation over both paid and unpaid schedule groups, and a final cleanup guard. The run fails if schedule/transaction namespace cleanup or budget snapshot cleanup cannot be confirmed. Provider/repository acceptance placeholders in `tests/external/test_production_evidence.py` remain intentionally failing until the corresponding external authority exists.
 
-## Contracts and architecture
+## Standards authority and contracts
 
+The trusted standards authority is declared once in [`trusted-executable-sources.lock.yaml`](trusted-executable-sources.lock.yaml), currently at exact `paulomac1000/ai-skills` revision `32b699c75eaf4edac00982fea181daebaba40114`. The lock also binds every trusted executable used by CI to a SHA-256 digest. CI resolves the authority from this canonical lock, validates the lock from the trusted checkout, runs consumer-trust hygiene, and then executes the pinned AFDS/AGENTS/CI/MCP validators.
+
+- [`trusted-executable-sources.lock.yaml`](trusted-executable-sources.lock.yaml) — immutable authority coordinates and trusted executable digests
 - [`upstream-contract.yaml`](upstream-contract.yaml) — machine-readable observed Kontomierz boundary
 - [`live-backend-test-policy.yaml`](live-backend-test-policy.yaml) — fail-closed live-test safety floor
 - [`docs/system-architecture.md`](docs/system-architecture.md)
 - [`docs/tool-contract.md`](docs/tool-contract.md)
 - [`docs/upstream-api.md`](docs/upstream-api.md)
 - [`docs/ai-skills-gap-assessment.md`](docs/ai-skills-gap-assessment.md)
+- [`docs/production-readiness.md`](docs/production-readiness.md)
 
 ## Compatibility note
 
-Version 2.0.0 is intentionally incompatible with the legacy 1.0.x transport and response surface. Public dates use ISO `YYYY-MM-DD`; budget months use `YYYY-MM`; pagination exposes only continuation hints; update tools distinguish omission (`None`) from an explicit empty text value; destructive stdio calls now require exact server-owned allowlists; and successful `_meta` identifies the authorized target through an opaque `target_ref` rather than exposing internal target identity.
+Version 2.0.0 is intentionally incompatible with the legacy 1.0.x transport and response surface. Public dates use ISO `YYYY-MM-DD`; budget months use `YYYY-MM`; pagination exposes only continuation hints; update tools distinguish omission (`None`) from an explicit empty text value; destructive stdio calls require exact server-owned allowlists; and successful `_meta` identifies the authorized target through an opaque `target_ref` rather than exposing internal target identity.

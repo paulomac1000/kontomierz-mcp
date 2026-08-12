@@ -20,49 +20,49 @@ All notable changes to kontomierz-mcp are recorded here.
 
 ### Fixed
 
-- Write bodies use `application/x-www-form-urlencoded` encoding, matching the live Kontomierz API contract verified on 2026-08-08. JSON-encoded write bodies are rejected by the upstream, so real-backend configuration now rejects `KONTOMIERZ_BODY_MODE=json` instead of preserving a known-broken compatibility mode.
-- Plain `pytest` excludes `external` tests by default. Live-account evidence additionally requires both `KONTOMIERZ_EXTERNAL_TESTS=1` and `KONTOMIERZ_ALLOW_REAL_MUTATIONS=1` before it can read credentials or mutate the real service.
-- Live schedule cleanup traverses both paid and unpaid schedule groups. A final live-backend guard reconciles the unique test namespace and budget snapshot, verifies deletion, and fails the run instead of silently swallowing unconfirmed cleanup.
-- Empty-body create success never guesses a stable ID by matching non-unique schedule descriptions or budget categories; it returns a reconciliation-required success marker.
+- Write bodies use `application/x-www-form-urlencoded`, matching the live Kontomierz API contract verified on 2026-08-08; known-broken JSON write mode is rejected for the real backend.
+- Plain `pytest` excludes `external` tests by default. Live-account evidence additionally requires both `KONTOMIERZ_EXTERNAL_TESTS=1` and `KONTOMIERZ_ALLOW_REAL_MUTATIONS=1` before credential access or mutation.
+- Live cleanup traverses paid and unpaid schedule groups, reconciles the unique test namespace and budget snapshot, verifies deletion, and fails instead of swallowing unconfirmed cleanup.
+- Empty-body create success never guesses a stable ID from non-unique descriptions/categories and returns a reconciliation-required marker.
 - Wealth points are unwrapped from their verified per-item `{"wealth_point": {...}}` upstream shape.
-- Restored the full `repeat` (1=once … 6=biennial) and `holidays` (0/1/2) parameter descriptions for `create_schedule`/`update_schedule`; a regression test now locks the agent-facing ergonomics.
-- Streamable HTTP smoke allows up to 60 seconds for server readiness on slow or heavily loaded machines.
-- Composition validates a frozen settings snapshot before constructing a real dependency client; unsafe base URLs fail before dependency creation.
-- Logging-security tests restore root logger state after proving that `httpx`/`httpcore` request diagnostics stay at WARNING or above.
-- Mock transaction contract tests use the synchronous mock API directly and no longer create an un-awaited value.
+- Restored full schedule `repeat`/`holidays` descriptions and locked them with regression tests.
+- Streamable HTTP smoke allows slow startup without weakening its bounded timeout.
+- Composition validates frozen settings before constructing a real dependency client; unsafe base URLs fail before dependency creation.
+- Logging tests restore global logger state and real request diagnostics stay at WARNING+ to protect the query-string API key.
+- Mock transaction contract tests call the synchronous mock API synchronously.
+- Exact-artifact Docker source-label verification uses a valid Docker Go-template expression.
 
 ### Changed
 
-- Mock backend response shapes mirror the verified real API (account wrappers and fields, `schedule_id`-based schedule list items, budget `kind`/`name`/`amount`, tags without ids, `category_groups`, per-item wealth wrappers, realistic currencies).
+- Mock backend response shapes mirror verified real API shapes rather than convenient synthetic substitutes.
 - The real upstream write/date/pagination contract is documented in `docs/upstream-api.md` and machine-readable `upstream-contract.yaml` with live-account evidence from 2026-08-08.
-- Standards CI is pinned to exact `ai-skills` revision `5868fcdf0d8cb55c6ff4082ee5945ee52888bab4` (`mcp-server-architect` 1.3.0) and runs its read-only repository inspector, upstream-contract validator, live-backend policy validator, AFDS validator, AGENTS audit, and workflow-policy audit from the trusted checkout.
+- Standards authority is canonicalized in `trusted-executable-sources.lock.yaml` at exact `ai-skills` revision `32b699c75eaf4edac00982fea181daebaba40114` (`mcp-server-architect` 1.3.0), with SHA-256 bindings for every trusted executable used by CI.
+- Standards CI validates the canonical trust lock and runs consumer-trust hygiene, repository discovery, upstream/live-backend contracts, AFDS, AGENTS, and workflow-policy checks from the trusted checkout.
+- Release promotion is split into read-only artifact verification, unprivileged isolated-registry quarantine/smoke, and protected registry-to-registry production promotion. The privileged publisher never loads or executes candidate content.
 
 ### Added
 
 - One governed catalog for tool signatures, descriptions, schemas, versions, manifests, active state, and registration.
 - Complete multi-axis capability manifests and supported-versus-active capability discovery.
-- Explicit application-owned authorization binding principal, exact capability, immutable configured target, exact resource identity, and normalized arguments, with pre-I/O revalidation.
-- Narrow destructive authorization on both transports with explicit capability and exact-resource allowlists; broad class access or the operator write gate alone is insufficient.
-- One structured server-side audit event per invocation with principal, policy decision, target, resource identity, result category, and correlation data without credentials or protected response bodies.
-- An audit-only INFO sink independent from ordinary `LOG_LEVEL`, with result-preserving fail-open behavior on sink failure.
+- Explicit application-owned authorization binding principal, exact capability, immutable target, exact resource identity, and normalized arguments, with pre-I/O revalidation.
+- Narrow destructive authorization on both transports with explicit capability and exact-resource allowlists.
+- One structured server-side audit event per invocation without credentials or protected result bodies.
 - Intentional Streamable HTTP Host/Origin policy, stateless mode, bounded request bodies, authenticated readiness, and adversarial pre-I/O tests.
-- Bounded admission, running concurrency, per-target write serialization, dependency-aware readiness, and conservative ambiguous-write handling.
-- Deterministic mock backend, all-tool smoke, official-client tests, and intentionally failing external evidence placeholders for provider-only acceptance work.
-- Exact Linux x64 runtime/development wheel locks for Python 3.11, 3.12, and 3.13 plus a separate build-tool lock; acceptance installs use exact SHA-256 wheel hashes without dependency resolution.
-- Exact-wheel and exact-image CI promotion, locked runtime wheelhouse, protected release environment, default-branch ancestry proof, registry digest comparison, and promotion attestation.
-- AFDS architecture, contract, upstream, migration, production-readiness, and standards-gap documentation plus root `AGENTS.md`.
-- Real external evidence tests (`tests/external/test_real_kontomierz_contract.py`) proving read shapes, schedule/transaction/budget write round trips with cleanup, pagination ordering and termination, money precision normalization, ISO-date rejection, and form-encoding requirements against the live account.
-- `live-backend-test-policy.yaml` declaring fail-closed real-system test safety and mandatory cleanup reporting.
+- Bounded admission/concurrency, per-target write serialization, dependency-aware readiness, response-size enforcement, and conservative ambiguous-write handling.
+- Exact Linux x64 runtime/development wheel locks for Python 3.11–3.13 and separate build-tool lock; acceptance installs use exact SHA-256 wheel hashes without dependency resolution.
+- Exact-wheel and exact-image CI artifact path with source-revision OCI label, non-root smoke, checksummed closed bundle, and protected promotion attestation.
+- Real external evidence tests plus `live-backend-test-policy.yaml` and `upstream-contract.yaml`.
+- `trusted-executable-sources.lock.yaml` as the single immutable standards-authority coordinate and executable-integrity contract.
+- Structural tests proving the privileged publisher cannot checkout/download/load/run candidate content and the quarantine lane remains unprivileged to production.
 
 ### Security
 
-- No control was weakened: form-encoding verification confirms the historical form-based contract; ambiguous-write handling still applies to timeout, transport loss, and malformed success responses.
 - Non-loopback HTTP binding remains forbidden; loopback HTTP requires request-scoped Bearer authentication and explicit server-side capability/target/resource authorization.
-- Financial reads are classified as confidential; every mutation requires the trusted operator write gate and HTTP writes require an independently allowed capability class.
-- Destructive operations require an explicitly allowlisted capability ID and exact resource identity on both stdio and HTTP; wildcard resource grants are not accepted.
-- Missing or invalid credentials, Host/Origin policy violations, oversized HTTP bodies, and unauthenticated readiness requests are rejected before operation/dependency I/O.
-- Any uninterpretable successful response to a mutation is treated as a potentially completed write.
-- No mutation is declared replay-safe or automatically retryable without real-system evidence.
+- Financial reads are confidential; every mutation requires the trusted operator write gate and HTTP writes require an independently allowed capability class.
+- Destructive operations require an explicitly allowlisted capability ID and exact resource identity on both stdio and HTTP; wildcard resources are rejected.
+- Missing/invalid credentials, Host/Origin violations, oversized HTTP bodies, and unauthenticated readiness requests stop before operation/dependency I/O.
+- Any uninterpretable successful mutation response is treated as potentially completed; no mutation is declared replay-safe or automatically retryable without evidence.
+- Quarantine credentials are separated from production coordinates in workflow design. Provider-backed proof that their actual configured scope cannot mutate production remains an external administrative evidence gate.
 
 ## 1.0.1 — 2026-07-07
 
