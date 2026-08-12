@@ -39,6 +39,7 @@ def configure_application_logging(settings: Settings) -> None:
 
 
 def build_kernel(settings: Settings, dependency: Any | None = None) -> InvocationKernel:
+    settings.validate()
     if dependency is None:
         dependency = (
             MockKontomierzClient()

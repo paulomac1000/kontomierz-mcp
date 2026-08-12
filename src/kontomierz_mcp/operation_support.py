@@ -115,13 +115,12 @@ def date_range(start: Any, end: Any) -> tuple[str | None, str | None]:
 def month(value: Any) -> str:
     if value is None:
         return ""
-    raw = bounded_text(value, "month", max_bytes=7, allow_empty=True, strip=True)
+    raw = bounded_text(value, "month", max_bytes=32, allow_empty=True, strip=True)
     if not raw:
         return ""
-    try:
-        return datetime.strptime(raw, "%Y-%m").strftime("01-%m-%Y")
-    except ValueError:
+    if re.fullmatch(r"\d{4}-(?:0[1-9]|1[0-2])", raw) is None:
         fail("month must be YYYY-MM")
+    return datetime.strptime(raw, "%Y-%m").strftime("01-%m-%Y")
 
 
 def page(value: Any) -> int:

@@ -266,7 +266,7 @@ async def test_stdio_principal_and_policy_decision_are_emitted_to_structured_aud
     assert len(audit_lines) == 1
     event = json.loads(audit_lines[0])
     assert event["event"] == "mcp_tool_invocation"
-    assert event["principal"].startswith("local-user:")
+    assert event["principal"].startswith("local-process:")
     assert event["transport"] == "stdio"
     assert event["authorization_decision"] == "pre-io:allowed"
     assert event["policy_version"] == "single-account-resource-v3"

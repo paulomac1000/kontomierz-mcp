@@ -7,9 +7,11 @@ from kontomierz_mcp.server import configure_application_logging
 
 
 def test_http_dependency_loggers_do_not_inherit_debug_or_info_verbosity() -> None:
+    root_logger = logging.getLogger()
     httpx_logger = logging.getLogger("httpx")
     httpcore_logger = logging.getLogger("httpcore")
-    previous = (httpx_logger.level, httpcore_logger.level)
+    previous_levels = (root_logger.level, httpx_logger.level, httpcore_logger.level)
+    previous_handlers = list(root_logger.handlers)
     try:
         httpx_logger.setLevel(logging.NOTSET)
         httpcore_logger.setLevel(logging.NOTSET)
@@ -17,5 +19,9 @@ def test_http_dependency_loggers_do_not_inherit_debug_or_info_verbosity() -> Non
         assert httpx_logger.level >= logging.WARNING
         assert httpcore_logger.level >= logging.WARNING
     finally:
-        httpx_logger.setLevel(previous[0])
-        httpcore_logger.setLevel(previous[1])
+        root_logger.setLevel(previous_levels[0])
+        httpx_logger.setLevel(previous_levels[1])
+        httpcore_logger.setLevel(previous_levels[2])
+        for handler in list(root_logger.handlers):
+            if handler not in previous_handlers:
+                root_logger.removeHandler(handler)

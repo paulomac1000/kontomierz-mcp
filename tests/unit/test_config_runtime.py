@@ -81,6 +81,22 @@ def test_pending_limit_cannot_be_smaller_than_running_limit() -> None:
     ("environment", "message"),
     [
         ({}, "KONTOMIERZ_API_KEY"),
+        (
+            {"KONTOMIERZ_API_KEY": "real-key", "KONTOMIERZ_API_BASE_URL": "http://secure.kontomierz.pl/k4"},
+            "absolute HTTPS URL",
+        ),
+        (
+            {"KONTOMIERZ_API_KEY": "real-key", "KONTOMIERZ_API_BASE_URL": "https://user:pass@example.test/k4"},
+            "absolute HTTPS URL",
+        ),
+        (
+            {"KONTOMIERZ_API_KEY": "real-key", "KONTOMIERZ_API_BASE_URL": "https://example.test/k4?target=x"},
+            "absolute HTTPS URL",
+        ),
+        (
+            {"KONTOMIERZ_API_KEY": "real-key", "KONTOMIERZ_API_BASE_URL": "https://example.test/k4#fragment"},
+            "absolute HTTPS URL",
+        ),
         ({"KONTOMIERZ_MOCK_DATA": "1", "MCP_TRANSPORT": "sse"}, "MCP_TRANSPORT"),
         (
             {
