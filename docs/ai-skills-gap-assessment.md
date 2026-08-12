@@ -5,24 +5,26 @@ type: decision
 status: evolving
 rigor: operational
 owners: [repository-maintainers]
-verification: Compare the exact SHA with ai-skills revision `b54fc6b27ea80b36a70d5de73445970e17f55789`, run hosted CI, and complete provider-backed evidence.
+verification: Compare the exact SHA with ai-skills revision `b359245d3a34fce90cfeb0fdab052e75b5b821f3`, run hosted CI, and complete provider-backed evidence.
 ---
 # AI Skills gap assessment
 
 ## Decision
 
-Target technical alignment with the immutable `ai-skills` revision `b54fc6b27ea80b36a70d5de73445970e17f55789`, the current head of `fix/unified-contract-release-hardening` used for this review, while withholding a formal L2+ claim. CI and this document pin the exact revision rather than a floating branch reference. Any later authority update requires a new exact-revision evidence run.
+Target technical alignment with the immutable `ai-skills` revision `b359245d3a34fce90cfeb0fdab052e75b5b821f3`, the current head of `fix/unified-contract-release-hardening` used for this review, while withholding a formal L2+ claim. CI and this document pin the exact revision rather than a floating branch reference. Any later authority update requires a new exact-revision evidence run.
 
 ## Closed or materially reduced gaps
 
-- Configuration precedes dependency creation and rejects invalid TCP ports, unsafe HTTP policy values, and the known-broken JSON write mode for the real Kontomierz backend.
+- Configuration precedes dependency creation and rejects invalid TCP ports, unsafe HTTP policy values, non-visible HTTP credential/principal bytes, and the known-broken JSON write mode for the real Kontomierz backend.
 - One kernel owns policy, bounded admission, concurrency, deadlines, readiness, error mapping, and metadata.
 - Authentication and authorization are separate: every invocation is bound server-side to an exact capability ID, capability class, immutable configured target, explicit resource identity, and normalized-argument digest, then revalidated immediately before I/O.
 - Streamable HTTP is fail-closed without request-scoped Bearer authentication and defaults to read-only authorization; write capability classes require explicit server-owned policy in addition to the operator write gate.
 - Destructive access is narrower than a capability class on both transports. Stdio requires exact capability IDs and exact resource identities through `MCP_STDIO_ALLOWED_DESTRUCTIVE_*`; HTTP requires its own exact `MCP_HTTP_ALLOWED_DESTRUCTIVE_*` lists in addition to the HTTP capability class. The global write gate alone never authorizes deletion.
 - Local stdio uses a process-derived principal and the principal is included in structured server-side audit records rather than model-visible output.
 - Each invocation emits one bounded JSON audit event containing correlation, principal, capability/target/resource policy decision, operator-gate decision, dependency state, result category, duration, cancellation, saturation, and ambiguous state without credentials or protected result bodies.
+- A cancellation after a mutation has entered its operation body remains a cancellation at the protocol/runtime boundary but is explicitly audited as an ambiguous write outcome, preserving the reconciliation requirement instead of implying the mutation is known not to have happened.
 - The audit channel owns an INFO-capable sink independent from ordinary `LOG_LEVEL`; sink failure is explicitly result-preserving fail-open to avoid turning a completed mutation into a misleading post-I/O application failure.
+- `httpx` and `httpcore` request diagnostics are held at WARNING or above even when application logging is DEBUG, preventing the query-string API credential required by Kontomierz from being emitted through dependency request logs.
 - Streamable HTTP has intentional SDK Host and Origin allowlists, explicit stateless mode, and an application-configured request-body bound; adversarial tests prove rejection before kernel I/O.
 - `/health/live` is public and dependency-free. `/health/ready` requires Bearer authentication before `InvocationKernel.readiness()` can run, so an unauthenticated remote request cannot cause upstream network I/O.
 - The dependency adapter is natively asynchronous; cancellation no longer leaves executor workers running.
