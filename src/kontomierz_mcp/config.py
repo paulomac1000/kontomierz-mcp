@@ -136,6 +136,23 @@ def _bounded_ascii_secret(value: str, name: str) -> str:
         raise ConfigurationError(f"{name} must contain at least 32 ASCII bytes")
     if len(encoded) > _MAX_HTTP_CREDENTIAL_BYTES:
         raise ConfigurationError(f"{name} must not exceed {_MAX_HTTP_CREDENTIAL_BYTES} ASCII bytes")
+    if any(byte <= 0x20 or byte > 0x7E for byte in encoded):
+        raise ConfigurationError(f"{name} must contain visible ASCII characters only")
+    return value
+
+
+def _bounded_ascii_principal(value: str) -> str:
+    name = "MCP_HTTP_PRINCIPAL"
+    if not value:
+        raise ConfigurationError(f"{name} is required for Streamable HTTP")
+    try:
+        encoded = value.encode("ascii")
+    except UnicodeEncodeError as exc:
+        raise ConfigurationError(f"{name} must contain ASCII characters only") from exc
+    if len(encoded) > 128:
+        raise ConfigurationError(f"{name} must not exceed 128 ASCII bytes")
+    if any(byte <= 0x20 or byte > 0x7E for byte in encoded):
+        raise ConfigurationError(f"{name} must contain visible ASCII characters only")
     return value
 
 
@@ -202,8 +219,8 @@ class Settings:
                 env, "MCP_STDIO_ALLOWED_DESTRUCTIVE_CAPABILITIES"
             ),
             stdio_allowed_destructive_resources=_destructive_resources(env, "MCP_STDIO_ALLOWED_DESTRUCTIVE_RESOURCES"),
-            http_auth_token=env.get("MCP_HTTP_AUTH_TOKEN", "").strip(),
-            http_principal=env.get("MCP_HTTP_PRINCIPAL", "").strip(),
+            http_auth_token=env.get("MCP_HTTP_AUTH_TOKEN", ""),
+            http_principal=env.get("MCP_HTTP_PRINCIPAL", ""),
             http_allowed_capabilities=_http_capabilities(env),
             http_allowed_destructive_capabilities=_destructive_capabilities(
                 env, "MCP_HTTP_ALLOWED_DESTRUCTIVE_CAPABILITIES"
@@ -235,14 +252,7 @@ class Settings:
             if self.host not in _LOOPBACK_HOSTS:
                 raise ConfigurationError("Remote HTTP is disabled; Streamable HTTP must use a loopback MCP_HOST")
             _bounded_ascii_secret(self.http_auth_token, "MCP_HTTP_AUTH_TOKEN")
-            if not self.http_principal:
-                raise ConfigurationError("MCP_HTTP_PRINCIPAL is required for Streamable HTTP")
-            try:
-                principal_bytes = self.http_principal.encode("ascii")
-            except UnicodeEncodeError as exc:
-                raise ConfigurationError("MCP_HTTP_PRINCIPAL must contain ASCII characters only") from exc
-            if len(principal_bytes) > 128:
-                raise ConfigurationError("MCP_HTTP_PRINCIPAL must not exceed 128 ASCII bytes")
+            _bounded_ascii_principal(self.http_principal)
             invalid_capabilities = sorted(set(self.http_allowed_capabilities) - _HTTP_CAPABILITY_CLASSES)
             if not self.http_allowed_capabilities or invalid_capabilities:
                 raise ConfigurationError("MCP_HTTP_ALLOWED_CAPABILITIES must contain only read, write, destructive")
