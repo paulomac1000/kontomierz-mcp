@@ -23,6 +23,10 @@ PRIMARY_TOOL_DEFINITIONS: dict[str, ToolDefinition] = {
             p("user_name", "str | None", "Optional wallet label; an empty string is an explicit empty label.", None),
             p("liquid", "str", "Kontomierz liquidity flag: '0' or '1'.", "1"),
         ),
+        usage_notes=(
+            "If the upstream reports success without an object, the result is a reconciliation-required marker; "
+            "call list_accounts before any dependent mutation"
+        ),
     ),
     "update_wallet": ToolDefinition(
         write_manifest("update_wallet"),
@@ -78,8 +82,9 @@ PRIMARY_TOOL_DEFINITIONS: dict[str, ToolDefinition] = {
             p("transaction_on", "str", "Optional ISO date YYYY-MM-DD.", ""),
         ),
         usage_notes=(
-            "client_assigned_id is required for reconciliation but replay-safe idempotency is not claimed "
-            "until verified against a disposable real account"
+            "client_assigned_id is required for reconciliation but replay-safe idempotency is not claimed; "
+            "if the upstream reports success without the created object, the result requires explicit reconciliation "
+            "through list_transactions before any retry"
         ),
     ),
     "update_transaction": ToolDefinition(
