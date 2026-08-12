@@ -13,13 +13,19 @@ verification: Run the manifest, operation, kernel, client, security, and MCP SDK
 
 Stable positive numeric IDs returned by list tools are accepted by detail and mutation tools. Money is a finite decimal string plus a three-letter currency. The server preserves the caller's finite decimal value without rounding or imposing a fixed scale; the upstream remains responsible for any accepted precision limit. Wallet balances may be zero or negative because the upstream contract has not established a positive-only restriction. Public dates accept only `YYYY-MM-DD`; months accept only `YYYY-MM`. Legacy `DD-MM-YYYY` values are rejected at the public operation boundary and are produced only internally for the localized upstream contract.
 
+Every public text or decimal-string input is bounded by a UTF-8 byte budget before it is copied into an upstream request. Current operation-level budgets include 64 bytes for decimal strings, 128 bytes for `client_assigned_id` and tag-name filters, 256 bytes for free-text search and wallet labels, and 512 bytes for schedule descriptions, transaction names, and tag strings. Dates, months, directions, chart kinds, and schedule-group values have narrower fixed-format bounds. These are application-enforced bounds; a client cannot bypass them by sending multibyte Unicode values whose character count is small but encoded byte size is large.
+
 For update tools, `None` means not provided. An empty string is an explicit request to clear a text field where the upstream accepts it.
 
 ## Outputs
 
 Successful tools return structured content with `data` and `_meta`. Metadata contains a request ID, duration, tool version, target scope, opaque `target_ref`, and authenticated transport class. `target_ref` is stable for the configured authorization target without exposing the internal credential-derived target identity. Empty lists are successful results. Principal identifiers, exact resource authorization, and authorization-policy internals are intentionally not echoed in tool output; the detailed decision is retained only in the server audit event.
 
+Each governed manifest declares `max_response_bytes`; the current default is 1 MiB and the kernel measures the final UTF-8 JSON document, including `_meta`, before returning it. Oversized read results fail closed with a bounded error and a narrowing/pagination suggestion. If a write has already completed but its returned representation is oversized, the kernel does not convert that completed mutation into a retry-provoking failure; it replaces the data with a small `completed`/`response_omitted`/`reconciliation_required` marker.
+
 When Kontomierz confirms a create with an empty body and therefore supplies no stable identity, the adapter returns `{"created": true, "reconciliation_required": true}`. It does not guess a resource ID by matching non-unique descriptions, categories, or other attributes after the write. The caller must use the corresponding list tool to reconcile state before any dependent mutation or retry.
+
+The upstream adapter separately caps any decoded Kontomierz response body at 4 MiB while streaming it. It rejects an oversized declared `Content-Length` or a streamed body that crosses the limit before JSON decoding. If this happens after a successful mutation response begins, the write remains classified as potentially completed and is normalized to the normal ambiguous-outcome path.
 
 ## Errors
 
@@ -27,7 +33,7 @@ Tool failures return an explicit MCP `CallToolResult` with `is_error=true`, cont
 
 ## Safety, authorization, and retry
 
-Each tool has one complete governed manifest containing risk, side effects, confidentiality, idempotency mechanism, retry conditions, concurrency scope, confirmation requirement, determinism, latency, cost, impact, reversibility, target binding, and active state. Authentication alone never grants tool access. The application policy binds a principal to the exact capability ID, capability class, immutable configured target, resolved resource identity, and normalized-argument digest, then revalidates that binding immediately before I/O.
+Each tool has one complete governed manifest containing risk, side effects, confidentiality, idempotency mechanism, retry conditions, concurrency scope, confirmation requirement, determinism, latency, cost, impact, reversibility, target binding, active state, and maximum response bytes. Authentication alone never grants tool access. The application policy binds a principal to the exact capability ID, capability class, immutable configured target, resolved resource identity, and normalized-argument digest, then revalidates that binding immediately before I/O.
 
 Existing resource mutations bind stable identities such as `wallet:123`, `transaction:456`, `budget:789`, and `schedule:321`. Create operations use bounded `*:new` identities; `create_transaction` additionally binds a SHA-256-derived correlation identity when `client_assigned_id` is present. List and aggregate tools authorize explicit collection/namespace resources rather than relying on the argument digest as a substitute for resource identity.
 
