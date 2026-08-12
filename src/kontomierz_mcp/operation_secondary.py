@@ -1,12 +1,9 @@
-"""Budget, schedule, chart, wealth, and capability handlers."""
+"""Budget, schedule, chart, and wealth operation handlers."""
 
 from __future__ import annotations
 
 from typing import Any
 
-from . import __version__
-from .config import Settings
-from .manifests import TOOL_DEFINITIONS
 from .operation_support import (
     bounded,
     bounded_text,
@@ -27,7 +24,7 @@ from .operation_support import (
 )
 
 
-async def dispatch_secondary(name: str, a: dict[str, Any], client: Any, settings: Settings) -> Any:
+async def dispatch_secondary(name: str, a: dict[str, Any], client: Any) -> Any:
     if name == "list_budgets":
         items = await resolve(client.get_budgets(month(a.get("month", "")) or None))
         return {"items": items, "items_in_page": len(items), "month": a.get("month") or None}
@@ -156,13 +153,4 @@ async def dispatch_secondary(name: str, a: dict[str, Any], client: Any, settings
     if name == "list_wealth_points":
         start, end = date_range(a.get("start_on", ""), a.get("end_on", ""))
         return await resolve(client.get_wealth_points(start, end))
-    if name == "describe_kontomierz_capabilities":
-        return {
-            "schema_version": "3.0.0",
-            "server_version": __version__,
-            "supported_transports": ["stdio", "streamable-http"],
-            "active_transport": "streamable-http" if settings.streamable_http else "stdio",
-            "write_operations_enabled": settings.enable_write_operations,
-            "tools": {tool_name: definition.as_dict() for tool_name, definition in TOOL_DEFINITIONS.items()},
-        }
     raise KeyError(name)
