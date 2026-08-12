@@ -153,6 +153,11 @@ class KontomierzClient:
             return payload.get(key, payload)
         return payload
 
+    @staticmethod
+    def _created_marker() -> dict[str, bool]:
+        """Represent known create success when upstream did not identify the new resource."""
+        return {"created": True, "reconciliation_required": True}
+
     async def get_user_accounts(self) -> list[dict[str, Any]]:
         payload = await self._request("GET", "user_accounts.json")
         items = self._expect_list(payload)
@@ -174,7 +179,7 @@ class KontomierzClient:
             body["user_account[user_name]"] = user_name
         payload = await self._request("POST", "user_accounts/create_wallet.json", body=body)
         if payload is None:
-            return {"created": True}
+            return self._created_marker()
         return self._response_object(payload, "user_account", write=True)
 
     async def update_wallet(self, wallet_id: int, **fields: Any) -> dict[str, Any]:
@@ -206,7 +211,7 @@ class KontomierzClient:
         body = {f"money_transaction[{key}]": value for key, value in fields.items() if value is not None}
         payload = await self._request("POST", "money_transactions.json", body=body)
         if payload is None:
-            return {"created": True}
+            return self._created_marker()
         return self._response_object(payload, "money_transaction", write=True)
 
     async def update_money_transaction(self, transaction_id: int, **fields: Any) -> dict[str, Any]:
@@ -271,24 +276,8 @@ class KontomierzClient:
             body["budget[month_on]"] = month_on
         payload = await self._request(method, path, body=body)
         if payload is None:
-            if method == "PUT":
-                return {"updated": True}
-            return await self._reconcile_budget(category_id, category_group_id)
+            return {"updated": True} if method == "PUT" else self._created_marker()
         return self._response_object(payload, "budget", write=True)
-
-    async def _reconcile_budget(self, category_id: int | None, category_group_id: int | None) -> dict[str, Any]:
-        try:
-            items = self._expect_list(self._unwrap(await self._request("GET", "budgets.json"), "budgets"))
-        except UpstreamError:
-            return {"created": True}
-        for item in reversed(items):
-            if not isinstance(item, dict) or item.get("kind") != "ordinary":
-                continue
-            if category_id is not None and item.get("category_id") == category_id:
-                return item
-            if category_group_id is not None and item.get("category_group_id") == category_group_id:
-                return item
-        return {"created": True}
 
     async def delete_budget(self, budget_id: int) -> bool:
         return bool(await self._request("DELETE", f"budgets/{budget_id}.json", expect_json=False))
@@ -313,9 +302,7 @@ class KontomierzClient:
 
     async def create_schedule(self, **fields: Any) -> dict[str, Any]:
         payload = await self._schedule_write("POST", "schedules.json", fields)
-        if payload is None:
-            return await self._reconcile_schedule(fields)
-        return payload
+        return self._created_marker() if payload is None else payload
 
     async def update_schedule(self, schedule_id: int, **fields: Any) -> dict[str, Any]:
         payload = await self._schedule_write("PUT", f"schedules/{schedule_id}.json", fields)
@@ -329,19 +316,6 @@ class KontomierzClient:
         if payload is None:
             return None
         return self._response_object(payload, "schedule", write=True)
-
-    async def _reconcile_schedule(self, fields: Mapping[str, Any]) -> dict[str, Any]:
-        description = str(fields.get("description", ""))
-        try:
-            items = self._expect_list(
-                self._unwrap(await self._request("GET", "scheduled_transactions.json"), "scheduled_transactions")
-            )
-        except UpstreamError:
-            return {"created": True}
-        for item in reversed(items):
-            if isinstance(item, dict) and item.get("description") == description:
-                return item
-        return {"created": True}
 
     async def delete_schedule(self, schedule_id: int) -> bool:
         return bool(await self._request("DELETE", f"schedules/{schedule_id}.json", expect_json=False))
