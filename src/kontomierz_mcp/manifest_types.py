@@ -54,6 +54,7 @@ class ToolManifest:
     concurrent_safe: bool
     concurrency_scope: str
     timeout_ms: int
+    max_response_bytes: int
     requires_confirmation: bool
     determinism: Determinism
     latency: Latency
