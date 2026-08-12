@@ -66,6 +66,13 @@ def money(value: Any, name: str, *, positive: bool) -> str:
         fail(f"{name} must be a decimal number")
     if not amount.is_finite() or (positive and amount <= 0):
         fail(f"{name} must be {'positive' if positive else 'finite'}")
+    _sign, digits, exponent = amount.as_tuple()
+    if not isinstance(exponent, int):
+        fail(f"{name} must be a finite decimal number")
+    integer_digits = max(len(digits) + exponent, 0)
+    decimal_places = max(-exponent, 0)
+    if len(digits) > 20 or integer_digits > 20 or decimal_places > 8:
+        fail(f"{name} must have at most 20 digits and 8 decimal places")
     return format(amount, "f")
 
 
