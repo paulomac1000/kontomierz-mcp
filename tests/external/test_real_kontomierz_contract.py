@@ -5,8 +5,9 @@ Executable contract evidence collected against a live account on 2026-08-08
 ``external`` marker, are excluded by default, and require TWO explicit opt-ins:
 ``KONTOMIERZ_EXTERNAL_TESTS=1`` and ``KONTOMIERZ_ALLOW_REAL_MUTATIONS=1``.
 They also require ``KONTOMIERZ_API_KEY`` from the repository ``.env``. Cleanup
-uses both captured IDs and unique ``MCP-E2E-TEST`` descriptions so a failure
-between a successful write and reconciliation does not silently orphan data.
+uses captured IDs plus bounded full pagination of unique ``MCP-E2E-TEST``
+descriptions so a failure between a successful write and normal reconciliation
+does not silently orphan data outside the first upstream page.
 """
 
 from __future__ import annotations
@@ -23,6 +24,8 @@ pytestmark = pytest.mark.external
 
 _BASE = "https://secure.kontomierz.pl/k4"
 _PREFIX = "MCP-E2E-TEST"
+_EVIDENCE_PAGE_SIZE = 100
+_MAX_EVIDENCE_PAGES = 100
 
 
 def _require_live_test_opt_in() -> None:
@@ -73,19 +76,33 @@ def _delete(client: httpx.Client, key: str, path: str) -> httpx.Response:
     return client.delete(f"{_BASE}/{path}", params={"api_key": key})
 
 
-def _schedule_ids_for_descriptions(
-    client: httpx.Client,
-    key: str,
-    descriptions: set[str],
-) -> set[int]:
-    response = _get(client, key, "scheduled_transactions.json")
-    if response.status_code != 200:
-        return set()
-    payload = response.json()
-    items = payload.get("scheduled_transactions", []) if isinstance(payload, dict) else []
+def _all_schedule_items(client: httpx.Client, key: str) -> list[dict[str, object]]:
+    result: list[dict[str, object]] = []
+    for page_number in range(1, _MAX_EVIDENCE_PAGES + 1):
+        response = _get(
+            client,
+            key,
+            "scheduled_transactions.json",
+            page=page_number,
+            per_page=_EVIDENCE_PAGE_SIZE,
+        )
+        if response.status_code != 200:
+            break
+        payload = response.json()
+        page_items = payload.get("scheduled_transactions", []) if isinstance(payload, dict) else []
+        if not isinstance(page_items, list):
+            break
+        typed = [item for item in page_items if isinstance(item, dict)]
+        result.extend(typed)
+        if len(page_items) < _EVIDENCE_PAGE_SIZE:
+            break
+    return result
+
+
+def _schedule_ids_for_descriptions(client: httpx.Client, key: str, descriptions: set[str]) -> set[int]:
     result: set[int] = set()
-    for item in items:
-        if not isinstance(item, dict) or item.get("description") not in descriptions:
+    for item in _all_schedule_items(client, key):
+        if item.get("description") not in descriptions:
             continue
         schedule_id = item.get("schedule_id")
         if isinstance(schedule_id, int) and schedule_id > 0:
@@ -112,17 +129,31 @@ def _cleanup_schedules(
             pass
 
 
+def _all_transaction_items(client: httpx.Client, key: str) -> list[dict[str, object]]:
+    result: list[dict[str, object]] = []
+    for page_number in range(1, _MAX_EVIDENCE_PAGES + 1):
+        response = _get(
+            client,
+            key,
+            "money_transactions.json",
+            page=page_number,
+            per_page=_EVIDENCE_PAGE_SIZE,
+        )
+        if response.status_code != 200:
+            break
+        payload = response.json()
+        if not isinstance(payload, list):
+            break
+        typed = [item for item in payload if isinstance(item, dict)]
+        result.extend(typed)
+        if len(payload) < _EVIDENCE_PAGE_SIZE:
+            break
+    return result
+
+
 def _transaction_ids_for_description(client: httpx.Client, key: str, description: str) -> set[int]:
-    response = _get(client, key, "money_transactions.json")
-    if response.status_code != 200:
-        return set()
-    payload = response.json()
-    if not isinstance(payload, list):
-        return set()
     result: set[int] = set()
-    for item in payload:
-        if not isinstance(item, dict):
-            continue
+    for item in _all_transaction_items(client, key):
         candidate = item.get("money_transaction", item)
         if not isinstance(candidate, dict):
             continue
@@ -319,6 +350,7 @@ def test_real_pagination_evidence() -> None:
     with _client() as client:
         unfiltered = _get(client, key, "scheduled_transactions.json").json()["scheduled_transactions"]
         assert len(unfiltered) >= 2, "pagination evidence needs at least two schedules"
+
         first_page = _get(client, key, "scheduled_transactions.json", page=1, per_page=1).json()[
             "scheduled_transactions"
         ]
@@ -326,19 +358,29 @@ def test_real_pagination_evidence() -> None:
             "scheduled_transactions"
         ]
         assert len(first_page) == 1 and len(second_page) == 1
-        assert first_page[0]["schedule_id"] != second_page[0]["schedule_id"], "pages must differ (stable ordering)"
-        last_page = _get(client, key, "scheduled_transactions.json", page=2, per_page=10).json()[
-            "scheduled_transactions"
-        ]
-        assert last_page, "the second page of 11 items with per_page=10 holds the remainder"
-        assert last_page[0]["schedule_id"] == unfiltered[-1]["schedule_id"], "ordering is stable across pages"
-        beyond = _get(client, key, "scheduled_transactions.json", page=999, per_page=10).json()[
-            "scheduled_transactions"
-        ]
-        assert beyond == [], "pages beyond the last one terminate with an empty list"
+        assert first_page[0]["schedule_id"] != second_page[0]["schedule_id"], "pages must differ"
+
+        page_size = max(1, min(10, len(unfiltered) // 2))
+        observed_ids: list[int] = []
+        terminated = False
+        for page_number in range(1, _MAX_EVIDENCE_PAGES + 1):
+            page_items = _get(
+                client,
+                key,
+                "scheduled_transactions.json",
+                page=page_number,
+                per_page=page_size,
+            ).json()["scheduled_transactions"]
+            if not page_items:
+                terminated = True
+                break
+            observed_ids.extend(int(item["schedule_id"]) for item in page_items)
+        expected_ids = [int(item["schedule_id"]) for item in unfiltered]
+        assert terminated, "paginated schedule traversal must terminate with an empty page"
+        assert observed_ids == expected_ids, "pagination must preserve the same stable ordering as the unfiltered list"
+
         transactions = _get(client, key, "money_transactions.json", page=1, per_page=3).json()
         assert isinstance(transactions, list)
-        assert len(transactions) < 3, "pagination termination proven only with the schedule list"
 
 
 def test_real_money_precision_normalization() -> None:
@@ -366,7 +408,7 @@ def test_real_money_precision_normalization() -> None:
             matches = _schedule_ids_for_descriptions(client, key, {description})
             assert matches
             created_ids.update(matches)
-            items = _get(client, key, "scheduled_transactions.json").json()["scheduled_transactions"]
+            items = _all_schedule_items(client, key)
             matched_items = [item for item in items if item.get("schedule_id") in matches]
             assert matched_items and matched_items[0]["currency_amount"] == "-1.23", (
                 "withdrawal amounts are normalized to negative strings"
