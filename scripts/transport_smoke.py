@@ -7,6 +7,7 @@ import asyncio
 import os
 import socket
 import subprocess
+import tempfile
 import time
 from contextlib import closing
 from pathlib import Path
@@ -106,29 +107,36 @@ async def smoke_http(executable: Path) -> None:
         "MCP_HTTP_ALLOWED_CAPABILITIES": "read",
         "MCP_HTTP_MAX_REQUEST_BODY_BYTES": "1048576",
     }
+    diagnostics_file = tempfile.TemporaryFile(mode="w+", encoding="utf-8")
     process = subprocess.Popen(
         [str(executable)],
         env=environment,
         stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
+        stderr=diagnostics_file,
         text=True,
     )
+
+    def read_diagnostics() -> str:
+        diagnostics_file.flush()
+        diagnostics_file.seek(0)
+        return diagnostics_file.read()
+
     try:
         deadline = time.monotonic() + 60
         ready_url = f"http://127.0.0.1:{port}/health/ready"
         ready_request = Request(ready_url, headers={"Authorization": f"Bearer {_HTTP_TOKEN}"})
         while time.monotonic() < deadline:
             if process.poll() is not None:
-                diagnostics = process.stderr.read() if process.stderr else ""
-                raise RuntimeError(f"HTTP server exited early: {diagnostics}")
+                raise RuntimeError(f"HTTP server exited early: {read_diagnostics()}")
             try:
                 with urlopen(ready_request, timeout=1) as response:  # noqa: S310 - fixed loopback URL
                     if response.status == 200:
                         break
             except OSError:
-                await asyncio.sleep(0.1)
+                pass
+            await asyncio.sleep(0.1)
         else:
-            raise TimeoutError("HTTP server did not become ready")
+            raise TimeoutError(f"HTTP server did not become ready: {read_diagnostics()}")
 
         http_client = httpx2.AsyncClient(headers={"Authorization": f"Bearer {_HTTP_TOKEN}"})
         async with http_client:
@@ -145,6 +153,7 @@ async def smoke_http(executable: Path) -> None:
         except subprocess.TimeoutExpired:
             process.kill()
             process.wait(timeout=5)
+        diagnostics_file.close()
 
 
 async def main() -> None:
