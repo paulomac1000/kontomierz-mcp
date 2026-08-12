@@ -110,34 +110,31 @@ async def test_explicit_json_body_mode_remains_supported() -> None:
 
 
 @pytest.mark.asyncio
-async def test_empty_create_body_is_success_not_ambiguous_and_reconciles() -> None:
+async def test_empty_schedule_create_requires_explicit_reconciliation() -> None:
     calls: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         calls.append(request)
-        if request.method == "POST":
-            return httpx.Response(201)
-        return httpx.Response(
-            200,
-            json={"scheduled_transactions": [{"schedule_id": 42, "description": "Rent"}]},
-        )
+        return httpx.Response(201)
 
     client = make_client(handler)
     result = await client.create_schedule(description="Rent", currency_amount="1.00")
-    assert result == {"schedule_id": 42, "description": "Rent"}
-    assert [call.method for call in calls] == ["POST", "GET"]
+    assert result == {"created": True, "reconciliation_required": True}
+    assert [call.method for call in calls] == ["POST"]
 
 
 @pytest.mark.asyncio
-async def test_empty_create_body_without_list_match_returns_created_marker() -> None:
+async def test_empty_budget_create_does_not_guess_existing_resource_identity() -> None:
+    calls: list[httpx.Request] = []
+
     def handler(request: httpx.Request) -> httpx.Response:
-        if request.method == "POST":
-            return httpx.Response(201)
-        return httpx.Response(200, json={"scheduled_transactions": []})
+        calls.append(request)
+        return httpx.Response(201)
 
     client = make_client(handler)
-    result = await client.create_schedule(description="Ghost")
-    assert result == {"created": True}
+    result = await client.create_budget("1.00", category_id=3)
+    assert result == {"created": True, "reconciliation_required": True}
+    assert [call.method for call in calls] == ["POST"]
 
 
 @pytest.mark.asyncio
@@ -145,30 +142,6 @@ async def test_empty_update_body_is_success_marker() -> None:
     client = make_client(lambda _request: httpx.Response(200))
     result = await client.update_schedule(7, description="x")
     assert result == {"updated": True, "schedule_id": 7}
-
-
-@pytest.mark.asyncio
-async def test_empty_budget_create_reconciles_by_category() -> None:
-    calls: list[httpx.Request] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        calls.append(request)
-        if request.method == "POST":
-            return httpx.Response(201)
-        return httpx.Response(
-            200,
-            json={
-                "budgets": [
-                    {"id": 9, "kind": "ordinary", "limit": "1.0", "category_id": 3},
-                    {"id": 10, "kind": "total", "limit": "1.0"},
-                ]
-            },
-        )
-
-    client = make_client(handler)
-    result = await client.create_budget("1.00", category_id=3)
-    assert result == {"id": 9, "kind": "ordinary", "limit": "1.0", "category_id": 3}
-    assert [call.method for call in calls] == ["POST", "GET"]
 
 
 @pytest.mark.asyncio
@@ -182,7 +155,7 @@ async def test_empty_budget_update_is_success_marker() -> None:
 async def test_empty_transaction_create_is_success_marker() -> None:
     client = make_client(lambda _request: httpx.Response(201))
     result = await client.create_money_transaction(client_assigned_id="x")
-    assert result == {"created": True}
+    assert result == {"created": True, "reconciliation_required": True}
 
 
 @pytest.mark.asyncio
