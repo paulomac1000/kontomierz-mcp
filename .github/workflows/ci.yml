@@ -17,7 +17,6 @@ concurrency:
 
 env:
   CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-  AI_SKILLS_REV: b7c7a41555537b982b012f0bc30899cb3b4b2279
 
 jobs:
   quality:
@@ -109,11 +108,33 @@ jobs:
         with:
           ref: ${{ env.CANDIDATE_SHA }}
           persist-credentials: false
+      - name: Resolve trusted ai-skills coordinates from canonical lock
+        id: trusted-ai-skills
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import re
+          from pathlib import Path
+
+          text = Path("trusted-executable-sources.lock.yaml").read_text(encoding="utf-8")
+          marker = "  - id: ai-skills-authority\n"
+          try:
+              block = text.split(marker, 1)[1]
+          except IndexError as exc:
+              raise SystemExit("ai-skills-authority is missing from trusted executable source lock") from exc
+          repository = re.search(r"^    repository: ([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)\s*$", block, re.MULTILINE)
+          revision = re.search(r"^    revision: ([0-9a-f]{40})\s*$", block, re.MULTILINE)
+          if repository is None or revision is None:
+              raise SystemExit("trusted ai-skills repository/revision is malformed")
+          print(f"repository={repository.group(1)}")
+          print(f"revision={revision.group(1)}")
+          PY
       - name: Checkout trusted ai-skills validators
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
-          repository: paulomac1000/ai-skills
-          ref: ${{ env.AI_SKILLS_REV }}
+          repository: ${{ steps.trusted-ai-skills.outputs.repository }}
+          ref: ${{ steps.trusted-ai-skills.outputs.revision }}
           path: .trusted/ai-skills
           persist-credentials: false
       - name: Move trusted verifier outside candidate tree
@@ -121,19 +142,7 @@ jobs:
           set -euo pipefail
           mv .trusted/ai-skills "$RUNNER_TEMP/ai-skills"
           rmdir .trusted
-          test "$(git -C "$RUNNER_TEMP/ai-skills" rev-parse HEAD)" = "$AI_SKILLS_REV"
-      - name: Report trusted executable SHA-256 values
-        run: |
-          set -euo pipefail
-          sha256sum \
-            "$RUNNER_TEMP/ai-skills/skills/afds-doc-writer/validate.py" \
-            "$RUNNER_TEMP/ai-skills/skills/agents-md-architect/tools/audit_agents_md.py" \
-            "$RUNNER_TEMP/ai-skills/skills/ci-cd-architect/tools/check_github_actions_policy.py" \
-            "$RUNNER_TEMP/ai-skills/skills/ci-cd-architect/tools/check_consumer_trust_hygiene.py" \
-            "$RUNNER_TEMP/ai-skills/skills/mcp-server-architect/tools/inspect_existing_project.py" \
-            "$RUNNER_TEMP/ai-skills/contracts/validate_upstream_contract.py" \
-            "$RUNNER_TEMP/ai-skills/contracts/validate_live_backend_test_policy.py" \
-            "$RUNNER_TEMP/ai-skills/contracts/validate_trusted_executable_sources.py"
+          test "$(git -C "$RUNNER_TEMP/ai-skills" rev-parse HEAD)" = "${{ steps.trusted-ai-skills.outputs.revision }}"
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v6
         with:
           python-version: "3.12"
@@ -141,6 +150,13 @@ jobs:
         run: >-
           python -m pip install --require-hashes
           -r "$RUNNER_TEMP/ai-skills/requirements-dev-linux-x64-py312.lock"
+      - name: Validate canonical trusted executable source lock
+        run: >-
+          python "$RUNNER_TEMP/ai-skills/contracts/validate_trusted_executable_sources.py"
+          trusted-executable-sources.lock.yaml
+          --repository-root .
+          --authority-root "ai-skills-authority=$RUNNER_TEMP/ai-skills"
+          --require-authority
       - name: Validate governed documents with trusted AFDS validator
         run: python "$RUNNER_TEMP/ai-skills/skills/afds-doc-writer/validate.py" AGENTS.md docs
       - name: Audit AGENTS instructions from trusted revision
@@ -260,8 +276,8 @@ jobs:
           .artifact-test-venv/bin/python -m pip check
           mkdir -p /tmp/kontomierz-wheel-test
           cp -R \
-            tests scripts pyproject.toml live-backend-test-policy.yaml upstream-contract.yaml \
-            /tmp/kontomierz-wheel-test/
+            tests scripts .github pyproject.toml live-backend-test-policy.yaml upstream-contract.yaml \
+            trusted-executable-sources.lock.yaml /tmp/kontomierz-wheel-test/
           (
             cd /tmp/kontomierz-wheel-test
             "$GITHUB_WORKSPACE/.artifact-test-venv/bin/python" -m pytest -m "not external" -q
@@ -277,7 +293,10 @@ jobs:
       - name: Build and smoke image from exact verified inputs
         run: |
           set -euo pipefail
-          docker build --pull=false -t "kontomierz-mcp:${SOURCE_SHA}" .
+          docker build --pull=false \
+            --label "org.opencontainers.image.revision=${SOURCE_SHA}" \
+            -t "kontomierz-mcp:${SOURCE_SHA}" .
+          test "$(docker image inspect --format '{{ index .Config.Labels \"org.opencontainers.image.revision\" }}' "kontomierz-mcp:${SOURCE_SHA}")" = "$SOURCE_SHA"
           docker run --rm --entrypoint python "kontomierz-mcp:${SOURCE_SHA}" -c \
             "import os, kontomierz_mcp; assert os.geteuid() != 0; print(kontomierz_mcp.__version__)"
       - name: Close release artifact set

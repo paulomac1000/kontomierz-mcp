@@ -1,0 +1,24 @@
+schema_version: 1
+sources:
+  - id: ai-skills-authority
+    role: auditor
+    repository: paulomac1000/ai-skills
+    revision: 32b699c75eaf4edac00982fea181daebaba40114
+    credential_access: none
+    files:
+      - authority_path: skills/afds-doc-writer/validate.py
+        sha256: sha256:4e36f8882edfcb6237cc30c181c8cce28d1695f66de5594f2cc3b9bd3656455e
+      - authority_path: skills/agents-md-architect/tools/audit_agents_md.py
+        sha256: sha256:2f29f41eb8fee0a2d9289a8daf9a610a9e84117cc25adde69e22b19ad5f9ee36
+      - authority_path: skills/ci-cd-architect/tools/check_github_actions_policy.py
+        sha256: sha256:35116ab4dc2ffe9a5d2833e72c2fe8252a1fcb5209570c3885fc8b9e975a84c4
+      - authority_path: skills/ci-cd-architect/tools/check_consumer_trust_hygiene.py
+        sha256: sha256:617e9652494735d0632fbcffd881006e8be9b42148aa6ad84c01353e65fd956e
+      - authority_path: skills/mcp-server-architect/tools/inspect_existing_project.py
+        sha256: sha256:89d36ed71357897a77d2346e22ad96d8c43052213ce06dfb229d5728c88788ff
+      - authority_path: contracts/validate_upstream_contract.py
+        sha256: sha256:eb53bdeca3f3d9829b133842186c509a61201fa509a9db58073ec1a5636efe04
+      - authority_path: contracts/validate_live_backend_test_policy.py
+        sha256: sha256:23d9fde3565667424ddb7a6763b92908da10b265a7a311c0988e328764685e8b
+      - authority_path: contracts/validate_trusted_executable_sources.py
+        sha256: sha256:ea45b61de987f69a11cb7c0de038ce929205e190185e07e22da88a6201c41f48
