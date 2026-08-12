@@ -25,6 +25,10 @@ Every request carries the credential as the `api_key` query parameter. Invalid c
 
 Write payload dates use `DD-MM-YYYY` (schedule `deadline_on`, `mark_as_payed` / `mark_as_unpayed` path dates, transaction `transaction_on`). ISO `YYYY-MM-DD` is rejected with `422 Nieprawidłowy parametr - termin płatności`. Responses contain ISO dates (for example `next_deadline_on`, and `transaction_on` in a created transaction). The public server surface accepts ISO dates only; conversion to `DD-MM-YYYY` happens internally after public validation.
 
+### Response bounds
+
+The adapter streams successful JSON responses and caps the decoded body at 4 MiB before JSON decoding. A declared `Content-Length` above the limit is rejected immediately, and chunked/streamed bodies are aborted as soon as accumulated decoded bytes would cross the same limit. Error status mapping is performed before reading a response body, so raw upstream error pages are not buffered or surfaced. An oversized read response is a non-retryable bounded upstream failure; an oversized response after a successful mutation is conservatively marked as a potentially completed write and normalized by the kernel to `AMBIGUOUS_OUTCOME`.
+
 ### Verified endpoints
 
 | Endpoint | Method | Notes |
@@ -53,7 +57,7 @@ Schedule and budget create/update responses are 201/200 with an **empty body** �
 
 ### Failure classification
 
-Read timeout, transport loss, 429, and 5xx errors may be retry-eligible for the caller. The server itself does not retry. For a started write, timeout, transport loss, invalid JSON, a missing response wrapper, or a wrong response shape after success status, and ambiguous 5xx are marked as potentially completed and normalized by the kernel to `AMBIGUOUS_OUTCOME`. A cancellation after mutation execution starts also remains ambiguous in the server-side audit record. Explicit 4xx rejections are not ambiguous.
+Read timeout, transport loss, 429, and 5xx errors may be retry-eligible for the caller. The server itself does not retry. For a started write, timeout, transport loss, invalid JSON, a missing response wrapper, a wrong response shape after success status, an oversized successful response body, and ambiguous 5xx are marked as potentially completed and normalized by the kernel to `AMBIGUOUS_OUTCOME`. A cancellation after mutation execution starts also remains ambiguous in the server-side audit record. Explicit 4xx rejections are not ambiguous.
 
 ## Remaining unverified
 
