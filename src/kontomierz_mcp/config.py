@@ -7,6 +7,7 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlsplit
 
 _DEFAULT_API_BASE_URL = "https://secure.kontomierz.pl/k4"
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
@@ -156,6 +157,23 @@ def _bounded_ascii_principal(value: str) -> str:
     return value
 
 
+def _validate_api_base_url(value: str, *, mock_data: bool) -> None:
+    if mock_data:
+        return
+    parsed = urlsplit(value)
+    if (
+        parsed.scheme != "https"
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ConfigurationError(
+            "KONTOMIERZ_API_BASE_URL must be an absolute HTTPS URL without credentials, query, or fragment"
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     """One validated settings snapshot owned by the composition root."""
@@ -238,6 +256,7 @@ class Settings:
     def validate(self) -> None:
         if not self.api_key and not self.mock_data:
             raise ConfigurationError("KONTOMIERZ_API_KEY is required unless KONTOMIERZ_MOCK_DATA=1")
+        _validate_api_base_url(self.api_base_url, mock_data=self.mock_data)
         if self.transport not in {"stdio", "http", "streamable-http"}:
             raise ConfigurationError("MCP_TRANSPORT must be stdio, http, or streamable-http")
         if not 1 <= self.port <= 65535:
