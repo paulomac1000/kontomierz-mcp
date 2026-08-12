@@ -9,6 +9,7 @@ from .config import Settings
 from .manifests import TOOL_DEFINITIONS
 from .operation_support import (
     bounded,
+    bounded_text,
     currency,
     date_range,
     date_value,
@@ -58,7 +59,13 @@ async def dispatch_secondary(name: str, a: dict[str, Any], client: Any, settings
         await resolve(client.copy_budgets_from_last_month())
         return {"copied": True}
     if name == "list_scheduled_transactions":
-        group = a.get("schedule_group_name", "unpaid")
+        group = bounded_text(
+            a.get("schedule_group_name", "unpaid"),
+            "schedule_group_name",
+            max_bytes=16,
+            allow_empty=False,
+            strip=True,
+        )
         if group not in {"paid", "unpaid"}:
             fail("schedule_group_name must be paid or unpaid")
         number, limit = page(a.get("page", 1)), page_limit(a.get("per_page", 0))
@@ -82,7 +89,7 @@ async def dispatch_secondary(name: str, a: dict[str, Any], client: Any, settings
                 direction=direction(a["direction"]),
                 deadline_on=date_value(a["deadline_on"], "deadline_on"),
                 holidays=str(bounded(a["holidays"], "holidays", {0, 1, 2})),
-                description=text(a["description"], "description"),
+                description=text(a["description"], "description", max_bytes=512),
                 currency_amount=money(a["currency_amount"], "currency_amount", positive=True),
                 currency_name=currency(a["currency_name"]),
                 repeat=str(bounded(a["repeat"], "repeat", set(range(1, 10)))),
@@ -107,6 +114,8 @@ async def dispatch_secondary(name: str, a: dict[str, Any], client: Any, settings
             fields["deadline_on"] = date_value(fields["deadline_on"], "deadline_on")
         if "holidays" in fields:
             fields["holidays"] = str(bounded(fields["holidays"], "holidays", {0, 1, 2}))
+        if "description" in fields:
+            fields["description"] = bounded_text(fields["description"], "description", max_bytes=512)
         if "currency_amount" in fields:
             fields["currency_amount"] = money(fields["currency_amount"], "currency_amount", positive=True)
         if "currency_name" in fields:
@@ -125,9 +134,12 @@ async def dispatch_secondary(name: str, a: dict[str, Any], client: Any, settings
         await resolve(method(item_id, payment))
         return {"schedule_id": item_id, "payment_date": a["payment_date"], "paid": name == "mark_schedule_paid"}
     if name == "get_pie_chart":
-        if a.get("chart_kind", "pie") != "pie":
+        chart_kind = bounded_text(a.get("chart_kind", "pie"), "chart_kind", max_bytes=16, strip=True)
+        if chart_kind != "pie":
             fail("chart_kind must be pie")
         start, end = date_range(a.get("start_on", ""), a.get("end_on", ""))
+        query = bounded_text(a.get("q", ""), "q", max_bytes=256, strip=True) or None
+        tag_name = bounded_text(a.get("tag_name", ""), "tag_name", max_bytes=128, strip=True) or None
         return await resolve(
             client.get_pie_chart(
                 chart_kind="pie",
@@ -137,8 +149,8 @@ async def dispatch_secondary(name: str, a: dict[str, Any], client: Any, settings
                 category_group_id=identifier(a.get("category_group_id"), "category_group_id", optional=True),
                 category_id=identifier(a.get("category_id"), "category_id", optional=True),
                 user_account_id=identifier(a.get("user_account_id"), "user_account_id", optional=True),
-                q=str(a.get("q", "")).strip() or None,
-                tag_name=str(a.get("tag_name", "")).strip() or None,
+                q=query,
+                tag_name=tag_name,
             )
         )
     if name == "list_wealth_points":
