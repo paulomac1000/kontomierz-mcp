@@ -176,6 +176,46 @@ async def test_probe_returns_false_on_dependency_error() -> None:
 
 
 @pytest.mark.asyncio
+async def test_oversized_read_body_is_rejected_before_json_decode(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("kontomierz_mcp.client._MAX_UPSTREAM_RESPONSE_BYTES", 64)
+    client = make_client(lambda _request: httpx.Response(200, content=b"[" + b" " * 128 + b"]"))
+    with pytest.raises(UpstreamError) as captured:
+        await client.get_user_accounts()
+    assert captured.value.code is ErrorCode.UPSTREAM_FAILURE
+    assert captured.value.retryable is False
+    assert captured.value.write_outcome_ambiguous is False
+    assert captured.value.details == {"max_response_bytes": 64}
+
+
+@pytest.mark.asyncio
+async def test_oversized_write_body_preserves_ambiguity(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("kontomierz_mcp.client._MAX_UPSTREAM_RESPONSE_BYTES", 64)
+    client = make_client(lambda _request: httpx.Response(201, content=b"{" + b" " * 128 + b"}"))
+    with pytest.raises(UpstreamError) as captured:
+        await client.create_wallet("0", "PLN")
+    assert captured.value.code is ErrorCode.UPSTREAM_FAILURE
+    assert captured.value.retryable is False
+    assert captured.value.write_outcome_ambiguous is True
+    assert captured.value.details == {"max_response_bytes": 64}
+
+
+@pytest.mark.asyncio
+async def test_declared_oversized_body_fails_without_json_decode(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("kontomierz_mcp.client._MAX_UPSTREAM_RESPONSE_BYTES", 64)
+    client = make_client(
+        lambda _request: httpx.Response(
+            200,
+            headers={"Content-Length": "1024"},
+            content=b"[]",
+        )
+    )
+    with pytest.raises(UpstreamError) as captured:
+        await client.get_user_accounts()
+    assert captured.value.code is ErrorCode.UPSTREAM_FAILURE
+    assert captured.value.details == {"max_response_bytes": 64}
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "payload",
     [
