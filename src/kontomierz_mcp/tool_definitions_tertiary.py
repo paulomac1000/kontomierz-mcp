@@ -35,6 +35,10 @@ TERTIARY_TOOL_DEFINITIONS: dict[str, ToolDefinition] = {
                 "3=quarterly, 4=semiannual, 5=yearly, 6=biennial.",
             ),
         ),
+        usage_notes=(
+            "The verified upstream returns an empty success body; the result therefore marks reconciliation_required "
+            "and list_scheduled_transactions must be used to obtain the created stable ID"
+        ),
     ),
     "update_schedule": ToolDefinition(
         write_manifest("update_schedule"),
