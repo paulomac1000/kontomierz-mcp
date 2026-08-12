@@ -180,7 +180,7 @@ class AuthorizationPolicy:
                 return False, "destructive capability is not explicitly allowlisted for the HTTP principal"
             return True, "principal and exact capability are authorized"
 
-        if not context.principal.startswith("local-user:"):
+        if not context.principal.startswith("local-process:"):
             return False, "stdio principal is not process-derived"
         if (
             capability_class == "destructive"
