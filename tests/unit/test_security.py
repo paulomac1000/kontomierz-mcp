@@ -113,4 +113,5 @@ def test_stdio_uses_explicit_process_derived_principal() -> None:
     context = InvocationContext.local_stdio()
     assert context.transport == "stdio"
     assert context.authenticated is True
-    assert context.principal.startswith("local-user:")
+    assert context.principal.startswith("local-process:")
+    assert ":uid:" in context.principal or ":pid:" in context.principal
