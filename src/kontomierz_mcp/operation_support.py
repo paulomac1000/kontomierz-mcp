@@ -27,10 +27,10 @@ def bounded_text(
     allow_empty: bool = True,
     strip: bool = False,
 ) -> str:
-    """Normalize one public text value and enforce its UTF-8 byte budget."""
-    result = str(value)
-    if strip:
-        result = result.strip()
+    """Validate one public string value and enforce its UTF-8 byte budget."""
+    if not isinstance(value, str):
+        fail(f"{name} must be a string")
+    result = value.strip() if strip else value
     if not result and not allow_empty:
         fail(f"{name} is required")
     if len(result.encode("utf-8")) > max_bytes:
@@ -51,9 +51,9 @@ def identifier(value: Any, name: str, *, optional: Literal[True]) -> int | None:
 
 
 def identifier(value: Any, name: str, *, optional: bool = False) -> int | None:
-    if optional and value in {None, 0}:
+    if optional and (value is None or (type(value) is int and value == 0)):
         return None
-    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+    if type(value) is not int or value <= 0:
         fail(f"{name} must be a positive integer")
     return value
 
@@ -85,7 +85,9 @@ def direction(value: Any, *, allow_all: bool = False, plural: bool = False) -> s
 
 
 def parse_date(value: Any, name: str, *, optional: bool = False) -> date | None:
-    raw = bounded_text(value or "", name, max_bytes=10, allow_empty=optional, strip=True)
+    if value is None and optional:
+        return None
+    raw = bounded_text(value, name, max_bytes=10, allow_empty=optional, strip=True)
     if not raw and optional:
         return None
     try:
@@ -111,7 +113,9 @@ def date_range(start: Any, end: Any) -> tuple[str | None, str | None]:
 
 
 def month(value: Any) -> str:
-    raw = bounded_text(value or "", "month", max_bytes=7, allow_empty=True, strip=True)
+    if value is None:
+        return ""
+    raw = bounded_text(value, "month", max_bytes=7, allow_empty=True, strip=True)
     if not raw:
         return ""
     try:
@@ -125,9 +129,9 @@ def page(value: Any) -> int:
 
 
 def page_limit(value: Any) -> int | None:
-    if value == 0:
+    if type(value) is int and value == 0:
         return None
-    if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 100:
+    if type(value) is not int or not 1 <= value <= 100:
         fail("per_page must be between 1 and 100")
     return value
 
@@ -140,15 +144,11 @@ def provided(arguments: dict[str, Any], names: tuple[str, ...]) -> dict[str, Any
 
 
 def bounded(value: Any, name: str, allowed: set[int]) -> int:
-    if isinstance(value, bool):
-        fail(f"{name} is invalid")
-    try:
-        result = int(value)
-    except (TypeError, ValueError):
+    if type(value) is not int:
         fail(f"{name} must be an integer")
-    if result not in allowed:
+    if value not in allowed:
         fail(f"{name} must be one of {', '.join(map(str, sorted(allowed)))}")
-    return result
+    return value
 
 
 def paging(items: list[dict[str, Any]], page_number: int, limit: int | None) -> dict[str, Any]:
