@@ -32,8 +32,12 @@ async def main() -> None:
     settings.validate()
     for name, arguments in SMOKE_SAMPLES.items():
         kernel = build_kernel(settings, MockKontomierzClient())
-        await kernel.invoke(name, arguments)
-        await kernel.close()
+        try:
+            result = await kernel.invoke(name, arguments)
+            if "data" not in result or result.get("_meta", {}).get("tool_name") != name:
+                raise RuntimeError(f"mock smoke returned an invalid success document: {name}")
+        finally:
+            await kernel.close()
     print(f"mock smoke passed: {len(SMOKE_SAMPLES)} tools")
 
 
