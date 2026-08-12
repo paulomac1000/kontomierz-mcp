@@ -134,6 +134,32 @@ async def test_started_write_deadline_is_ambiguous(monkeypatch: pytest.MonkeyPat
 
 
 @pytest.mark.asyncio
+async def test_started_write_cancellation_is_audited_as_ambiguous(monkeypatch: pytest.MonkeyPatch) -> None:
+    started = asyncio.Event()
+    audits: list[dict[str, object]] = []
+
+    async def write() -> None:
+        started.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(
+        "kontomierz_mcp.kernel.emit_invocation_audit",
+        lambda state: audits.append(state.document()),
+    )
+    kernel = InvocationKernel(settings=settings(), operations={"create_wallet": write}, dependency=Dependency())
+    task = asyncio.create_task(kernel.invoke("create_wallet", {}))
+    await started.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert len(audits) == 1
+    assert audits[0]["result_category"] == ErrorCode.CANCELLED.value
+    assert audits[0]["cancelled"] is True
+    assert audits[0]["ambiguous"] is True
+
+
+@pytest.mark.asyncio
 async def test_readiness_checks_and_caches_dependency() -> None:
     dependency = Dependency()
     kernel = InvocationKernel(
