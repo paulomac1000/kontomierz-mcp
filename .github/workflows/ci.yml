@@ -244,7 +244,9 @@ jobs:
           .artifact-test-venv/bin/python -m pip install --no-index --no-deps dist/kontomierz_mcp-*.whl
           .artifact-test-venv/bin/python -m pip check
           mkdir -p /tmp/kontomierz-wheel-test
-          cp -R tests scripts pyproject.toml /tmp/kontomierz-wheel-test/
+          cp -R \
+            tests scripts pyproject.toml live-backend-test-policy.yaml upstream-contract.yaml \
+            /tmp/kontomierz-wheel-test/
           (
             cd /tmp/kontomierz-wheel-test
             "$GITHUB_WORKSPACE/.artifact-test-venv/bin/python" -m pytest -m "not external" -q
