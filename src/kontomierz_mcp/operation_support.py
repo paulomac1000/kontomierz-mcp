@@ -19,11 +19,27 @@ def fail(message: str) -> NoReturn:
     raise ApplicationError(ErrorCode.INVALID_PARAMETER, message)
 
 
-def text(value: Any, name: str) -> str:
-    result = str(value).strip()
-    if not result:
+def bounded_text(
+    value: Any,
+    name: str,
+    *,
+    max_bytes: int,
+    allow_empty: bool = True,
+    strip: bool = False,
+) -> str:
+    """Normalize one public text value and enforce its UTF-8 byte budget."""
+    result = str(value)
+    if strip:
+        result = result.strip()
+    if not result and not allow_empty:
         fail(f"{name} is required")
+    if len(result.encode("utf-8")) > max_bytes:
+        fail(f"{name} must not exceed {max_bytes} UTF-8 bytes")
     return result
+
+
+def text(value: Any, name: str, *, max_bytes: int = 512) -> str:
+    return bounded_text(value, name, max_bytes=max_bytes, allow_empty=False, strip=True)
 
 
 @overload
@@ -43,7 +59,7 @@ def identifier(value: Any, name: str, *, optional: bool = False) -> int | None:
 
 
 def money(value: Any, name: str, *, positive: bool) -> str:
-    raw = text(value, name)
+    raw = text(value, name, max_bytes=64)
     try:
         amount = Decimal(raw)
     except InvalidOperation:
@@ -54,14 +70,14 @@ def money(value: Any, name: str, *, positive: bool) -> str:
 
 
 def currency(value: Any) -> str:
-    result = text(value, "currency_name").upper()
+    result = text(value, "currency_name", max_bytes=16).upper()
     if re.fullmatch(r"[A-Z]{3}", result) is None:
         fail("currency_name must be a three-letter code")
     return result
 
 
 def direction(value: Any, *, allow_all: bool = False, plural: bool = False) -> str:
-    result = str(value).strip().lower()
+    result = bounded_text(value, "direction", max_bytes=16, allow_empty=False, strip=True).lower()
     allowed = {"withdrawal", "deposit"} | ({"all"} if allow_all else set())
     if result not in allowed:
         fail(f"direction must be one of {sorted(allowed)}")
@@ -69,11 +85,9 @@ def direction(value: Any, *, allow_all: bool = False, plural: bool = False) -> s
 
 
 def parse_date(value: Any, name: str, *, optional: bool = False) -> date | None:
-    raw = str(value or "").strip()
+    raw = bounded_text(value or "", name, max_bytes=10, allow_empty=optional, strip=True)
     if not raw and optional:
         return None
-    if not raw:
-        fail(f"{name} is required")
     try:
         return datetime.strptime(raw, "%Y-%m-%d").date()
     except ValueError:
@@ -97,7 +111,7 @@ def date_range(start: Any, end: Any) -> tuple[str | None, str | None]:
 
 
 def month(value: Any) -> str:
-    raw = str(value or "").strip()
+    raw = bounded_text(value or "", "month", max_bytes=7, allow_empty=True, strip=True)
     if not raw:
         return ""
     try:
