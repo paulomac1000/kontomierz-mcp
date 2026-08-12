@@ -17,7 +17,7 @@ concurrency:
 
 env:
   CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-  AI_SKILLS_REV: 2737ed3c6d052e9c96333f6264226ed9ecf98756
+  AI_SKILLS_REV: 5868fcdf0d8cb55c6ff4082ee5945ee52888bab4
 
 jobs:
   quality:
@@ -138,6 +138,38 @@ jobs:
       - name: Audit workflows from trusted revision
         run: >-
           python "$RUNNER_TEMP/ai-skills/skills/ci-cd-architect/tools/check_github_actions_policy.py" .
+      - name: Inspect existing MCP project from trusted revision
+        run: >-
+          python "$RUNNER_TEMP/ai-skills/skills/mcp-server-architect/tools/inspect_existing_project.py"
+          . --output "$RUNNER_TEMP/ai-skills-discovery.json"
+      - name: Verify discovery facts and progressive routing
+        run: |
+          python - "$RUNNER_TEMP/ai-skills-discovery.json" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          document = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+          facts = document["facts"]
+          plan = document["plan"]
+          assert facts["sdk_profile"] == "python-official-mcp"
+          assert facts["external_upstream"] is True
+          assert facts["external_tests"] is True
+          assert facts["external_tests_default_excluded"] is True
+          assert facts["upstream_contract_present"] is True
+          assert facts["live_backend_policy_present"] is True
+          assert plan["upstream_contract"] == "verified"
+          assert plan["live_backend_safety"] == "declared"
+          assert document["unknowns"] == []
+          PY
+      - name: Validate observed upstream contract from trusted revision
+        run: >-
+          python "$RUNNER_TEMP/ai-skills/contracts/validate_upstream_contract.py"
+          upstream-contract.yaml --require-observed
+      - name: Validate live-backend safety policy from trusted revision
+        run: >-
+          python "$RUNNER_TEMP/ai-skills/contracts/validate_live_backend_test_policy.py"
+          live-backend-test-policy.yaml
 
   exact-artifact:
     needs: [quality, compatibility, standards]

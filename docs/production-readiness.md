@@ -30,7 +30,7 @@ The runtime fails closed by default:
 - normal tests and live/provider evidence are separate; plain `pytest` cannot mutate a real Kontomierz account;
 - production package metadata and locks pin the exact tested MCP SDK lane (`mcp==2.0.0`).
 
-Real Kontomierz contract evidence is implemented in `tests/external/test_real_kontomierz_contract.py` and was collected on 2026-08-08. Provider/repository gaps remain encoded in `tests/external/test_production_evidence.py` as deliberate `NOT IMPLEMENTED` failures. An agent with the required GitHub administration/reviewer access must implement those provider assertions rather than delete, skip, weaken, or fabricate them.
+Real Kontomierz contract evidence is implemented in `tests/external/test_real_kontomierz_contract.py` and was collected on 2026-08-08. The observed boundary is also captured in root `upstream-contract.yaml`; live-test controls are declared in `live-backend-test-policy.yaml`. Both are validated from the pinned trusted ai-skills checkout. Provider/repository gaps remain encoded in `tests/external/test_production_evidence.py` as deliberate `NOT IMPLEMENTED` failures. An agent with the required GitHub administration/reviewer access must implement those provider assertions rather than delete, skip, weaken, or fabricate them.
 
 ## Normal completion gate
 
@@ -93,7 +93,7 @@ KONTOMIERZ_ALLOW_REAL_MUTATIONS=1 \
   tests/external/test_real_kontomierz_contract.py
 ```
 
-Both opt-ins are required before the suite reads `KONTOMIERZ_API_KEY` from the repository `.env`. Schedule and transaction cleanup fallbacks traverse bounded pagination rather than only the first upstream page; budget cleanup uses a pre-create ID snapshot plus post-failure recovery. A failed cleanup must be treated as an operational reconciliation event, not as permission to rerun a mutation blindly. After any failed live run, an operator must still confirm that no `MCP-E2E-TEST` records remain.
+Both opt-ins are required before the suite reads `KONTOMIERZ_API_KEY` from the repository `.env`. Before each deliberately opted-in live test, the cleanup guard removes stale `MCP-E2E-TEST` schedule/transaction records and captures a budget-ID baseline. After the test it traverses both paid and unpaid schedule groups, reconciles the transaction namespace, removes any new budget IDs, and verifies that no discovered test resources remain. A transport, pagination, delete, or verification failure is reported as a failing teardown instead of being swallowed. The inline cleanup remains a first attempt; the final guard is the authoritative safety check.
 
 The implemented live suite proves real read shapes, form-encoded schedule/transaction/budget writes with cleanup, schedule paid/unpaid transitions, schedule pagination ordering and termination, withdrawal amount normalization, credential rejection/success, upstream `DD-MM-YYYY` date behavior, and rejection of JSON-encoded write bodies.
 
@@ -105,7 +105,8 @@ The following real-system behaviors remain separate evidence gaps rather than im
 - full accepted money precision/rounding limits beyond the observed normalization case;
 - readiness recovery transitions under invalid/restored credentials;
 - budget-copy semantics;
-- wallet mutation response behavior not yet exercised on the evidence account.
+- wallet mutation response behavior not yet exercised on the evidence account;
+- transaction pagination termination with a populated transaction history.
 
 Never run destructive external tests against a personal or non-disposable account.
 
@@ -128,7 +129,7 @@ This provider command remains intentionally red until external authority exists.
 
 ## ai-skills authority
 
-The candidate CI pins an immutable `AI_SKILLS_REV` rather than a branch name. The assessment records the exact `fix/unified-contract-release-hardening` revision used for review. Before final approval, confirm that the branch has not moved; if it has, repin the exact new revision, rerun the standards gate, and update the assessment. A previously green run against an older authority is not evidence for a later standard.
+The candidate CI pins an immutable `AI_SKILLS_REV` rather than a branch name. For this migration the reviewed authority is `mcp-server-architect` 1.3.0 plus the other validators at exact revision `5868fcdf0d8cb55c6ff4082ee5945ee52888bab4`. Standards CI runs the trusted read-only repository inspector and validates `upstream-contract.yaml` and `live-backend-test-policy.yaml` in addition to AFDS, AGENTS, and workflow policy. Before final approval, confirm that the source branch has not moved; if it has, repin the exact new revision and rerun the standards gate. A previously green run against an older authority is not evidence for a later standard.
 
 ## Definition of done
 

@@ -22,17 +22,20 @@ All notable changes to kontomierz-mcp are recorded here.
 
 - Write bodies use `application/x-www-form-urlencoded` encoding, matching the live Kontomierz API contract verified on 2026-08-08. JSON-encoded write bodies are rejected by the upstream, so real-backend configuration now rejects `KONTOMIERZ_BODY_MODE=json` instead of preserving a known-broken compatibility mode.
 - Plain `pytest` excludes `external` tests by default. Live-account evidence additionally requires both `KONTOMIERZ_EXTERNAL_TESTS=1` and `KONTOMIERZ_ALLOW_REAL_MUTATIONS=1` before it can read credentials or mutate the real service.
-- Live schedule, transaction, and budget evidence cleanup now uses captured IDs plus reconciliation fallbacks so failures between a successful create and normal ID discovery do not silently orphan test data.
-- Empty-body success responses from schedule/budget create and update are no longer reported as ambiguous failures. The adapter reconciles by listing (schedule by description, budget by category/group) to return the created identity, falling back to a success marker when the record is not yet visible.
+- Live schedule cleanup traverses both paid and unpaid schedule groups. A final live-backend guard reconciles the unique test namespace and budget snapshot, verifies deletion, and fails the run instead of silently swallowing unconfirmed cleanup.
+- Empty-body create success never guesses a stable ID by matching non-unique schedule descriptions or budget categories; it returns a reconciliation-required success marker.
 - Wealth points are unwrapped from their verified per-item `{"wealth_point": {...}}` upstream shape.
 - Restored the full `repeat` (1=once … 6=biennial) and `holidays` (0/1/2) parameter descriptions for `create_schedule`/`update_schedule`; a regression test now locks the agent-facing ergonomics.
 - Streamable HTTP smoke allows up to 60 seconds for server readiness on slow or heavily loaded machines.
+- Composition validates a frozen settings snapshot before constructing a real dependency client; unsafe base URLs fail before dependency creation.
+- Logging-security tests restore root logger state after proving that `httpx`/`httpcore` request diagnostics stay at WARNING or above.
+- Mock transaction contract tests use the synchronous mock API directly and no longer create an un-awaited value.
 
 ### Changed
 
 - Mock backend response shapes mirror the verified real API (account wrappers and fields, `schedule_id`-based schedule list items, budget `kind`/`name`/`amount`, tags without ids, `category_groups`, per-item wealth wrappers, realistic currencies).
-- The real upstream write/date/pagination contract is documented in `docs/upstream-api.md` with live-account evidence from 2026-08-08.
-- Standards CI is repinned to the reviewed `ai-skills` `fix/unified-contract-release-hardening` head used for this revision.
+- The real upstream write/date/pagination contract is documented in `docs/upstream-api.md` and machine-readable `upstream-contract.yaml` with live-account evidence from 2026-08-08.
+- Standards CI is pinned to exact `ai-skills` revision `5868fcdf0d8cb55c6ff4082ee5945ee52888bab4` (`mcp-server-architect` 1.3.0) and runs its read-only repository inspector, upstream-contract validator, live-backend policy validator, AFDS validator, AGENTS audit, and workflow-policy audit from the trusted checkout.
 
 ### Added
 
@@ -49,6 +52,7 @@ All notable changes to kontomierz-mcp are recorded here.
 - Exact-wheel and exact-image CI promotion, locked runtime wheelhouse, protected release environment, default-branch ancestry proof, registry digest comparison, and promotion attestation.
 - AFDS architecture, contract, upstream, migration, production-readiness, and standards-gap documentation plus root `AGENTS.md`.
 - Real external evidence tests (`tests/external/test_real_kontomierz_contract.py`) proving read shapes, schedule/transaction/budget write round trips with cleanup, pagination ordering and termination, money precision normalization, ISO-date rejection, and form-encoding requirements against the live account.
+- `live-backend-test-policy.yaml` declaring fail-closed real-system test safety and mandatory cleanup reporting.
 
 ### Security
 

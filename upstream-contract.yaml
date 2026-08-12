@@ -1,0 +1,254 @@
+schema_version: 1
+upstream:
+  name: Kontomierz K4 HTTP API
+  classification: legacy
+observations:
+  - operation: list_accounts
+    method: GET
+    endpoint: user_accounts.json
+    request_encoding: none
+    required_fields: []
+    date_formats: []
+    success_statuses: [200]
+    response_body: json
+    credential_placement: query
+    confidence: observed
+    evidence:
+      - tests/external/test_real_kontomierz_contract.py::test_real_read_contract_shapes
+  - operation: list_currencies
+    method: GET
+    endpoint: currencies.json
+    request_encoding: none
+    required_fields: []
+    date_formats: []
+    success_statuses: [200]
+    response_body: json
+    credential_placement: query
+    confidence: observed
+    evidence:
+      - tests/external/test_real_kontomierz_contract.py::test_real_read_contract_shapes
+  - operation: list_categories
+    method: GET
+    endpoint: categories.json
+    request_encoding: query
+    required_fields: [direction, in_wallet]
+    date_formats: []
+    success_statuses: [200]
+    response_body: json
+    credential_placement: query
+    confidence: observed
+    evidence:
+      - tests/external/test_real_kontomierz_contract.py::test_real_read_contract_shapes
+  - operation: list_tags
+    method: GET
+    endpoint: tags.json
+    request_encoding: none
+    required_fields: []
+    date_formats: []
+    success_statuses: [200]
+    response_body: json
+    credential_placement: query
+    confidence: observed
+    evidence:
+      - tests/external/test_real_kontomierz_contract.py::test_real_read_contract_shapes
+  - operation: list_budgets
+    method: GET
+    endpoint: budgets.json
+    request_encoding: query
+    required_fields: []
+    date_formats: [DD-MM-YYYY]
+    success_statuses: [200]
+    response_body: json
+    credential_placement: query
+    confidence: observed
+    evidence:
+      - tests/external/test_real_kontomierz_contract.py::test_real_read_contract_shapes
+  - operation: create_budget
+    method: POST
+    endpoint: budgets.json
+    request_encoding: form
+    required_fields: [budget[limit]]
+    date_formats: [DD-MM-YYYY]
+    success_statuses: [201]
+    response_body: empty
+    create_identity: Response does not return the created budget identity; list reconciliation is required.
+    credential_placement: query
+    confidence: observed
+    evidence:
+      - tests/external/test_real_kontomierz_contract.py::test_real_budget_write_round_trip
+  - operation: delete_budget
+    method: DELETE
+    endpoint: budgets/{id}.json
+    request_encoding: none
+    required_fields: []
+    date_formats: []
+    success_statuses: [200]
+    response_body: empty
+    delete_semantics: Deleted budget disappears from the subsequent budget listing.
+    credential_placement: query
+    confidence: observed
+    evidence:
+      - tests/external/test_real_kontomierz_contract.py::test_real_budget_write_round_trip
+  - operation: list_scheduled_transactions
+    method: GET
+    endpoint: scheduled_transactions.json
+    request_encoding: query
+    required_fields: []
+    date_formats: [DD-MM-YYYY]
+    success_statuses: [200]
+    response_body: json
+    pagination:
+      model: one-based page plus per_page
+      termination: Stable ordering is preserved and a page beyond the end returns an empty scheduled_transactions list.
+    credential_placement: query
+    confidence: observed
+    evidence:
+      - tests/external/test_real_kontomierz_contract.py::test_real_pagination_evidence
+  - operation: get_schedule
+    method: GET
+    endpoint: schedules/{id}.json
+    request_encoding: none
+    required_fields: []
+    date_formats: []
+    success_statuses: [200]
+    response_body: json
+    credential_placement: query
+    confidence: observed
+    evidence:
+      - tests/external/test_real_kontomierz_contract.py::test_real_read_contract_shapes
+  - operation: create_schedule
+    method: POST
+    endpoint: schedules.json
+    request_encoding: form
+    required_fields:
+      - schedule[description]
+      - schedule[currency_amount]
+      - schedule[currency_name]
+      - schedule[direction]
+      - schedule[deadline_on]
+      - schedule[repeat]
+      - schedule[holidays]
+    date_formats: [DD-MM-YYYY]
+    success_statuses: [201]
+    response_body: empty
+    create_identity: Response does not return the created schedule identity; list reconciliation is required.
+    credential_placement: query
+    confidence: observed
+    evidence:
+      - tests/external/test_real_kontomierz_contract.py::test_real_schedule_write_round_trip
+      - tests/external/test_real_kontomierz_contract.py::test_real_iso_dates_are_rejected_and_dd_mm_accepted
+      - tests/external/test_real_kontomierz_contract.py::test_real_form_encoding_is_required_for_writes
+  - operation: update_schedule
+    method: PUT
+    endpoint: schedules/{id}.json
+    request_encoding: form
+    required_fields: []
+    date_formats: [DD-MM-YYYY]
+    success_statuses: [200]
+    response_body: empty
+    credential_placement: query
+    confidence: observed
+    evidence:
+      - tests/external/test_real_kontomierz_contract.py::test_real_schedule_write_round_trip
+  - operation: delete_schedule
+    method: DELETE
+    endpoint: schedules/{id}.json
+    request_encoding: none
+    required_fields: []
+    date_formats: []
+    success_statuses: [200]
+    response_body: empty
+    delete_semantics: Subsequent GET of the deleted schedule returns 404.
+    credential_placement: query
+    confidence: recorded
+    evidence:
+      - docs/upstream-api.md#verified-endpoints
+  - operation: mark_schedule_paid
+    method: PUT
+    endpoint: schedules/{id}/mark_as_payed/{date}.json
+    request_encoding: form
+    required_fields: []
+    date_formats: [DD-MM-YYYY]
+    success_statuses: [200]
+    response_body: empty
+    credential_placement: query
+    confidence: observed
+    evidence:
+      - tests/external/test_real_kontomierz_contract.py::test_real_schedule_write_round_trip
+  - operation: mark_schedule_unpaid
+    method: PUT
+    endpoint: schedules/{id}/mark_as_unpayed/{date}.json
+    request_encoding: form
+    required_fields: []
+    date_formats: [DD-MM-YYYY]
+    success_statuses: [200]
+    response_body: empty
+    credential_placement: query
+    confidence: observed
+    evidence:
+      - tests/external/test_real_kontomierz_contract.py::test_real_schedule_write_round_trip
+  - operation: list_transactions
+    method: GET
+    endpoint: money_transactions.json
+    request_encoding: query
+    required_fields: []
+    date_formats: [DD-MM-YYYY]
+    success_statuses: [200]
+    response_body: json
+    credential_placement: query
+    confidence: recorded
+    evidence:
+      - docs/upstream-api.md#verified-endpoints
+  - operation: create_transaction
+    method: POST
+    endpoint: money_transactions.json
+    request_encoding: form
+    required_fields:
+      - money_transaction[currency_amount]
+      - money_transaction[currency_name]
+      - money_transaction[direction]
+    date_formats: [DD-MM-YYYY]
+    success_statuses: [201]
+    response_body: json
+    create_identity: The JSON response returns money_transaction.id.
+    credential_placement: query
+    confidence: observed
+    evidence:
+      - tests/external/test_real_kontomierz_contract.py::test_real_transaction_write_round_trip
+  - operation: delete_transaction
+    method: DELETE
+    endpoint: money_transactions/{id}.json
+    request_encoding: none
+    required_fields: []
+    date_formats: []
+    success_statuses: [200]
+    response_body: empty
+    delete_semantics: Subsequent GET of the deleted transaction returns 404.
+    credential_placement: query
+    confidence: observed
+    evidence:
+      - tests/external/test_real_kontomierz_contract.py::test_real_transaction_write_round_trip
+  - operation: list_wealth_points
+    method: GET
+    endpoint: wealth_points.json
+    request_encoding: query
+    required_fields: []
+    date_formats: [DD-MM-YYYY]
+    success_statuses: [200]
+    response_body: json
+    credential_placement: query
+    confidence: observed
+    evidence:
+      - tests/external/test_real_kontomierz_contract.py::test_real_read_contract_shapes
+  - operation: get_pie_chart
+    method: GET
+    endpoint: charts/money_transactions.json
+    request_encoding: query
+    required_fields: [chart_kind]
+    date_formats: [DD-MM-YYYY]
+    success_statuses: [200]
+    response_body: json
+    credential_placement: query
+    confidence: observed
+    evidence:
+      - tests/external/test_real_kontomierz_contract.py::test_real_read_contract_shapes

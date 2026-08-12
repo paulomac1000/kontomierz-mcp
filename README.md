@@ -122,10 +122,12 @@ KONTOMIERZ_ALLOW_REAL_MUTATIONS=1 \
 .venv/bin/python -m pytest -o addopts='' -m external tests/external/test_real_kontomierz_contract.py
 ```
 
-Those tests use unique descriptions and cleanup fallbacks so a failure after a successful create but before normal reconciliation still attempts to remove the test record. Provider/repository acceptance placeholders in `tests/external/test_production_evidence.py` remain intentionally failing until the corresponding external authority exists; they are not fabricated or silently skipped. See [`docs/production-readiness.md`](docs/production-readiness.md) and [`AGENTS.md`](AGENTS.md) for the handoff and full gate.
+Those tests use unique descriptions, captured IDs, bounded reconciliation over both paid and unpaid schedule groups, and a final safety guard. The run fails if schedule/transaction namespace cleanup or the budget ID-snapshot cleanup cannot be confirmed; an unverified cleanup is never silently converted into success. Provider/repository acceptance placeholders in `tests/external/test_production_evidence.py` remain intentionally failing until the corresponding external authority exists; they are not fabricated or silently skipped. See [`docs/production-readiness.md`](docs/production-readiness.md) and [`AGENTS.md`](AGENTS.md) for the handoff and full gate.
 
 ## Contracts and architecture
 
+- [`upstream-contract.yaml`](upstream-contract.yaml) — machine-readable observed Kontomierz boundary
+- [`live-backend-test-policy.yaml`](live-backend-test-policy.yaml) — fail-closed live-test safety floor
 - [`docs/system-architecture.md`](docs/system-architecture.md)
 - [`docs/tool-contract.md`](docs/tool-contract.md)
 - [`docs/upstream-api.md`](docs/upstream-api.md)
