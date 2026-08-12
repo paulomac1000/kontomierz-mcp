@@ -67,7 +67,7 @@ observations:
     method: POST
     endpoint: budgets.json
     request_encoding: form
-    required_fields: [budget[limit]]
+    required_fields: ["budget[limit]"]
     date_formats: [DD-MM-YYYY]
     success_statuses: [201]
     response_body: empty
@@ -78,7 +78,7 @@ observations:
       - tests/external/test_real_kontomierz_contract.py::test_real_budget_write_round_trip
   - operation: delete_budget
     method: DELETE
-    endpoint: budgets/{id}.json
+    endpoint: "budgets/{id}.json"
     request_encoding: none
     required_fields: []
     date_formats: []
@@ -106,7 +106,7 @@ observations:
       - tests/external/test_real_kontomierz_contract.py::test_real_pagination_evidence
   - operation: get_schedule
     method: GET
-    endpoint: schedules/{id}.json
+    endpoint: "schedules/{id}.json"
     request_encoding: none
     required_fields: []
     date_formats: []
@@ -121,13 +121,13 @@ observations:
     endpoint: schedules.json
     request_encoding: form
     required_fields:
-      - schedule[description]
-      - schedule[currency_amount]
-      - schedule[currency_name]
-      - schedule[direction]
-      - schedule[deadline_on]
-      - schedule[repeat]
-      - schedule[holidays]
+      - "schedule[description]"
+      - "schedule[currency_amount]"
+      - "schedule[currency_name]"
+      - "schedule[direction]"
+      - "schedule[deadline_on]"
+      - "schedule[repeat]"
+      - "schedule[holidays]"
     date_formats: [DD-MM-YYYY]
     success_statuses: [201]
     response_body: empty
@@ -140,7 +140,7 @@ observations:
       - tests/external/test_real_kontomierz_contract.py::test_real_form_encoding_is_required_for_writes
   - operation: update_schedule
     method: PUT
-    endpoint: schedules/{id}.json
+    endpoint: "schedules/{id}.json"
     request_encoding: form
     required_fields: []
     date_formats: [DD-MM-YYYY]
@@ -152,7 +152,7 @@ observations:
       - tests/external/test_real_kontomierz_contract.py::test_real_schedule_write_round_trip
   - operation: delete_schedule
     method: DELETE
-    endpoint: schedules/{id}.json
+    endpoint: "schedules/{id}.json"
     request_encoding: none
     required_fields: []
     date_formats: []
@@ -165,7 +165,7 @@ observations:
       - docs/upstream-api.md#verified-endpoints
   - operation: mark_schedule_paid
     method: PUT
-    endpoint: schedules/{id}/mark_as_payed/{date}.json
+    endpoint: "schedules/{id}/mark_as_payed/{date}.json"
     request_encoding: form
     required_fields: []
     date_formats: [DD-MM-YYYY]
@@ -177,7 +177,7 @@ observations:
       - tests/external/test_real_kontomierz_contract.py::test_real_schedule_write_round_trip
   - operation: mark_schedule_unpaid
     method: PUT
-    endpoint: schedules/{id}/mark_as_unpayed/{date}.json
+    endpoint: "schedules/{id}/mark_as_unpayed/{date}.json"
     request_encoding: form
     required_fields: []
     date_formats: [DD-MM-YYYY]
@@ -204,9 +204,9 @@ observations:
     endpoint: money_transactions.json
     request_encoding: form
     required_fields:
-      - money_transaction[currency_amount]
-      - money_transaction[currency_name]
-      - money_transaction[direction]
+      - "money_transaction[currency_amount]"
+      - "money_transaction[currency_name]"
+      - "money_transaction[direction]"
     date_formats: [DD-MM-YYYY]
     success_statuses: [201]
     response_body: json
@@ -217,7 +217,7 @@ observations:
       - tests/external/test_real_kontomierz_contract.py::test_real_transaction_write_round_trip
   - operation: delete_transaction
     method: DELETE
-    endpoint: money_transactions/{id}.json
+    endpoint: "money_transactions/{id}.json"
     request_encoding: none
     required_fields: []
     date_formats: []

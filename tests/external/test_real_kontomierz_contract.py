@@ -7,7 +7,9 @@ Executable contract evidence collected against a live account on 2026-08-08
 They also require ``KONTOMIERZ_API_KEY`` from the repository ``.env``. Cleanup
 uses captured IDs plus bounded full pagination of unique ``MCP-E2E-TEST``
 descriptions across both paid and unpaid schedule groups so a failure between a
-successful write and normal reconciliation does not silently orphan data.
+successful write and normal reconciliation does not silently orphan data. The
+autouse cleanup guard in ``tests/external/conftest.py`` fails the live run when
+final resource cleanup cannot be confirmed.
 """
 
 from __future__ import annotations
