@@ -296,7 +296,8 @@ jobs:
           docker build --pull=false \
             --label "org.opencontainers.image.revision=${SOURCE_SHA}" \
             -t "kontomierz-mcp:${SOURCE_SHA}" .
-          test "$(docker image inspect --format '{{ index .Config.Labels \"org.opencontainers.image.revision\" }}' "kontomierz-mcp:${SOURCE_SHA}")" = "$SOURCE_SHA"
+          REVISION="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "kontomierz-mcp:${SOURCE_SHA}")"
+          test "$REVISION" = "$SOURCE_SHA"
           docker run --rm --entrypoint python "kontomierz-mcp:${SOURCE_SHA}" -c \
             "import os, kontomierz_mcp; assert os.geteuid() != 0; print(kontomierz_mcp.__version__)"
       - name: Close release artifact set
