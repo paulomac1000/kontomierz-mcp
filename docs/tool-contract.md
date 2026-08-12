@@ -19,6 +19,8 @@ For update tools, `None` means not provided. An empty string is an explicit requ
 
 Successful tools return structured content with `data` and `_meta`. Metadata contains a request ID, duration, tool version, target scope, opaque `target_ref`, and authenticated transport class. `target_ref` is stable for the configured authorization target without exposing the internal credential-derived target identity. Empty lists are successful results. Principal identifiers, exact resource authorization, and authorization-policy internals are intentionally not echoed in tool output; the detailed decision is retained only in the server audit event.
 
+When Kontomierz confirms a create with an empty body and therefore supplies no stable identity, the adapter returns `{"created": true, "reconciliation_required": true}`. It does not guess a resource ID by matching non-unique descriptions, categories, or other attributes after the write. The caller must use the corresponding list tool to reconcile state before any dependent mutation or retry.
+
 ## Errors
 
 Tool failures return an explicit MCP `CallToolResult` with `is_error=true`, controlled text JSON, and `structured_content.error`. The error contains `code`, `message`, `retryable`, and optional `suggestion` or bounded details. SDK-added exception prefixes are not part of the contract.
@@ -33,13 +35,15 @@ Stdio destructive operations require both `MCP_STDIO_ALLOWED_DESTRUCTIVE_CAPABIL
 
 `requires_confirmation` is currently false for every mutation because no independent approval authority exists. This is intentional: the server does not claim a control it cannot verify. The kernel fails closed if a future manifest sets it true before a trusted approval-record verifier is installed.
 
-A transient read error may be marked retryable for a caller-controlled retry. A write rejected before admission has not started. A started write with an ambiguous dependency outcome returns `AMBIGUOUS_OUTCOME`, `retryable=false`, and a reconciliation suggestion.
+A transient read error may be marked retryable for a caller-controlled retry. A write rejected before admission has not started. A started write with an ambiguous dependency outcome returns `AMBIGUOUS_OUTCOME`, `retryable=false`, and a reconciliation suggestion. If the invocation itself is cancelled after a mutation operation has started, cancellation still propagates, but the server-side audit event marks the outcome ambiguous so operators do not mistake cancellation for proof that the mutation did not happen.
 
 ## Transport identity and HTTP policy
 
-Stdio uses a process-derived local principal. Streamable HTTP requires a server-owned Bearer token and principal mapping. Authentication occurs before MCP handling and before any readiness request that may trigger dependency network I/O. `/health/live` is the only public HTTP route and performs no dependency call. Neither the write gate, principal, capability allowlist, destructive resource allowlist, target identity, nor any future approval record may be supplied as a tool argument.
+Stdio uses a process-derived local principal. Streamable HTTP requires a server-owned Bearer token and principal mapping. Both values are bounded visible ASCII and are validated without silently trimming process-environment credentials. Authentication occurs before MCP handling and before any readiness request that may trigger dependency network I/O. `/health/live` is the only public HTTP route and performs no dependency call. Neither the write gate, principal, capability allowlist, destructive resource allowlist, target identity, nor any future approval record may be supplied as a tool argument.
 
 Streamable HTTP is stateless and loopback-only. The application intentionally supplies Host and Origin allowlists to the official SDK and bounds the request body with `MCP_HTTP_MAX_REQUEST_BODY_BYTES`. Missing, duplicate, malformed, oversized, or incorrect Bearer credentials fail before tool dispatch. Invalid Host, cross-origin Origin, oversized bodies, and unauthenticated `/health/ready` requests are also rejected before operation/dependency I/O.
+
+Because the legacy Kontomierz API requires `api_key` in the query string, application logging explicitly keeps `httpx` and `httpcore` below request-level INFO/DEBUG diagnostics even when `LOG_LEVEL=DEBUG`. This prevents dependency request logs from exposing the credential-bearing URL.
 
 ## Audit contract
 
