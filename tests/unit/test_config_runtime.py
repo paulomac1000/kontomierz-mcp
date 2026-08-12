@@ -107,6 +107,24 @@ def test_pending_limit_cannot_be_smaller_than_running_limit() -> None:
             {
                 "KONTOMIERZ_MOCK_DATA": "1",
                 "MCP_TRANSPORT": "http",
+                "MCP_HTTP_AUTH_TOKEN": "a" * 31 + "\x7f",
+                "MCP_HTTP_PRINCIPAL": "operator:test",
+            },
+            "visible ASCII",
+        ),
+        (
+            {
+                "KONTOMIERZ_MOCK_DATA": "1",
+                "MCP_TRANSPORT": "http",
+                "MCP_HTTP_AUTH_TOKEN": HTTP_TOKEN,
+                "MCP_HTTP_PRINCIPAL": "operator:\x7f",
+            },
+            "visible ASCII",
+        ),
+        (
+            {
+                "KONTOMIERZ_MOCK_DATA": "1",
+                "MCP_TRANSPORT": "http",
                 "MCP_HTTP_AUTH_TOKEN": HTTP_TOKEN,
                 "MCP_HTTP_PRINCIPAL": "operator:test",
                 "MCP_HTTP_ALLOWED_CAPABILITIES": "read,admin",
