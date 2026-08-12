@@ -7,7 +7,7 @@ from typing import Any
 
 from .config import Settings
 from .errors import ApplicationError, ErrorCode
-from .manifests import TOOL_MANIFESTS
+from .manifests import TOOL_DEFINITIONS, TOOL_MANIFESTS
 from .operation_primary import PRIMARY_NAMES, dispatch_primary
 from .operation_secondary import dispatch_secondary
 
@@ -26,7 +26,23 @@ def build_operations(client: Any, settings: Settings) -> dict[str, Operation]:
             raise ApplicationError(ErrorCode.RESOURCE_NOT_FOUND, f"Unknown tool: {name}") from exc
 
     def bind(name: str) -> Operation:
+        definition = TOOL_DEFINITIONS[name]
+        required = frozenset(definition.required_parameters)
+        allowed = frozenset(parameter.name for parameter in definition.parameters)
+
         async def operation(**arguments: Any) -> Any:
+            missing = sorted(required - arguments.keys())
+            if missing:
+                raise ApplicationError(
+                    ErrorCode.INVALID_PARAMETER,
+                    "Missing required parameter(s): " + ", ".join(missing),
+                )
+            unexpected = sorted(arguments.keys() - allowed)
+            if unexpected:
+                raise ApplicationError(
+                    ErrorCode.INVALID_PARAMETER,
+                    "Unexpected parameter(s): " + ", ".join(unexpected),
+                )
             return await dispatch(name, arguments)
 
         return operation
