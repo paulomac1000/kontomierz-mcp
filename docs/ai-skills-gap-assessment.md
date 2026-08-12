@@ -5,13 +5,13 @@ type: decision
 status: evolving
 rigor: operational
 owners: [repository-maintainers]
-verification: Compare the exact SHA with ai-skills revision `b18e95e6a99a8cb5790b9239e2592bbad12344c6`, run hosted CI, and complete provider-backed evidence.
+verification: Compare the exact SHA with ai-skills revision `2737ed3c6d052e9c96333f6264226ed9ecf98756`, run hosted CI, and complete provider-backed evidence.
 ---
 # AI Skills gap assessment
 
 ## Decision
 
-Target technical alignment with the immutable `ai-skills` revision `b18e95e6a99a8cb5790b9239e2592bbad12344c6`, the current head of `fix/unified-contract-release-hardening` used for this review, while withholding a formal L2+ claim. CI and this document pin the exact revision rather than a floating branch reference. The six commits after the previously reviewed `b359245d3a34fce90cfeb0fdab052e75b5b821f3` affect only temporary PR-repair workflow/scripts in `ai-skills`, not the normative MCP or CI contracts, but the authoritative checkout is still repinned to the branch's actual latest SHA. Any later authority update requires a new exact-revision evidence run.
+Target technical alignment with the immutable `ai-skills` revision `2737ed3c6d052e9c96333f6264226ed9ecf98756`, the current head of `fix/unified-contract-release-hardening` used for this review, while withholding a formal L2+ claim. CI and this document pin the exact revision rather than a floating branch reference. Commits added after the last normative review point only changed temporary PR-repair/export workflow helpers in `ai-skills`; they did not change the normative MCP or CI contracts, but the authoritative checkout is still pinned to the branch's actual latest SHA. Any later authority update requires a new exact-revision evidence run.
 
 ## Closed or materially reduced gaps
 
