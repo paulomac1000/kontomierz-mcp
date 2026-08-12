@@ -168,7 +168,7 @@ jobs:
           rm -rf dist build src/*.egg-info
           python -m pip wheel --no-deps --no-build-isolation . --wheel-dir dist
           test "$(find dist -maxdepth 1 -type f -name 'kontomierz_mcp-*.whl' | wc -l)" -eq 1
-      - name: Materialize hash-locked runtime wheelhouse
+      - name: Materialize hash-locked runtime wheelhouse and image inputs
         run: |
           set -euo pipefail
           mkdir -p dist/wheelhouse
@@ -178,9 +178,11 @@ jobs:
             --require-hashes \
             --dest dist/wheelhouse \
             -r requirements/runtime-linux-x64-py312.lock
+          cp requirements/runtime-linux-x64-py312.lock dist/
           (
             cd dist
-            find . -type f -name '*.whl' -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+            find . -type f \( -name '*.whl' -o -name 'runtime-linux-x64-py312.lock' \) \
+              -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
             sha256sum --check SHA256SUMS
           )
       - name: Install runtime-only exact wheel without network
@@ -194,7 +196,7 @@ jobs:
             --no-deps \
             --only-binary=:all: \
             --require-hashes \
-            -r requirements/runtime-linux-x64-py312.lock
+            -r dist/runtime-linux-x64-py312.lock
           .artifact-venv/bin/python -m pip install --no-index --no-deps dist/kontomierz_mcp-*.whl
           .artifact-venv/bin/python -m pip check
           .artifact-venv/bin/python -c "import kontomierz_mcp; print(kontomierz_mcp.__version__)"
@@ -223,7 +225,7 @@ jobs:
         run: >-
           .artifact-venv/bin/python scripts/transport_smoke.py streamable-http
           --executable .artifact-venv/bin/kontomierz-mcp
-      - name: Build and smoke image from exact wheel
+      - name: Build and smoke image from exact verified inputs
         run: |
           set -euo pipefail
           docker build --pull=false -t "kontomierz-mcp:${SOURCE_SHA}" .
@@ -241,7 +243,6 @@ jobs:
           print(json.dumps({"source_sha": sys.argv[1], "image_id": sys.argv[2], "wheel_sha256": sys.argv[3]}, sort_keys=True))
           PY
           docker save "kontomierz-mcp:${SOURCE_SHA}" | gzip -n > dist/kontomierz-mcp-image.tar.gz
-          cp requirements/runtime-linux-x64-py312.lock dist/
           cp requirements/build-linux-x64.lock dist/
           cat > dist/BUILD_METADATA <<EOF
           SOURCE_SHA=${SOURCE_SHA}
