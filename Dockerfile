@@ -8,14 +8,13 @@ RUN addgroup --system app && adduser --system --ingroup app app
 
 WORKDIR /app
 COPY dist/ /tmp/dist/
-COPY requirements/runtime-linux-x64-py312.lock /tmp/runtime.lock
 RUN cd /tmp/dist \
     && sha256sum --check SHA256SUMS \
     && python -m pip install --no-cache-dir --no-index --find-links /tmp/dist/wheelhouse \
-       --no-deps --only-binary=:all: --require-hashes -r /tmp/runtime.lock \
+       --no-deps --only-binary=:all: --require-hashes -r /tmp/dist/runtime-linux-x64-py312.lock \
     && python -m pip install --no-cache-dir --no-index --no-deps /tmp/dist/kontomierz_mcp-*.whl \
     && python -m pip check \
-    && rm -rf /tmp/dist /tmp/runtime.lock
+    && rm -rf /tmp/dist
 
 USER app
 ENTRYPOINT ["kontomierz-mcp"]
