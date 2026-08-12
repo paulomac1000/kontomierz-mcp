@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 import logging
 import time
 import uuid
@@ -141,6 +142,50 @@ class InvocationKernel:
                 details=error.details,
             )
         return error
+
+    @staticmethod
+    def _encoded_size(document: dict[str, Any]) -> int:
+        try:
+            encoded = json.dumps(
+                document,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        except (TypeError, ValueError) as exc:
+            raise ApplicationError(ErrorCode.INTERNAL_ERROR, "Tool returned a non-serializable result") from exc
+        return len(encoded)
+
+    @classmethod
+    def _bounded_result(
+        cls,
+        manifest: ToolManifest,
+        data: Any,
+        metadata: dict[str, Any],
+    ) -> dict[str, Any]:
+        result = {"data": data, "_meta": metadata}
+        if cls._encoded_size(result) <= manifest.max_response_bytes:
+            return result
+
+        if manifest.side_effects in {"write", "destructive"}:
+            reduced = {
+                "data": {
+                    "completed": True,
+                    "response_omitted": True,
+                    "reconciliation_required": True,
+                },
+                "_meta": metadata,
+            }
+            if cls._encoded_size(reduced) <= manifest.max_response_bytes:
+                return reduced
+
+        raise ApplicationError(
+            ErrorCode.UPSTREAM_FAILURE,
+            "Tool response exceeds the configured safe output bound",
+            retryable=False,
+            suggestion="Narrow filters or use pagination before retrying when the tool supports them.",
+            details={"max_response_bytes": manifest.max_response_bytes},
+        )
 
     @staticmethod
     def _sdk_identity() -> tuple[str, list[str]]:
@@ -360,18 +405,16 @@ class InvocationKernel:
                 _logger.exception("Unhandled operation failure request_id=%s tool=%s", request_id, tool_name)
                 raise ApplicationError(ErrorCode.INTERNAL_ERROR, "The operation failed unexpectedly") from exc
 
-        return {
-            "data": data,
-            "_meta": {
-                "request_id": request_id,
-                "tool_name": tool_name,
-                "duration_ms": int((time.monotonic() - started_at) * 1000),
-                "tool_version": manifest.version,
-                "target_scope": manifest.target_scope,
-                "target_ref": AuthorizationPolicy.public_target_ref(executed_decision.target_identity),
-                "transport": invocation_context.transport,
-            },
+        metadata = {
+            "request_id": request_id,
+            "tool_name": tool_name,
+            "duration_ms": int((time.monotonic() - started_at) * 1000),
+            "tool_version": manifest.version,
+            "target_scope": manifest.target_scope,
+            "target_ref": AuthorizationPolicy.public_target_ref(executed_decision.target_identity),
+            "transport": invocation_context.transport,
         }
+        return self._bounded_result(manifest, data, metadata)
 
     @staticmethod
     def _bind_authorization_audit(
