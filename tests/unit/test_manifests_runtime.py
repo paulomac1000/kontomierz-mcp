@@ -20,6 +20,7 @@ _REQUIRED_FIELDS = {
     "concurrent_safe",
     "concurrency_scope",
     "timeout_ms",
+    "max_response_bytes",
     "requires_confirmation",
     "determinism",
     "latency",
@@ -49,6 +50,7 @@ def test_manifest_claims_are_conservative_and_internally_consistent() -> None:
     for manifest in TOOL_MANIFESTS.values():
         assert manifest.version.startswith("2.0.0")
         assert manifest.timeout_ms > 0
+        assert 1 <= manifest.max_response_bytes <= 16 * 1024 * 1024
         assert manifest.target_binding.fallback == "forbidden"
         assert manifest.automatic_retry is False
         assert all(
