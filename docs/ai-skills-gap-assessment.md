@@ -5,13 +5,13 @@ type: decision
 status: evolving
 rigor: operational
 owners: [repository-maintainers]
-verification: Compare the exact SHA with the authority in `trusted-executable-sources.lock.yaml`, run hosted CI, and complete provider-backed evidence.
+verification: Compare the exact candidate SHA with the authority in `trusted-executable-sources.lock.yaml`, run hosted CI, and complete provider-backed evidence.
 ---
 # AI Skills gap assessment
 
 ## Decision
 
-Target technical alignment with the immutable `ai-skills` authority declared in `trusted-executable-sources.lock.yaml`, currently revision `32b699c75eaf4edac00982fea181daebaba40114` on `fix/unified-contract-release-hardening` with `mcp-server-architect` 1.3.0, while withholding a formal L2+ claim. The authority is not duplicated in workflow constants: CI resolves repository/revision from the canonical lock, independently checks out that exact revision, verifies trusted executable SHA-256 values, and then runs the standards checks. Any later authority update requires a new exact-revision evidence run.
+Target technical alignment with the immutable `ai-skills` authority declared in `trusted-executable-sources.lock.yaml` and `mcp-server-architect` 1.3.0 while withholding a formal L2+ claim. The exact authority revision is intentionally declared only in the canonical lock, not duplicated in workflows or prose. CI resolves repository/revision from that lock, independently checks out the authority, verifies trusted executable SHA-256 values, and then runs the standards checks. Any authority update requires review of the branch delta, a lock update, and a new exact-revision evidence run.
 
 ## Closed or materially reduced gaps
 
@@ -45,4 +45,4 @@ Target technical alignment with the immutable `ai-skills` authority declared in 
 
 ## Approval condition
 
-Keep PR #7 draft until quality, exact-artifact, latest-pinned standards, Python compatibility, official stdio/HTTP smoke, adversarial security, and Docker gates all pass on one immutable implementation SHA; live evidence supports every claimed real-backend behavior; the provider/repository placeholders are implemented from real authority; the release and quarantine administration is verified; provider-backed migration/adoption and build-provenance evidence matches the same SHA; and an independent reviewer approves it. Formal L2+ adoption is intentionally not claimed before those conditions hold.
+Keep PR #7 draft until quality, exact-artifact, latest-reviewed standards, Python compatibility, official stdio/HTTP smoke, adversarial security, and Docker gates all pass on one immutable implementation SHA; live evidence supports every claimed real-backend behavior; the provider/repository placeholders are implemented from real authority; release and quarantine administration is verified; provider-backed migration/adoption and build-provenance evidence matches the same SHA; and an independent reviewer approves it. Formal L2+ adoption is intentionally not claimed before those conditions hold.
