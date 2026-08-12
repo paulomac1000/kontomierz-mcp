@@ -74,6 +74,49 @@ async def test_legacy_public_date_formats_are_rejected(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("tool", "arguments", "message"),
+    [
+        ("list_transactions", {"q": "ą" * 129}, "q must not exceed 256 UTF-8 bytes"),
+        (
+            "create_transaction",
+            {"client_assigned_id": "x" * 129},
+            "client_assigned_id must not exceed 128 UTF-8 bytes",
+        ),
+        (
+            "create_schedule",
+            {
+                "direction": "withdrawal",
+                "deadline_on": "2026-12-31",
+                "holidays": 0,
+                "description": "x" * 513,
+                "currency_amount": "1",
+                "currency_name": "PLN",
+                "repeat": 1,
+            },
+            "description must not exceed 512 UTF-8 bytes",
+        ),
+        (
+            "create_budget",
+            {"limit": "1" * 65, "category_id": 1},
+            "limit must not exceed 64 UTF-8 bytes",
+        ),
+    ],
+)
+async def test_public_text_and_money_inputs_have_utf8_byte_bounds(
+    operations,
+    tool: str,
+    arguments: dict[str, object],
+    message: str,
+) -> None:
+    ops, _ = operations
+    with pytest.raises(ApplicationError) as captured:
+        await ops[tool](**arguments)
+    assert captured.value.code is ErrorCode.INVALID_PARAMETER
+    assert captured.value.message == message
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("balance", ["0", "-100.25"])
 async def test_wallet_balance_allows_zero_and_debt(operations, balance: str) -> None:
     ops, _ = operations
