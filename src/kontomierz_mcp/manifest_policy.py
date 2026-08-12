@@ -23,6 +23,7 @@ from .manifest_types import (
     ToolParameter,
 )
 
+_DEFAULT_MAX_RESPONSE_BYTES = 1024 * 1024
 _READ_RETRY = RetryConditions(
     eligible_error_codes=("TIMEOUT", "DEPENDENCY_UNAVAILABLE", "RATE_LIMITED"),
     attempt_limit=2,
@@ -83,6 +84,7 @@ def manifest(
     claim_evidence: ClaimEvidence,
     requires_operator_write_gate: bool = False,
     target_scope: str = "kontomierz-account",
+    max_response_bytes: int = _DEFAULT_MAX_RESPONSE_BYTES,
 ) -> ToolManifest:
     return ToolManifest(
         name=name,
@@ -97,6 +99,7 @@ def manifest(
         concurrent_safe=concurrent_safe,
         concurrency_scope=concurrency_scope,
         timeout_ms=timeout_ms,
+        max_response_bytes=max_response_bytes,
         requires_confirmation=requires_confirmation,
         determinism=determinism,
         latency=latency,
