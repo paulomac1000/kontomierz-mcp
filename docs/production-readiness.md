@@ -59,7 +59,7 @@ Implemented live evidence covers read shapes, form-encoded schedule/transaction/
 
 ## Trusted standards authority
 
-`trusted-executable-sources.lock.yaml` is the single authority source. It currently binds `paulomac1000/ai-skills` revision `32b699c75eaf4edac00982fea181daebaba40114` and SHA-256 digests for every trusted executable used by standards CI. CI resolves authority coordinates from that lock, validates the lock from the immutable external checkout, then runs AFDS, AGENTS, workflow policy, consumer-trust hygiene, MCP discovery, upstream-contract, and live-backend-policy checks. If the authority branch moves, update this canonical lock only after reviewing the delta and rerun all acceptance on the new exact candidate SHA.
+`trusted-executable-sources.lock.yaml` is the single authority source. It binds the reviewed exact `paulomac1000/ai-skills` revision and SHA-256 digests for every trusted executable used by standards CI. CI resolves authority coordinates from that lock, validates the lock from the immutable external checkout, then runs AFDS, AGENTS, workflow policy, consumer-trust hygiene, MCP discovery, upstream-contract, and live-backend-policy checks. If the authority branch moves, review its delta and update this canonical lock only when the new branch head is the intended authority; a previously green run against an older lock is not evidence for the later revision.
 
 ## Release trust and administrative gate
 
@@ -93,7 +93,7 @@ The command remains intentionally red until the external authorities exist. Neve
 The candidate may be treated as fully production/adoption complete only when all of the following are true on one final immutable revision:
 
 1. normal hash-locked quality and compatibility gates pass;
-2. latest-pinned standards and exact-artifact gates pass;
+2. latest-reviewed standards and exact-artifact gates pass;
 3. required live Kontomierz evidence passes in an authorized disposable environment;
 4. all provider/repository placeholders are replaced by real executable verification and pass;
 5. release environment and quarantine registry/credential boundaries are administratively verified;
