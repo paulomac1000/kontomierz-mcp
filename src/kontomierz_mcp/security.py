@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import getpass
 import hmac
 import os
 from contextvars import ContextVar, Token
@@ -24,9 +23,12 @@ class InvocationContext:
 
     @classmethod
     def local_stdio(cls) -> InvocationContext:
-        user = getpass.getuser() or "unknown"
-        uid = str(os.geteuid()) if hasattr(os, "geteuid") else "unknown"
-        return cls(principal=f"local-user:{user}:uid:{uid}", transport="stdio", authenticated=True)
+        """Bind stdio trust to process-owned OS identity, never spoofable username environment."""
+        if hasattr(os, "geteuid"):
+            principal = f"local-process:uid:{os.geteuid()}"
+        else:  # Windows has no geteuid; stdio trust is the spawned local process boundary.
+            principal = f"local-process:pid:{os.getpid()}"
+        return cls(principal=principal, transport="stdio", authenticated=True)
 
     @classmethod
     def authenticated_http(cls, principal: str) -> InvocationContext:
