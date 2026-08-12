@@ -17,7 +17,7 @@ concurrency:
 
 env:
   CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-  AI_SKILLS_REV: b359245d3a34fce90cfeb0fdab052e75b5b821f3
+  AI_SKILLS_REV: b18e95e6a99a8cb5790b9239e2592bbad12344c6
 
 jobs:
   quality:
