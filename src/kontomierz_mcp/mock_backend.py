@@ -167,10 +167,10 @@ class MockKontomierzClient:
         return deepcopy(self._find(self.transactions, transaction_id))
 
     def create_money_transaction(self, **fields: Any) -> dict[str, Any]:
-        assigned = fields.get("client_assigned_id")
-        for item in self.transactions:
-            if item.get("client_assigned_id") == assigned:
-                return deepcopy(item)
+        # The real upstream has not proven client_assigned_id replay/deduplication
+        # semantics, and the governed manifest intentionally declares this create
+        # non-idempotent. The mock therefore creates a distinct record for every
+        # invocation instead of inventing stronger semantics than production.
         item = {"id": self._next_id(self.transactions), **fields}
         self.transactions.append(item)
         return deepcopy(item)
