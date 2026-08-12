@@ -93,7 +93,7 @@ Release publication uses three distinct trust stages:
 2. `quarantine` remains unprivileged with respect to production. It loads and smokes the exact CI image, then pushes it to an **isolated non-GHCR quarantine registry**, resolves an immutable digest, pulls that exact digest, rechecks the source-revision label, and smokes it again.
 3. `publish` runs behind the protected `release` environment. It does not checkout candidate code, download the CI archive, `docker load`, or `docker run` candidate content. It promotes only the immutable quarantine digest to production GHCR with registry tooling, verifies the production digest, and emits a promotion attestation.
 
-Repository administrators must provide `QUARANTINE_REGISTRY` and `QUARANTINE_REPOSITORY` variables plus `QUARANTINE_USERNAME`/`QUARANTINE_TOKEN` secrets. The quarantine registry must not be `ghcr.io`, and its credential must be scoped so it cannot mutate the production package. That last credential-scope property requires provider/administrator evidence and remains an explicit external gate rather than a source-code assertion.
+Repository administrators must provide `QUARANTINE_REGISTRY` and `QUARANTINE_REPOSITORY` variables plus `QUARANTINE_USERNAME`/`QUARANTINE_TOKEN` secrets. The quarantine registry must not be `ghcr.io`, and its credential must be scoped so it cannot mutate the production package. That credential-scope property requires provider/administrator evidence and remains an explicit external gate rather than a source-code assertion.
 
 ## Tests
 
@@ -117,7 +117,7 @@ Those tests use unique descriptions, captured IDs, bounded reconciliation over b
 
 ## Standards authority and contracts
 
-The trusted standards authority is declared once in [`trusted-executable-sources.lock.yaml`](trusted-executable-sources.lock.yaml), currently at exact `paulomac1000/ai-skills` revision `32b699c75eaf4edac00982fea181daebaba40114`. The lock also binds every trusted executable used by CI to a SHA-256 digest. CI resolves the authority from this canonical lock, validates the lock from the trusted checkout, runs consumer-trust hygiene, and then executes the pinned AFDS/AGENTS/CI/MCP validators.
+The trusted standards authority is declared once in [`trusted-executable-sources.lock.yaml`](trusted-executable-sources.lock.yaml). That file is the canonical source for the exact `paulomac1000/ai-skills` revision and SHA-256 digest of every trusted executable used by CI. CI resolves the authority from this lock, validates the lock from the trusted checkout, runs consumer-trust hygiene, and then executes the pinned AFDS/AGENTS/CI/MCP validators. Do not duplicate the revision in documentation or workflow constants; inspect the lock when the exact authority SHA is required.
 
 - [`trusted-executable-sources.lock.yaml`](trusted-executable-sources.lock.yaml) — immutable authority coordinates and trusted executable digests
 - [`upstream-contract.yaml`](upstream-contract.yaml) — machine-readable observed Kontomierz boundary
