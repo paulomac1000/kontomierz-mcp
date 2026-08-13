@@ -66,6 +66,13 @@ class FakeSessionManager:
             self.entered = False
 
 
+class FailingSessionManager:
+    @asynccontextmanager
+    async def run(self):
+        raise RuntimeError("session startup failed")
+        yield  # pragma: no cover - makes this an async context manager generator
+
+
 class FakeMCPServer:
     last_instance: FakeMCPServer | None = None
 
@@ -233,6 +240,30 @@ async def test_http_health_routes_include_dependency_readiness_and_explicit_tran
 
     async with app.router.lifespan_context(app):
         assert routes[""].app is not None
+    assert dependency.closed is True
+
+
+@pytest.mark.asyncio
+async def test_http_lifespan_closes_kernel_when_session_startup_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    install_fake_sdk(monkeypatch)
+    settings = Settings(
+        api_key="",
+        mock_data=True,
+        transport="http",
+        http_auth_token=HTTP_TOKEN,
+        http_principal="test-operator",
+    )
+    dependency = MockKontomierzClient()
+    kernel = build_kernel(settings, dependency)
+    app = create_http_app(settings, kernel)
+    fake_mcp = FakeMCPServer.last_instance
+    assert fake_mcp is not None
+    fake_mcp.session_manager = FailingSessionManager()
+
+    with pytest.raises(RuntimeError, match="session startup failed"):
+        async with app.router.lifespan_context(app):
+            pass
+
     assert dependency.closed is True
 
 
