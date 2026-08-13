@@ -3,7 +3,7 @@ sources:
   - id: ai-skills-authority
     role: auditor
     repository: paulomac1000/ai-skills
-    revision: a8aea2482aa1c73e42eeb4316fda0702341a31a8
+    revision: 122082bd1af2fc9cfd9a0fdaa94c1f60ec1fafd5
     credential_access: none
     files:
       - authority_path: skills/afds-doc-writer/validate.py
@@ -16,6 +16,8 @@ sources:
         sha256: sha256:617e9652494735d0632fbcffd881006e8be9b42148aa6ad84c01353e65fd956e
       - authority_path: skills/mcp-server-architect/tools/inspect_existing_project.py
         sha256: sha256:89d36ed71357897a77d2346e22ad96d8c43052213ce06dfb229d5728c88788ff
+      - authority_path: skills/mcp-server-architect/tools/plan_existing_project.py
+        sha256: sha256:0000000000000000000000000000000000000000000000000000000000000000
       - authority_path: contracts/validate_upstream_contract.py
         sha256: sha256:eb53bdeca3f3d9829b133842186c509a61201fa509a9db58073ec1a5636efe04
       - authority_path: contracts/validate_live_backend_test_policy.py
