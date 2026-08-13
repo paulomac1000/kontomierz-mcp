@@ -12,6 +12,7 @@ from kontomierz_mcp.operations import build_operations
 def operations():
     backend = MockKontomierzClient()
     settings = Settings(api_key="", mock_data=True, enable_write_operations=True)
+    settings.validate()
     return build_operations(backend, settings), backend
 
 
@@ -27,8 +28,33 @@ async def test_negative_optional_ids_are_rejected(operations, field: str) -> Non
 @pytest.mark.asyncio
 async def test_negative_budget_category_is_rejected(operations) -> None:
     ops, _ = operations
-    with pytest.raises(ApplicationError):
+    with pytest.raises(ApplicationError) as captured:
         await ops["create_budget"](limit="10", category_id=-1)
+    assert captured.value.code is ErrorCode.INVALID_PARAMETER
+
+
+@pytest.mark.asyncio
+async def test_missing_required_parameter_is_invalid_parameter(operations) -> None:
+    ops, _ = operations
+    with pytest.raises(ApplicationError) as captured:
+        await ops["create_budget"](category_id=1)
+    assert captured.value.code is ErrorCode.INVALID_PARAMETER
+    assert captured.value.message == "Missing required parameter(s): limit"
+
+
+@pytest.mark.asyncio
+async def test_internal_key_error_from_known_dispatcher_is_not_misreported_as_unknown_tool(
+    operations,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ops, _ = operations
+
+    async def broken_dispatch(_name, _arguments, _client):
+        raise KeyError("domain-data")
+
+    monkeypatch.setattr("kontomierz_mcp.operations.dispatch_primary", broken_dispatch)
+    with pytest.raises(KeyError, match="domain-data"):
+        await ops["list_accounts"]()
 
 
 @pytest.mark.asyncio
