@@ -60,7 +60,7 @@ MCP_HTTP_MAX_REQUEST_BODY_BYTES=1048576 \
 .venv/bin/kontomierz-mcp
 ```
 
-Every remote HTTP request except `/health/live` must send `Authorization: Bearer <MCP_HTTP_AUTH_TOKEN>`. The token is mapped server-side to `MCP_HTTP_PRINCIPAL`, so the model cannot choose its own principal. The principal is authorized against the exact tool, configured target, resolved resource identity, normalized argument digest, and capability policy, then revalidated immediately before operation I/O.
+Every supported protected HTTP endpoint (`/mcp` and `/health/ready`) requires `Authorization: Bearer <MCP_HTTP_AUTH_TOKEN>`. Unknown paths return 404 before entering the mounted MCP SDK application; `/health/live` is the only public route. The token is mapped server-side to `MCP_HTTP_PRINCIPAL`, so the model cannot choose its own principal. The principal is authorized against the exact tool, configured target, resolved resource identity, normalized argument digest, and capability policy, then revalidated immediately before operation I/O.
 
 The MCP endpoint is `/mcp`; liveness remains public at `/health/live`. Readiness at `/health/ready` requires the same Bearer authentication because a cache miss may trigger a bounded upstream probe. Non-loopback binding is rejected. The HTTP adapter explicitly configures Host and Origin policy, stateless mode, and a bounded request body.
 
