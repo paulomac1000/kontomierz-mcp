@@ -17,9 +17,9 @@ sources:
       - authority_path: skills/mcp-server-architect/tools/inspect_existing_project.py
         sha256: sha256:c7e33364d7325cdbd927f932fd15fedb5cf6dff5af25600834a35a84b6560bf8
       - authority_path: skills/mcp-server-architect/tools/plan_existing_project.py
-        sha256: sha256:4129ea5eb5b865f8e3dadc3e0d18eb623578b34ee7acbb15629ed0abbba6f6e4
+        sha256: sha256:2b73916179a83fc93d473cab5b064cf4ed37ed07faddb841990f70a56879b9b9
       - authority_path: skills/mcp-server-architect/tools/capture_mcp_contract.py
-        sha256: sha256:26a4ecc82814bef6aff6e2023703f388c8274bee83489309f67e40425098e35b
+        sha256: sha256:06c74cba2ee44e9d35e909b59f6708f7cdbe9b629c55c2e6fa8b1b43718d07d5
       - authority_path: skills/mcp-server-architect/tools/compare_mcp_contracts.py
         sha256: sha256:1c3b46f99537f72a8a3edc96a20a971e3312d4f1dff4335d37335210f1c17bcc
       - authority_path: contracts/validate_upstream_contract.py
