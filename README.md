@@ -8,7 +8,7 @@ The current candidate is **2.0.0** because it removes legacy HTTP+SSE and the un
 
 Financial reads are confidential. Every invocation is authenticated and then authorized server-side against the exact capability, immutable configured target, and invocation resource identity. HTTP principals are read-only by default through `MCP_HTTP_ALLOWED_CAPABILITIES=read`. Mutations require both an explicitly allowed HTTP capability class (for HTTP callers) and `ENABLE_WRITE_OPERATIONS=1` from the trusted server operator. Destructive operations are narrower on both transports: stdio requires exact capability IDs in `MCP_STDIO_ALLOWED_DESTRUCTIVE_CAPABILITIES` and exact resource IDs in `MCP_STDIO_ALLOWED_DESTRUCTIVE_RESOURCES`; HTTP additionally requires the corresponding `MCP_HTTP_ALLOWED_DESTRUCTIVE_*` allowlists. A model argument cannot establish identity, authorization, or write enablement.
 
-The server does **not** advertise `requires_confirmation=true` because no independent server-side approval authority exists yet. A started mutation with an uninterpretable outcome is never declared safely retryable. Each invocation emits one structured server-side audit record containing principal, exact capability, target identity, resource identity, policy decision, operator-gate decision, dependency state, result category, cancellation/saturation state, and correlation ID; credentials and protected response bodies are excluded. The audit logger owns an INFO-capable sink independent from `LOG_LEVEL` and follows an explicit result-preserving fail-open policy.
+The server does **not** advertise `requires_confirmation=true` because no independent server-side approval authority exists yet. A started mutation with an uninterpretable outcome is never declared safely retryable. In particular, an empty-body create that does not identify the created resource is surfaced as `AMBIGUOUS_OUTCOME` and must be reconciled before any dependent mutation or retry. Each invocation emits one structured server-side audit record containing principal, exact capability, target identity, resource identity, policy decision, operator-gate decision, dependency state, result category, cancellation/saturation state, and correlation ID; credentials and protected response bodies are excluded. The audit logger owns an INFO-capable sink independent from `LOG_LEVEL` and follows an explicit result-preserving fail-open policy.
 
 Public text inputs have UTF-8 byte limits before upstream I/O. Successful upstream bodies are streamed with a 4 MiB decoded-body limit, and every tool manifest has a final response budget (1 MiB by default). Oversized reads fail closed; a completed mutation whose representation exceeds the tool budget returns a small reconciliation marker instead of a retry-provoking error.
 
@@ -105,15 +105,17 @@ A plain pytest run excludes live/provider evidence by default:
 
 The default suite uses synthetic data. The official MCP SDK test is mandatory and fails collection when the SDK is absent.
 
-The live Kontomierz contract suite requires a repository `.env` containing the real API key **and both** explicit opt-ins, and should be run only against a disposable account:
+The live Kontomierz contract suite is intentionally harder to start than the normal suite. It requires a repository `.env` containing the real API key, both explicit mutation opt-ins, an assertion that the target account is an **exclusive disposable test account**, and a positive wallet ID that must exist in the authenticated account before any cleanup or mutation begins:
 
 ```bash
 KONTOMIERZ_EXTERNAL_TESTS=1 \
 KONTOMIERZ_ALLOW_REAL_MUTATIONS=1 \
+KONTOMIERZ_EXCLUSIVE_DISPOSABLE_ACCOUNT=1 \
+KONTOMIERZ_DISPOSABLE_WALLET_ID=123 \
 .venv/bin/python -m pytest -o addopts='' -m external tests/external/test_real_kontomierz_contract.py
 ```
 
-Those tests use unique descriptions, captured IDs, bounded reconciliation over both paid and unpaid schedule groups, and a final cleanup guard. The run fails if schedule/transaction namespace cleanup or budget snapshot cleanup cannot be confirmed. Provider/repository acceptance placeholders in `tests/external/test_production_evidence.py` remain intentionally failing until the corresponding external authority exists.
+Do not point this suite at an ordinary personal account. The guard verifies `KONTOMIERZ_DISPOSABLE_WALLET_ID` through the authenticated `user_accounts.json` response before performing pre-clean or mutations; a mismatch fails closed. The tests then use unique descriptions, captured IDs, bounded reconciliation over both paid and unpaid schedule groups, and a final cleanup guard. Budget baseline-difference cleanup is permitted only after the exclusive disposable target has been verified. The run fails if schedule/transaction namespace cleanup or budget snapshot cleanup cannot be confirmed. Provider/repository acceptance placeholders in `tests/external/test_production_evidence.py` remain intentionally failing until the corresponding external authority exists.
 
 ## Standards authority and contracts
 
