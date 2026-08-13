@@ -80,6 +80,27 @@ async def test_write_429_is_not_ambiguous_and_preserves_retry_after() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("status", [301, 302, 307, 308])
+async def test_write_redirect_is_ambiguous_and_never_reported_as_success(status: int) -> None:
+    client = make_client(lambda _request: httpx.Response(status, headers={"Location": "https://elsewhere.test/"}))
+    with pytest.raises(UpstreamError) as captured:
+        await client.delete_budget(7)
+    assert captured.value.code is ErrorCode.UPSTREAM_FAILURE
+    assert captured.value.retryable is False
+    assert captured.value.write_outcome_ambiguous is True
+    assert captured.value.details == {"status": status}
+
+
+@pytest.mark.asyncio
+async def test_read_redirect_is_failure_but_not_ambiguous() -> None:
+    client = make_client(lambda _request: httpx.Response(302, headers={"Location": "https://elsewhere.test/"}))
+    with pytest.raises(UpstreamError) as captured:
+        await client.get_user_accounts()
+    assert captured.value.code is ErrorCode.UPSTREAM_FAILURE
+    assert captured.value.write_outcome_ambiguous is False
+
+
+@pytest.mark.asyncio
 async def test_put_uses_form_and_preserves_empty_clear_value() -> None:
     seen: list[httpx.Request] = []
 
@@ -110,31 +131,23 @@ async def test_explicit_json_body_mode_remains_supported() -> None:
 
 
 @pytest.mark.asyncio
-async def test_empty_schedule_create_requires_explicit_reconciliation() -> None:
-    calls: list[httpx.Request] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        calls.append(request)
-        return httpx.Response(201)
-
-    client = make_client(handler)
-    result = await client.create_schedule(description="Rent", currency_amount="1.00")
-    assert result == {"created": True, "reconciliation_required": True}
-    assert [call.method for call in calls] == ["POST"]
-
-
-@pytest.mark.asyncio
-async def test_empty_budget_create_does_not_guess_existing_resource_identity() -> None:
-    calls: list[httpx.Request] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        calls.append(request)
-        return httpx.Response(201)
-
-    client = make_client(handler)
-    result = await client.create_budget("1.00", category_id=3)
-    assert result == {"created": True, "reconciliation_required": True}
-    assert [call.method for call in calls] == ["POST"]
+@pytest.mark.parametrize(
+    "operation",
+    [
+        lambda client: client.create_wallet("0", "PLN"),
+        lambda client: client.create_money_transaction(client_assigned_id="x"),
+        lambda client: client.create_budget("1.00", category_id=3),
+        lambda client: client.create_schedule(description="Rent", currency_amount="1.00"),
+    ],
+)
+async def test_empty_create_response_is_ambiguous(operation) -> None:
+    client = make_client(lambda _request: httpx.Response(201))
+    with pytest.raises(UpstreamError) as captured:
+        await operation(client)
+    assert captured.value.code is ErrorCode.UPSTREAM_FAILURE
+    assert captured.value.retryable is False
+    assert captured.value.write_outcome_ambiguous is True
+    assert "did not identify" in captured.value.message
 
 
 @pytest.mark.asyncio
@@ -149,13 +162,6 @@ async def test_empty_budget_update_is_success_marker() -> None:
     client = make_client(lambda _request: httpx.Response(200))
     result = await client.update_budget(9, "2.00")
     assert result == {"updated": True}
-
-
-@pytest.mark.asyncio
-async def test_empty_transaction_create_is_success_marker() -> None:
-    client = make_client(lambda _request: httpx.Response(201))
-    result = await client.create_money_transaction(client_assigned_id="x")
-    assert result == {"created": True, "reconciliation_required": True}
 
 
 @pytest.mark.asyncio
