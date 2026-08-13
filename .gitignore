@@ -1,4 +1,7 @@
 .venv/
+.artifact-venv/
+.artifact-test-venv/
+.trusted/
 .env
 .envrc
 __pycache__/
