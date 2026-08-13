@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+import pytest_asyncio
 
 from kontomierz_mcp.config import Settings
 from kontomierz_mcp.mock_backend import MockKontomierzClient
@@ -44,11 +45,19 @@ def mock_client() -> MockKontomierzClient:
     return MockKontomierzClient()
 
 
-@pytest.fixture
-def readonly_kernel(readonly_settings: Settings, mock_client: MockKontomierzClient):
-    return build_kernel(readonly_settings, mock_client)
+@pytest_asyncio.fixture
+async def readonly_kernel(readonly_settings: Settings, mock_client: MockKontomierzClient):
+    kernel = build_kernel(readonly_settings, mock_client)
+    try:
+        yield kernel
+    finally:
+        await kernel.close()
 
 
-@pytest.fixture
-def write_kernel(write_settings: Settings, mock_client: MockKontomierzClient):
-    return build_kernel(write_settings, mock_client)
+@pytest_asyncio.fixture
+async def write_kernel(write_settings: Settings, mock_client: MockKontomierzClient):
+    kernel = build_kernel(write_settings, mock_client)
+    try:
+        yield kernel
+    finally:
+        await kernel.close()
