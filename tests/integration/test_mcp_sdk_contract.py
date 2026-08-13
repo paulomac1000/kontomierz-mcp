@@ -5,6 +5,7 @@ import json
 import pytest
 from mcp import Client
 
+from kontomierz_mcp.authorization import AUTHORIZATION_POLICY_VERSION
 from kontomierz_mcp.config import Settings
 from kontomierz_mcp.manifests import TOOL_DEFINITIONS
 from kontomierz_mcp.server import build_server
@@ -51,12 +52,12 @@ async def test_official_in_memory_capability_document_has_full_active_state() ->
     assert result.is_error is False
     document = result.structured_content["data"]
     assert document["schema_version"] == "3.0.0"
-    assert document["supported_component_count"] == 27
+    assert document["supported_component_count"] == len(TOOL_DEFINITIONS)
     assert set(document["tools"]) == set(TOOL_DEFINITIONS)
     assert document["tools"]["create_wallet"]["manifest"]["active_state"] == "disabled"
     assert document["tools"]["list_accounts"]["manifest"]["active_state"] == "active"
     assert document["profile"] == "local-process-principal"
-    assert document["authorization_policy"] == "single-account-resource-v3"
+    assert document["authorization_policy"] == AUTHORIZATION_POLICY_VERSION
     assert document["tools"]["destroy_wallet"]["manifest"]["active_state"] == "disabled"
 
 
