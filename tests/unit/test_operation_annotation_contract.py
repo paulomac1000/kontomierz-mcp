@@ -7,4 +7,5 @@ def test_governed_operation_annotations_use_supported_scalar_vocabulary() -> Non
     annotations = {
         parameter.annotation for definition in TOOL_DEFINITIONS.values() for parameter in definition.parameters
     }
+    assert annotations
     assert annotations <= {"str", "str | None", "int", "int | None", "bool"}
