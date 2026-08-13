@@ -26,6 +26,8 @@ PYTAG="$(.venv/bin/python -c 'import sys; print(f"py{sys.version_info.major}{sys
 cp .env.example .env
 ```
 
+Any of the three supported Python versions works for local development. The exact release artifact and the Docker image are materialized on the **Python 3.12 lane**: the runtime lock contains cp312 wheel digests, and `pip download` of that lock from a 3.11/3.13 interpreter resolves wheels for the running interpreter instead, failing the `--require-hashes` check. Use a Python 3.12 environment (e.g. `python3.12 -m venv .venv`) whenever reproducing the release artifact locally.
+
 For synthetic local development:
 
 ```bash
@@ -86,6 +88,8 @@ The exact release artifact uses the Python 3.12 runtime lock. That lock and the 
 ## Docker and release promotion
 
 Docker consumes the already-built application wheel, hash-locked runtime wheelhouse, and copied runtime lock that CI verifies before the image build. The image runs as non-root and is built with `org.opencontainers.image.revision=<full source SHA>`; CI verifies that label and smokes the exact image before archiving it.
+
+Streamable HTTP binds `127.0.0.1` only (non-loopback binding is a hard configuration invariant), so a containerized HTTP deployment cannot use ordinary port publishing: run the container with host networking (`--network host` on Linux) or bridge through a loopback sidecar. The stdio default needs no network.
 
 Release publication uses three distinct trust stages:
 
