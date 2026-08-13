@@ -6,7 +6,7 @@ import logging
 
 import pytest
 
-from kontomierz_mcp.audit import configure_audit_sink
+from kontomierz_mcp.audit import InvocationAuditState, configure_audit_sink
 from kontomierz_mcp.config import Settings
 from kontomierz_mcp.kernel import InvocationKernel
 
@@ -25,6 +25,23 @@ class BrokenAuditStream(io.StringIO):
 
     def flush(self) -> None:
         raise OSError("audit sink unavailable")
+
+
+@pytest.fixture(autouse=True)
+def restore_audit_logger() -> None:
+    logger = logging.getLogger("kontomierz_mcp.audit")
+    previous_handlers = list(logger.handlers)
+    previous_level = logger.level
+    previous_propagate = logger.propagate
+    try:
+        yield
+    finally:
+        for handler in list(logger.handlers):
+            logger.removeHandler(handler)
+        for handler in previous_handlers:
+            logger.addHandler(handler)
+        logger.setLevel(previous_level)
+        logger.propagate = previous_propagate
 
 
 @pytest.mark.asyncio
@@ -76,12 +93,38 @@ async def test_audit_sink_failure_is_observable_without_changing_tool_result(
         operations={"list_accounts": read},
         dependency=Dependency(),
     )
-    try:
-        result = await kernel.invoke("list_accounts", {})
-    finally:
-        configure_audit_sink(stream=io.StringIO(), replace=True)
+    result = await kernel.invoke("list_accounts", {})
 
     assert result["data"] == [{"id": 1}]
     signal = fallback.getvalue()
     assert "mcp_audit_emission_failure" in signal
     assert "fail-open-result-preserving" in signal
+
+
+def test_audit_document_hashes_oversized_fields_and_validates_categories() -> None:
+    state = InvocationAuditState(
+        request_id="x" * 1024,
+        tool_name="list_accounts",
+        started_at=0.0,
+        principal="secret-prefix-" + "p" * 4096,
+        transport="unexpected-transport",
+        capability_class="unexpected-class",
+        authorization_decision="unexpected-decision",
+        operator_gate_decision="unexpected-gate",
+        dependency_state="unexpected-state",
+        result_category="unexpected-result",
+    )
+
+    document = state.document()
+
+    assert str(document["request_id"]).startswith("sha256:")
+    assert str(document["principal"]).startswith("sha256:")
+    assert "secret-prefix" not in str(document["principal"])
+    assert document["transport"] == "unresolved"
+    assert document["capability_class"] == "unresolved"
+    assert document["authorization_decision"] == "not-evaluated"
+    assert document["operator_gate_decision"] == "not-applicable"
+    assert document["dependency_state"] == "unknown"
+    assert document["result_category"] == "INTERNAL_ERROR"
+    encoded = json.dumps(document, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    assert len(encoded) <= 8192
