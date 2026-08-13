@@ -125,6 +125,31 @@ def test_final_http_app_rejects_missing_wrong_or_duplicate_bearer_before_kernel_
         assert kernel.invoke_calls == 0
 
 
+def test_unknown_paths_return_404_without_authentication_or_kernel_io() -> None:
+    kernel = SpyKernel()
+    app = create_http_app(settings(), kernel=kernel)  # type: ignore[arg-type]
+
+    with TestClient(app, base_url="http://127.0.0.1:9101") as client:
+        root = client.get("/")
+        assert root.status_code == 404
+
+        unknown = client.get("/no/such/route")
+        assert unknown.status_code == 404
+
+        assert kernel.invoke_calls == 0
+        assert kernel.readiness_calls == 0
+
+        assert client.get("/health/ready").status_code == 401
+        missing = client.post(
+            "/mcp",
+            headers={"content-type": "application/json", "accept": "application/json"},
+            content=b"{}",
+        )
+        assert missing.status_code == 401
+        assert kernel.invoke_calls == 0
+        assert kernel.readiness_calls == 0
+
+
 def test_live_is_public_but_ready_authenticates_before_dependency_probe() -> None:
     kernel = SpyKernel()
     app = create_http_app(settings(), kernel=kernel)  # type: ignore[arg-type]

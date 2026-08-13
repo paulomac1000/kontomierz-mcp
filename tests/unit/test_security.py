@@ -132,6 +132,91 @@ async def test_bearer_middleware_binds_request_scoped_principal() -> None:
     assert seen == InvocationContext(principal="operator:test", transport="streamable-http", authenticated=True)
 
 
+@pytest.mark.asyncio
+async def test_bearer_middleware_default_protects_every_non_public_path() -> None:
+    entered = False
+
+    async def app(scope: dict[str, Any], receive: Any, send: Any) -> None:
+        del scope, receive, send
+        nonlocal entered
+        entered = True
+
+    middleware = BearerPrincipalMiddleware(app, http_settings())
+
+    async def receive() -> dict[str, Any]:
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    messages: list[dict[str, Any]] = []
+
+    async def send(message: dict[str, Any]) -> None:
+        messages.append(message)
+
+    await middleware({"type": "http", "path": "/no/such/route", "headers": []}, receive, send)
+    assert messages[0]["status"] == 401
+    assert entered is False
+
+
+@pytest.mark.asyncio
+async def test_bearer_middleware_passes_unlisted_paths_to_router_without_auth() -> None:
+    entered = False
+
+    async def app(scope: dict[str, Any], receive: Any, send: Any) -> None:
+        del receive
+        nonlocal entered
+        entered = True
+        assert scope["path"] == "/no/such/route"
+        await send({"type": "http.response.start", "status": 404, "headers": []})
+        await send({"type": "http.response.body", "body": b""})
+
+    middleware = BearerPrincipalMiddleware(app, http_settings(), protected_paths=frozenset({"/mcp", "/health/ready"}))
+
+    async def receive() -> dict[str, Any]:
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    messages: list[dict[str, Any]] = []
+
+    async def send(message: dict[str, Any]) -> None:
+        messages.append(message)
+
+    await middleware({"type": "http", "path": "/no/such/route", "headers": []}, receive, send)
+    assert messages[0]["status"] == 404
+    assert entered is True
+
+
+@pytest.mark.asyncio
+async def test_bearer_middleware_still_authenticates_listed_protected_paths() -> None:
+    entered = False
+
+    async def app(scope: dict[str, Any], receive: Any, send: Any) -> None:
+        del scope, receive
+        nonlocal entered
+        entered = True
+        await send({"type": "http.response.start", "status": 204, "headers": []})
+        await send({"type": "http.response.body", "body": b""})
+
+    middleware = BearerPrincipalMiddleware(app, http_settings(), protected_paths=frozenset({"/mcp", "/health/ready"}))
+
+    async def receive() -> dict[str, Any]:
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def exercise(headers: list[tuple[bytes, bytes]]) -> list[dict[str, Any]]:
+        messages: list[dict[str, Any]] = []
+
+        async def send(message: dict[str, Any]) -> None:
+            messages.append(message)
+
+        await middleware({"type": "http", "path": "/health/ready", "headers": headers}, receive, send)
+        return messages
+
+    denied = await exercise([])
+    assert denied[0]["status"] == 401
+    assert entered is False
+
+    allowed = await exercise([(b"authorization", f"Bearer {TOKEN}".encode())])
+    assert allowed[0]["status"] == 204
+    assert entered is True
+
+
 def test_stdio_uses_explicit_process_derived_principal() -> None:
     context = InvocationContext.local_stdio()
     assert context.transport == "stdio"

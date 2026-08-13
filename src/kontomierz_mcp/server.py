@@ -130,7 +130,8 @@ def build_server(
     for definition in TOOL_DEFINITIONS.values():
         _validate_generated_definition(definition)
         namespace: dict[str, Any] = {"_dispatch": dispatch, "Annotated": Annotated, "Field": Field}
-        exec(  # nosec B102 - catalog identifiers/types are validated against a closed grammar immediately above.
+        # Catalog identifiers/types are validated against a closed grammar immediately above.
+        exec(  # nosec B102
             (
                 f"async def {definition.name}({definition.signature}):\n"
                 f"    return await _dispatch({definition.name!r}, locals())"
@@ -199,7 +200,14 @@ def create_http_app(settings: Settings, kernel: InvocationKernel | None = None) 
             Route("/health/ready", ready, methods=["GET"]),
             Mount("/", app=mcp_app),
         ],
-        middleware=[Middleware(BearerPrincipalMiddleware, settings=settings, public_paths=frozenset({"/health/live"}))],
+        middleware=[
+            Middleware(
+                BearerPrincipalMiddleware,
+                settings=settings,
+                public_paths=frozenset({"/health/live"}),
+                protected_paths=frozenset({"/mcp", "/health/ready"}),
+            )
+        ],
         lifespan=lifespan,
     )
 

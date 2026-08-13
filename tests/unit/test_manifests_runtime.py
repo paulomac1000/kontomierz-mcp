@@ -88,7 +88,8 @@ def test_manifest_claims_are_conservative_and_internally_consistent() -> None:
 def test_parameter_contract_generates_stable_python_signatures() -> None:
     namespace: dict[str, object] = {"Annotated": Annotated, "Field": Field}
     for definition in TOOL_DEFINITIONS.values():
-        exec(  # nosec B102 - immutable repository-owned signatures
+        # Signatures are immutable repository-owned values.
+        exec(  # nosec B102
             f"def {definition.name}({definition.signature}):\n    return None",
             namespace,
         )

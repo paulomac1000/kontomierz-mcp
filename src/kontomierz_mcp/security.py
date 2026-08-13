@@ -65,17 +65,24 @@ class BearerPrincipalMiddleware:
         settings: Settings,
         *,
         public_paths: frozenset[str] = frozenset(),
+        protected_paths: frozenset[str] | None = None,
     ) -> None:
         self._app = app
         self._token = settings.http_auth_token.encode("ascii")
         self._principal = settings.http_principal
         self._public_paths = public_paths
+        # None = fail-closed default: every non-public path authenticates.
+        self._protected_paths = protected_paths
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope.get("type") != "http":
             await self._app(scope, receive, send)
             return
         if scope.get("path") in self._public_paths:
+            await self._app(scope, receive, send)
+            return
+        if self._protected_paths is not None and scope.get("path") not in self._protected_paths:
+            # Unknown path: the router answers 404 and no MCP handling or dependency I/O occurs.
             await self._app(scope, receive, send)
             return
 
