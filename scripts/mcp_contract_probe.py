@@ -150,9 +150,16 @@ async def main() -> None:
     args = parser.parse_args()
     if not args.executable.is_file():
         parser.error("--executable must identify the installed MCP server executable")
-    if len(args.source_revision) != 40 or any(character not in "0123456789abcdef" for character in args.source_revision):
+    if len(args.source_revision) != 40 or any(
+        character not in "0123456789abcdef" for character in args.source_revision
+    ):
         parser.error("--source-revision must be a lowercase 40-character Git SHA")
-    if not args.artifact_digest.startswith("sha256:") or len(args.artifact_digest) != 71:
+    digest = args.artifact_digest.removeprefix("sha256:")
+    if (
+        not args.artifact_digest.startswith("sha256:")
+        or len(digest) != 64
+        or any(character not in "0123456789abcdef" for character in digest)
+    ):
         parser.error("--artifact-digest must be sha256:<64 lowercase hex>")
     print(json.dumps(await _capture(args), ensure_ascii=False, sort_keys=True, separators=(",", ":")))
 
