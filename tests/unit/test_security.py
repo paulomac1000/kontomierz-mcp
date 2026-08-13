@@ -80,6 +80,29 @@ async def test_bearer_middleware_rejects_missing_wrong_or_duplicate_token_withou
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("scope_type", ["lifespan", "websocket"])
+async def test_bearer_middleware_passes_non_http_scopes_to_wrapped_app(scope_type: str) -> None:
+    entered = False
+
+    async def app(scope: dict[str, Any], receive: Any, send: Any) -> None:
+        del receive, send
+        nonlocal entered
+        entered = True
+        assert scope["type"] == scope_type
+
+    middleware = BearerPrincipalMiddleware(app, http_settings())
+
+    async def receive() -> dict[str, Any]:
+        return {"type": "noop"}
+
+    async def send(_message: dict[str, Any]) -> None:
+        return None
+
+    await middleware({"type": scope_type}, receive, send)
+    assert entered is True
+
+
+@pytest.mark.asyncio
 async def test_bearer_middleware_binds_request_scoped_principal() -> None:
     seen: InvocationContext | None = None
 
