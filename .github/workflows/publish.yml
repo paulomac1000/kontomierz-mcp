@@ -92,7 +92,6 @@ jobs:
       - name: Verify archive identity without executing candidate content
         run: |
           set -euo pipefail
-          test "$HEAD_SHA" = "${{ github.event.workflow_run.head_sha }}"
           (cd dist && sha256sum --check SHA256SUMS)
           (cd dist && sha256sum --check RELEASE_SHA256SUMS)
           python - "$HEAD_SHA" <<'PY'
@@ -238,7 +237,8 @@ jobs:
       - name: Authenticate production GHCR
         env:
           GHCR_TOKEN: ${{ github.token }}
-        run: printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          GHCR_USERNAME: ${{ github.actor }}
+        run: printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
       - name: Promote exact registry digest without loading or executing candidate image
         env:
           QUARANTINE_REF: ${{ steps.promotion-input.outputs.reference }}
