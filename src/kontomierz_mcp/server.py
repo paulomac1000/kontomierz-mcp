@@ -31,9 +31,6 @@ def configure_application_logging(settings: Settings) -> None:
         level=getattr(logging, settings.log_level),
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
-    # Kontomierz requires the API key in the query string. httpx/httpcore request
-    # diagnostics can include the full URL, so their INFO/DEBUG output must never
-    # inherit the application's verbosity and disclose that credential.
     for logger_name in _SENSITIVE_HTTP_LOGGERS:
         logging.getLogger(logger_name).setLevel(logging.WARNING)
 
@@ -58,7 +55,12 @@ def _error_document(error: ApplicationError) -> dict[str, Any]:
     return {"error": error.as_dict()}
 
 
-def build_server(settings: Settings, kernel: InvocationKernel | None = None) -> Any:
+def build_server(
+    settings: Settings,
+    kernel: InvocationKernel | None = None,
+    *,
+    owns_kernel: bool = True,
+) -> Any:
     """Build one official MCP SDK v2 server from the governed tool catalog."""
     try:
         from mcp.server import MCPServer
@@ -73,7 +75,8 @@ def build_server(settings: Settings, kernel: InvocationKernel | None = None) -> 
         try:
             yield {"kernel": owned_kernel}
         finally:
-            await owned_kernel.close()
+            if owns_kernel:
+                await owned_kernel.close()
 
     mcp = MCPServer(
         "kontomierz-mcp",
@@ -133,7 +136,7 @@ def create_http_app(settings: Settings, kernel: InvocationKernel | None = None) 
     settings.validate()
 
     owned_kernel = kernel or build_kernel(settings)
-    mcp = build_server(settings, owned_kernel)
+    mcp = build_server(settings, owned_kernel, owns_kernel=False)
     from mcp.server.transport_security import TransportSecuritySettings
 
     host_header = f"[{settings.host}]" if ":" in settings.host else settings.host
