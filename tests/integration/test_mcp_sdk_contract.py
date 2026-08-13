@@ -14,10 +14,7 @@ pytestmark = pytest.mark.sdk
 
 
 def _input_schema(tool) -> dict[str, object]:
-    schema = getattr(tool, "inputSchema", None)
-    if schema is None:
-        schema = tool.input_schema
-    return schema
+    return tool.input_schema
 
 
 @pytest.mark.asyncio
