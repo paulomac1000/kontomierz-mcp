@@ -113,14 +113,14 @@ class MockKontomierzClient:
 
     @staticmethod
     def _positive_page(value: Any, name: str, *, allow_zero: bool = False) -> int | None:
-        if allow_zero and value in {None, 0, "0"}:
+        if allow_zero and (value is None or (type(value) is int and value == 0) or value == "0"):
             return None
-        if isinstance(value, bool):
-            raise ApplicationError(ErrorCode.INVALID_PARAMETER, f"{name} must be a positive integer")
-        try:
+        if type(value) is int:
+            result = value
+        elif isinstance(value, str) and value.isdecimal():
             result = int(value)
-        except (TypeError, ValueError) as exc:
-            raise ApplicationError(ErrorCode.INVALID_PARAMETER, f"{name} must be a positive integer") from exc
+        else:
+            raise ApplicationError(ErrorCode.INVALID_PARAMETER, f"{name} must be a positive integer")
         if result <= 0:
             raise ApplicationError(ErrorCode.INVALID_PARAMETER, f"{name} must be a positive integer")
         return result
