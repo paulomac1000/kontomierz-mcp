@@ -138,11 +138,31 @@ jobs:
           path: .trusted/ai-skills
           persist-credentials: false
       - name: Move trusted verifier outside candidate tree
+        env:
+          TRUSTED_REVISION: ${{ steps.trusted-ai-skills.outputs.revision }}
         run: |
           set -euo pipefail
           mv .trusted/ai-skills "$RUNNER_TEMP/ai-skills"
           rmdir .trusted
-          test "$(git -C "$RUNNER_TEMP/ai-skills" rev-parse HEAD)" = "${{ steps.trusted-ai-skills.outputs.revision }}"
+          test "$(git -C "$RUNNER_TEMP/ai-skills" rev-parse HEAD)" = "$TRUSTED_REVISION"
+      - name: Print trusted authority SHA256 values
+        shell: bash
+        run: |
+          set -euo pipefail
+          for path in \
+            skills/afds-doc-writer/validate.py \
+            skills/agents-md-architect/tools/audit_agents_md.py \
+            skills/ci-cd-architect/tools/check_github_actions_policy.py \
+            skills/ci-cd-architect/tools/check_consumer_trust_hygiene.py \
+            skills/mcp-server-architect/tools/inspect_existing_project.py \
+            skills/mcp-server-architect/tools/plan_existing_project.py \
+            contracts/validate_upstream_contract.py \
+            contracts/validate_live_backend_test_policy.py \
+            contracts/validate_trusted_executable_sources.py
+          do
+            digest="$(sha256sum "$RUNNER_TEMP/ai-skills/$path" | awk '{print $1}')"
+            printf 'AUTHORITY_SHA256 %s sha256:%s\n' "$path" "$digest"
+          done
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v6
         with:
           python-version: "3.12"
@@ -192,6 +212,27 @@ jobs:
           assert plan["upstream_contract"] == "verified"
           assert plan["live_backend_safety"] == "declared"
           assert document["unknowns"] == []
+          PY
+      - name: Plan existing MCP adoption from trusted revision
+        run: >-
+          python "$RUNNER_TEMP/ai-skills/skills/mcp-server-architect/tools/plan_existing_project.py"
+          . --target-level L2 --output "$RUNNER_TEMP/ai-skills-plan.json"
+      - name: Verify adoption plan and exact SDK claim
+        run: |
+          python - "$RUNNER_TEMP/ai-skills-plan.json" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          document = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+          assert document["format"] == "ai-skills-mcp-adoption-plan"
+          assert document["target_level"] == "L2"
+          assert document["sdk_compatibility_claim"] == {
+              "package": "mcp",
+              "requirement": "==2.0.0",
+              "status": "exact-pin",
+          }
+          assert document["discovery"]["unknowns"] == []
           PY
       - name: Validate observed upstream contract from trusted revision
         run: >-
@@ -293,6 +334,12 @@ jobs:
       - name: Build and smoke image from exact verified inputs
         run: |
           set -euo pipefail
+          BASE_IMAGE="$(awk '/^FROM / { print $2; exit }' Dockerfile)"
+          case "$BASE_IMAGE" in
+            *@sha256:*) ;;
+            *) echo "Dockerfile base image must be digest-pinned" >&2; exit 1 ;;
+          esac
+          docker pull "$BASE_IMAGE"
           docker build --pull=false \
             --label "org.opencontainers.image.revision=${SOURCE_SHA}" \
             -t "kontomierz-mcp:${SOURCE_SHA}" .
