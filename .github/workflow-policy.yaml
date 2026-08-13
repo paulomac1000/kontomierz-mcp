@@ -1,5 +1,6 @@
 schema_version: 1
 workflows:
   .github/workflows/ci.yml: trusted-ci
+  .github/workflows/contract-evidence.yml: trusted-ci
   .github/workflows/security.yml: trusted-ci
   .github/workflows/publish.yml: protected-release
