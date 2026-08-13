@@ -55,7 +55,7 @@ def reset_invocation_context(token: Token[InvocationContext | None]) -> None:
 
 
 class BearerPrincipalMiddleware:
-    """Authenticate every MCP HTTP request before it reaches the SDK application."""
+    """Authenticate protected HTTP routes and reject unknown routes before SDK handling."""
 
     _MAX_AUTHORIZATION_BYTES = 1024
 
@@ -82,8 +82,9 @@ class BearerPrincipalMiddleware:
             await self._app(scope, receive, send)
             return
         if self._protected_paths is not None and scope.get("path") not in self._protected_paths:
-            # Unknown path: the router answers 404 and no MCP handling or dependency I/O occurs.
-            await self._app(scope, receive, send)
+            # Do not pass an unauthenticated request into the mounted SDK app: future SDK routes
+            # must not silently become public merely because the outer router has a catch-all mount.
+            await self._not_found(send)
             return
 
         values = [value for name, value in scope.get("headers", ()) if name.lower() == b"authorization"]
@@ -113,6 +114,21 @@ class BearerPrincipalMiddleware:
             await self._app(scope, receive, send)
         finally:
             reset_invocation_context(token)
+
+    @staticmethod
+    async def _not_found(send: Send) -> None:
+        body = b'{"error":{"code":"NOT_FOUND","message":"Not found","retryable":false}}'
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 404,
+                "headers": [
+                    (b"content-type", b"application/json"),
+                    (b"cache-control", b"no-store"),
+                ],
+            }
+        )
+        await send({"type": "http.response.body", "body": body})
 
     @staticmethod
     async def _reject(send: Send) -> None:
