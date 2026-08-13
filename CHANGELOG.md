@@ -26,7 +26,7 @@ All notable changes to kontomierz-mcp are recorded here.
 - Empty-body create success never guesses a stable ID from non-unique descriptions/categories and is surfaced as a non-retryable ambiguous outcome that requires reconciliation.
 - Upstream redirects are rejected explicitly; redirects observed after a mutation request are treated as potentially ambiguous rather than successful.
 - Readiness uses an explicit never-checked sentinel rather than a numeric monotonic-time sentinel, so a process started near a monotonic epoch cannot cache a false initial state.
-- Audit events enforce closed categorical values, 256-byte free-form field bounds, and a hard 8 KiB serialized-event ceiling.
+- Audit events enforce closed categorical values, field-specific safe identities/digests, 256-byte free-form field bounds, and a hard 8 KiB serialized-event ceiling; short protected values are never emitted verbatim.
 - Decimal inputs are bounded before fixed-point formatting so scientific notation cannot expand into an unbounded request value.
 - HTTP application lifespan owns and closes the shared kernel exactly once.
 - Wealth points are unwrapped from their verified per-item `{"wealth_point": {...}}` upstream shape.
@@ -36,6 +36,8 @@ All notable changes to kontomierz-mcp are recorded here.
 - Logging tests restore global logger state and real request diagnostics stay at WARNING+ to protect the query-string API key.
 - Mock transaction contract tests call the synchronous mock API synchronously.
 - Exact-artifact Docker source-label verification uses a valid Docker Go-template expression.
+- ID-bound capabilities reject missing, boolean, floating-point, zero, negative, or string identifiers before authorization can claim an exact resource binding.
+- Mock schedule pagination rejects floating-point page/per-page values instead of silently truncating them with `int()`.
 
 ### Changed
 
@@ -56,6 +58,7 @@ All notable changes to kontomierz-mcp are recorded here.
 - Bounded admission/concurrency, per-target write serialization, dependency-aware readiness, response-size enforcement, and conservative ambiguous-write handling.
 - Exact Linux x64 runtime/development wheel locks for Python 3.11–3.13 and separate build-tool lock; acceptance installs use exact SHA-256 wheel hashes without dependency resolution.
 - Exact-wheel and exact-image CI artifact path with source-revision OCI label, non-root smoke, checksummed closed bundle, and protected promotion attestation.
+- An exact candidate MCP public-contract evidence lane that probes the installed wheel through the official client and validates the retained snapshot with hash-bound trusted `ai-skills` capture tooling.
 - Real external evidence tests plus `live-backend-test-policy.yaml` and `upstream-contract.yaml`.
 - `trusted-executable-sources.lock.yaml` as the single immutable standards-authority coordinate and executable-integrity contract.
 - Structural tests proving the privileged publisher cannot checkout/download/load/run candidate content and the quarantine lane remains unprivileged to production.
