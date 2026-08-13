@@ -78,7 +78,8 @@ async def test_non_concurrent_safe_writes_are_serialized_per_target() -> None:
     entered_first = asyncio.Event()
     release = asyncio.Event()
 
-    async def write(limit: str) -> dict[str, str]:
+    async def write(budget_id: int, limit: str) -> dict[str, str]:
+        del budget_id
         nonlocal active, maximum
         active += 1
         maximum = max(maximum, active)
@@ -88,9 +89,9 @@ async def test_non_concurrent_safe_writes_are_serialized_per_target() -> None:
         return {"limit": limit}
 
     kernel = InvocationKernel(settings=settings(), operations={"update_budget": write}, dependency=Dependency())
-    first = asyncio.create_task(kernel.invoke("update_budget", {"limit": "1"}))
+    first = asyncio.create_task(kernel.invoke("update_budget", {"budget_id": 7, "limit": "1"}))
     await entered_first.wait()
-    second = asyncio.create_task(kernel.invoke("update_budget", {"limit": "2"}))
+    second = asyncio.create_task(kernel.invoke("update_budget", {"budget_id": 7, "limit": "2"}))
     await _wait_until(lambda: kernel._admitted_invocations == 2)
     assert maximum == 1
     release.set()
