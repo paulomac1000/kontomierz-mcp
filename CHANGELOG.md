@@ -38,6 +38,7 @@ All notable changes to kontomierz-mcp are recorded here.
 - Exact-artifact Docker source-label verification uses a valid Docker Go-template expression.
 - ID-bound capabilities reject missing, boolean, floating-point, zero, negative, or string identifiers before authorization can claim an exact resource binding.
 - Mock schedule pagination rejects floating-point page/per-page values instead of silently truncating them with `int()`.
+- MCP public-contract evidence is generated from the same exact wheel that is tested, smoke-tested, image-bundled, and released; the snapshot is no longer produced from a separately rebuilt wheel with a different digest.
 
 ### Changed
 
@@ -57,8 +58,7 @@ All notable changes to kontomierz-mcp are recorded here.
 - Intentional Streamable HTTP Host/Origin policy, stateless mode, bounded request bodies, authenticated readiness, and adversarial pre-I/O tests.
 - Bounded admission/concurrency, per-target write serialization, dependency-aware readiness, response-size enforcement, and conservative ambiguous-write handling.
 - Exact Linux x64 runtime/development wheel locks for Python 3.11–3.13 and separate build-tool lock; acceptance installs use exact SHA-256 wheel hashes without dependency resolution.
-- Exact-wheel and exact-image CI artifact path with source-revision OCI label, non-root smoke, checksummed closed bundle, and protected promotion attestation.
-- An exact candidate MCP public-contract evidence lane that probes the installed wheel through the official client and validates the retained snapshot with hash-bound trusted `ai-skills` capture tooling.
+- Exact-wheel and exact-image CI artifact path with source-revision OCI label, non-root smoke, checksummed closed bundle, protected promotion attestation, and a trusted MCP public-contract snapshot captured from that same wheel and included in the release checksum closure.
 - Real external evidence tests plus `live-backend-test-policy.yaml` and `upstream-contract.yaml`.
 - `trusted-executable-sources.lock.yaml` as the single immutable standards-authority coordinate and executable-integrity contract.
 - Structural tests proving the privileged publisher cannot checkout/download/load/run candidate content and the quarantine lane remains unprivileged to production.
