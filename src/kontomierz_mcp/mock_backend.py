@@ -285,7 +285,8 @@ class MockKontomierzClient:
         paid = filters.get("schedule_group_name") == "paid"
         values = [deepcopy(item) for item in self.schedules if bool(item.get("paid")) is paid]
         page_number = self._positive_page(filters.get("page", 1), "page")
-        assert page_number is not None
+        if page_number is None:
+            raise ApplicationError(ErrorCode.INVALID_PARAMETER, "page must be a positive integer")
         per_page = self._positive_page(filters.get("per_page"), "per_page", allow_zero=True)
         if per_page is not None:
             start = (page_number - 1) * per_page
