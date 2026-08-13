@@ -13,7 +13,7 @@ from .manifest_types import ToolManifest
 from .security import InvocationContext
 
 CapabilityClass = Literal["read", "write", "destructive"]
-_POLICY_VERSION = "single-account-resource-v3"
+AUTHORIZATION_POLICY_VERSION = "single-account-resource-v3"
 
 _RESOURCE_BINDINGS: dict[str, tuple[str, str | None]] = {
     "list_accounts": ("account", None),
@@ -45,20 +45,6 @@ _RESOURCE_BINDINGS: dict[str, tuple[str, str | None]] = {
     "describe_kontomierz_capabilities": ("server", None),
 }
 _CREATE_CAPABILITIES = frozenset({"create_wallet", "create_transaction", "create_budget", "create_schedule"})
-_COLLECTION_CAPABILITIES = frozenset(
-    {
-        "list_accounts",
-        "list_transactions",
-        "list_categories",
-        "list_tags",
-        "list_currencies",
-        "list_budgets",
-        "copy_budgets_from_last_month",
-        "list_scheduled_transactions",
-        "get_pie_chart",
-        "list_wealth_points",
-    }
-)
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,8 +107,6 @@ class AuthorizationPolicy:
             return "transaction:new"
         if manifest.name in _CREATE_CAPABILITIES:
             return f"{resource_kind}:new"
-        if manifest.name in _COLLECTION_CAPABILITIES:
-            return f"{resource_kind}:collection"
         return f"{resource_kind}:collection"
 
     @staticmethod
@@ -149,7 +133,7 @@ class AuthorizationPolicy:
         return AuthorizationDecision(
             allowed,
             reason,
-            _POLICY_VERSION,
+            AUTHORIZATION_POLICY_VERSION,
             manifest.name,
             capability_class,
             target_identity,
@@ -277,7 +261,7 @@ class AuthorizationPolicy:
             return AuthorizationDecision(
                 False,
                 "authorization binding changed before I/O",
-                _POLICY_VERSION,
+                AUTHORIZATION_POLICY_VERSION,
                 current.capability_id,
                 current.capability_class,
                 current.target_identity,
