@@ -196,9 +196,9 @@ observations:
     success_statuses: [200]
     response_body: json
     credential_placement: query
-    confidence: recorded
+    confidence: observed
     evidence:
-      - docs/upstream-api.md#verified-endpoints
+      - tests/external/test_real_kontomierz_contract.py::test_real_pagination_evidence
   - operation: create_transaction
     method: POST
     endpoint: money_transactions.json
