@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from types import ModuleType
 from typing import Any, get_type_hints
 
+import httpx
 import pytest
 from pydantic import create_model
 
@@ -114,6 +115,16 @@ class FakeMCPServer:
         self.run_transport = transport
 
 
+class ProbeCountingDependency(MockKontomierzClient):
+    def __init__(self) -> None:
+        super().__init__()
+        self.probe_calls = 0
+
+    async def probe(self) -> bool:
+        self.probe_calls += 1
+        return True
+
+
 def install_fake_sdk(monkeypatch: pytest.MonkeyPatch) -> None:
     mcp = ModuleType("mcp")
     mcp_types = ModuleType("mcp.types")
@@ -173,24 +184,32 @@ async def test_http_health_routes_include_dependency_readiness_and_explicit_tran
 ) -> None:
     install_fake_sdk(monkeypatch)
     settings = Settings(
-        api_key="",
-        mock_data=True,
+        api_key="secret",
+        mock_data=False,
         transport="http",
         http_auth_token=HTTP_TOKEN,
         http_principal="test-operator",
         http_max_request_body_bytes=2048,
     )
-    dependency = MockKontomierzClient()
+    dependency = ProbeCountingDependency()
     kernel = build_kernel(settings, dependency)
     app = create_http_app(settings, kernel)
     routes = {getattr(route, "path", None): route for route in app.routes}
 
-    live = await routes["/health/live"].endpoint(None)
-    ready = await routes["/health/ready"].endpoint(None)
-    assert live.status_code == 200
-    assert json.loads(live.body) == {"status": "alive"}
-    assert ready.status_code == 200
-    assert json.loads(ready.body) == {"status": "ready"}
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1") as client:
+        live = await client.get("/health/live")
+        assert live.status_code == 200
+        assert live.json() == {"status": "alive"}
+
+        unauthenticated = await client.get("/health/ready")
+        assert unauthenticated.status_code == 401
+        assert dependency.probe_calls == 0
+
+        ready = await client.get("/health/ready", headers={"Authorization": f"Bearer {HTTP_TOKEN}"})
+        assert ready.status_code == 200
+        assert ready.json() == {"status": "ready"}
+        assert dependency.probe_calls == 1
 
     mounted = routes[""].app
     assert mounted is not None
