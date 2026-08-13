@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import keyword
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -14,7 +15,7 @@ from . import __version__
 from .audit import configure_audit_sink
 from .client import KontomierzClient
 from .config import Settings
-from .errors import ApplicationError
+from .errors import ApplicationError, ErrorCode
 from .kernel import InvocationKernel
 from .manifests import TOOL_DEFINITIONS
 from .mock_backend import MockKontomierzClient
@@ -23,6 +24,7 @@ from .security import BearerPrincipalMiddleware, current_invocation_context
 
 _logger = logging.getLogger(__name__)
 _SENSITIVE_HTTP_LOGGERS = ("httpx", "httpcore")
+_ALLOWED_GENERATED_ANNOTATIONS = frozenset({"str", "str | None", "int", "int | None", "bool"})
 
 
 def configure_application_logging(settings: Settings) -> None:
@@ -53,6 +55,22 @@ def build_kernel(settings: Settings, dependency: Any | None = None) -> Invocatio
 
 def _error_document(error: ApplicationError) -> dict[str, Any]:
     return {"error": error.as_dict()}
+
+
+def _validate_generated_definition(definition: Any) -> None:
+    """Fail closed before repository-owned catalog values enter generated Python source."""
+    if not definition.name.isidentifier() or keyword.iskeyword(definition.name):
+        raise RuntimeError(f"Invalid governed tool identifier: {definition.name!r}")
+    seen: set[str] = set()
+    for parameter in definition.parameters:
+        if (
+            not parameter.name.isidentifier()
+            or keyword.iskeyword(parameter.name)
+            or parameter.name in seen
+            or parameter.annotation not in _ALLOWED_GENERATED_ANNOTATIONS
+        ):
+            raise RuntimeError(f"Invalid governed parameter for tool {definition.name}: {parameter.name!r}")
+        seen.add(parameter.name)
 
 
 def build_server(
@@ -90,25 +108,29 @@ def build_server(
         lifespan=lifespan,
     )
 
+    def call_tool_result(document: dict[str, Any], *, is_error: bool) -> Any:
+        body = document if is_error else document["data"]
+        return CallToolResult(
+            content=[TextContent(type="text", text=json.dumps(body, ensure_ascii=False))],
+            structured_content=document,
+            is_error=is_error,
+        )
+
     async def dispatch(name: str, arguments: dict[str, Any]) -> Any:
         try:
             result = await owned_kernel.invoke(name, arguments, context=current_invocation_context())
-            return CallToolResult(
-                content=[TextContent(type="text", text=json.dumps(result["data"], ensure_ascii=False))],
-                structured_content=result,
-                is_error=False,
-            )
+            return call_tool_result(result, is_error=False)
         except ApplicationError as exc:
-            document = _error_document(exc)
-            return CallToolResult(
-                content=[TextContent(type="text", text=json.dumps(document, ensure_ascii=False))],
-                structured_content=document,
-                is_error=True,
-            )
+            return call_tool_result(_error_document(exc), is_error=True)
+        except Exception as exc:
+            _logger.error("Unhandled MCP adapter failure tool=%s exception_type=%s", name, type(exc).__name__)
+            error = ApplicationError(ErrorCode.INTERNAL_ERROR, "The operation failed unexpectedly")
+            return call_tool_result(_error_document(error), is_error=True)
 
     for definition in TOOL_DEFINITIONS.values():
+        _validate_generated_definition(definition)
         namespace: dict[str, Any] = {"_dispatch": dispatch, "Annotated": Annotated, "Field": Field}
-        exec(  # nosec B102 - signatures and names are immutable repository-owned catalog values
+        exec(  # nosec B102 - catalog identifiers/types are validated against a closed grammar immediately above.
             (
                 f"async def {definition.name}({definition.signature}):\n"
                 f"    return await _dispatch({definition.name!r}, locals())"
