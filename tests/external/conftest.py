@@ -23,7 +23,8 @@ def _live_opted_in() -> bool:
 def _required_disposable_wallet_id() -> int:
     if os.environ.get(_EXCLUSIVE_TARGET_ENV) != "1":
         pytest.fail(
-            f"Live mutations require {_EXCLUSIVE_TARGET_ENV}=1 to assert that no unrelated actor uses the disposable account"
+            f"Live mutations require {_EXCLUSIVE_TARGET_ENV}=1 to assert that "
+            "no unrelated actor uses the disposable account"
         )
     raw = os.environ.get(_DISPOSABLE_WALLET_ENV, "").strip()
     try:
