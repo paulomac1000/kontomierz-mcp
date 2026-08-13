@@ -128,3 +128,31 @@ def test_audit_document_hashes_oversized_fields_and_validates_categories() -> No
     assert document["result_category"] == "INTERNAL_ERROR"
     encoded = json.dumps(document, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     assert len(encoded) <= 8192
+
+
+def test_audit_document_never_emits_short_protected_values_verbatim() -> None:
+    protected_values = {
+        "principal": "Bearer-secret-token",
+        "target_identity": "https://private.example/account/123",
+        "resource_identity": "raw-account-secret",
+        "argument_digest": "raw-argument-body",
+        "authorization_reason": "api-key=short-secret",
+    }
+    state = InvocationAuditState(
+        request_id="0" * 32,
+        tool_name="list_accounts",
+        started_at=0.0,
+        transport="streamable-http",
+        capability_id="list_accounts",
+        capability_class="read",
+        policy_version="single-account-resource-v3",
+        **protected_values,
+    )
+
+    document = state.document()
+    encoded = json.dumps(document, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+    for field, raw_value in protected_values.items():
+        assert document[field] != raw_value
+        assert str(document[field]).startswith("sha256:")
+        assert raw_value not in encoded
