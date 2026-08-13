@@ -18,7 +18,7 @@ from typing import Any
 
 from . import __version__
 from .audit import InvocationAuditState, emit_invocation_audit
-from .authorization import AuthorizationDecision, AuthorizationPolicy
+from .authorization import AUTHORIZATION_POLICY_VERSION, AuthorizationDecision, AuthorizationPolicy
 from .config import Settings
 from .errors import ApplicationError, ErrorCode, UpstreamError
 from .manifests import TOOL_DEFINITIONS, TOOL_MANIFESTS, ToolManifest, project_manifest
@@ -27,6 +27,8 @@ from .security import InvocationContext
 Operation = Callable[..., Any | Awaitable[Any]]
 _logger = logging.getLogger(__name__)
 _CAPABILITY_TOOL = "describe_kontomierz_capabilities"
+_CAPACITY_FULL_MESSAGE = "Server invocation capacity is full"
+_SHUTDOWN_GRACE_SECONDS = 1.0
 
 
 class InvocationKernel:
@@ -40,6 +42,10 @@ class InvocationKernel:
         self._semaphore = asyncio.Semaphore(settings.max_concurrency)
         self._admission_lock = asyncio.Lock()
         self._admitted_invocations = 0
+        self._drained = asyncio.Event()
+        self._drained.set()
+        self._close_lock = asyncio.Lock()
+        self._dependency_closed = False
         self._target_locks: dict[str, asyncio.Lock] = {}
         self._readiness_lock = asyncio.Lock()
         self._readiness_value = settings.mock_data
@@ -88,19 +94,24 @@ class InvocationKernel:
     @asynccontextmanager
     async def _admission_slot(self) -> AsyncIterator[None]:
         async with self._admission_lock:
+            if self._closed:
+                raise ApplicationError(ErrorCode.DEPENDENCY_UNAVAILABLE, "Server is shutting down", retryable=True)
             if self._admitted_invocations >= self._settings.max_pending_invocations:
                 raise ApplicationError(
                     ErrorCode.RATE_LIMITED,
-                    "Server invocation capacity is full",
+                    _CAPACITY_FULL_MESSAGE,
                     retryable=True,
                     suggestion="Retry later; the operation did not start.",
                 )
             self._admitted_invocations += 1
+            self._drained.clear()
         try:
             yield
         finally:
             async with self._admission_lock:
                 self._admitted_invocations -= 1
+                if self._admitted_invocations == 0:
+                    self._drained.set()
 
     @asynccontextmanager
     async def _execution_slot(self, manifest: ToolManifest) -> AsyncIterator[None]:
@@ -230,7 +241,7 @@ class InvocationKernel:
             "profile": "authenticated-http" if self._settings.streamable_http else "local-process-principal",
             "dependency_state": dependency_state,
             "write_operations_enabled": self._settings.enable_write_operations,
-            "authorization_policy": "single-account-resource-v3",
+            "authorization_policy": AUTHORIZATION_POLICY_VERSION,
             "http_state_mode": "stateless" if self._settings.streamable_http else None,
             "http_allowed_capabilities": (
                 list(self._settings.http_allowed_capabilities) if self._settings.streamable_http else None
@@ -277,7 +288,7 @@ class InvocationKernel:
         except ApplicationError as exc:
             audit.result_category = exc.code.value
             audit.ambiguous = exc.code is ErrorCode.AMBIGUOUS_OUTCOME
-            audit.saturated = exc.code is ErrorCode.RATE_LIMITED and exc.message == "Server invocation capacity is full"
+            audit.saturated = exc.code is ErrorCode.RATE_LIMITED and exc.message == _CAPACITY_FULL_MESSAGE
             raise
         finally:
             emit_invocation_audit(audit)
@@ -361,8 +372,9 @@ class InvocationKernel:
         operation_started = False
         executed_decision = decision
         async with self._admission_slot():
+            timeout_scope = asyncio.timeout(manifest.timeout_seconds)
             try:
-                async with asyncio.timeout(manifest.timeout_seconds):
+                async with timeout_scope:
                     async with self._execution_slot(manifest):
                         revalidated = self._authorization.revalidate(decision, invocation_context, manifest, arguments)
                         self._bind_authorization_audit(audit, revalidated, phase="pre-io")
@@ -379,6 +391,8 @@ class InvocationKernel:
                             else await self._run(operation, arguments)
                         )
             except TimeoutError as exc:
+                if not timeout_scope.expired():
+                    raise
                 if operation_started and manifest.side_effects in {"write", "destructive"}:
                     raise ApplicationError(
                         ErrorCode.AMBIGUOUS_OUTCOME,
@@ -435,11 +449,24 @@ class InvocationKernel:
         audit.authorization_reason = decision.reason
 
     async def close(self) -> None:
-        if self._closed:
-            return
-        self._closed = True
-        close = getattr(self._dependency, "close", None)
-        if callable(close):
-            value = close()
-            if inspect.isawaitable(value):
-                await value
+        """Stop new admissions, drain bounded in-flight work, then close the dependency once."""
+        async with self._close_lock:
+            if self._dependency_closed:
+                return
+            async with self._admission_lock:
+                self._closed = True
+                if self._admitted_invocations == 0:
+                    self._drained.set()
+
+            longest_deadline = max((manifest.timeout_seconds for manifest in TOOL_MANIFESTS.values()), default=0.0)
+            try:
+                await asyncio.wait_for(self._drained.wait(), timeout=longest_deadline + _SHUTDOWN_GRACE_SECONDS)
+            except TimeoutError:
+                _logger.warning("Timed out draining in-flight invocations before dependency close")
+
+            close = getattr(self._dependency, "close", None)
+            if callable(close):
+                value = close()
+                if inspect.isawaitable(value):
+                    await value
+            self._dependency_closed = True
