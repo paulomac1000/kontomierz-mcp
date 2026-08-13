@@ -14,7 +14,11 @@ pytestmark = pytest.mark.sdk
 
 
 def _input_schema(tool) -> dict[str, object]:
-    return tool.input_schema
+    # MCP wire models may expose the protocol alias or the Python field name.
+    schema = getattr(tool, "inputSchema", None)
+    if schema is None:
+        schema = tool.input_schema
+    return schema
 
 
 @pytest.mark.asyncio
