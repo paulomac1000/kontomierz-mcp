@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import time
+from collections.abc import Callable
 from dataclasses import replace
 
 import pytest
@@ -34,6 +36,12 @@ def settings(**overrides):
     }
     values.update(overrides)
     return Settings(**values)
+
+
+async def _wait_until(predicate: Callable[[], bool]) -> None:
+    async with asyncio.timeout(1):
+        while not predicate():
+            await asyncio.sleep(0)
 
 
 @pytest.mark.asyncio
@@ -83,7 +91,7 @@ async def test_non_concurrent_safe_writes_are_serialized_per_target() -> None:
     first = asyncio.create_task(kernel.invoke("update_budget", {"limit": "1"}))
     await entered_first.wait()
     second = asyncio.create_task(kernel.invoke("update_budget", {"limit": "2"}))
-    await asyncio.sleep(0.03)
+    await _wait_until(lambda: kernel._admitted_invocations == 2)
     assert maximum == 1
     release.set()
     await asyncio.gather(first, second)
@@ -110,7 +118,7 @@ async def test_concurrency_limit_applies_to_running_async_operations() -> None:
         dependency=Dependency(),
     )
     tasks = [asyncio.create_task(kernel.invoke("list_accounts", {})) for _ in range(6)]
-    await asyncio.sleep(0.05)
+    await _wait_until(lambda: active == 2)
     assert maximum == 2
     release.set()
     await asyncio.gather(*tasks)
@@ -207,8 +215,32 @@ async def test_readiness_checks_and_caches_dependency() -> None:
     assert await kernel.readiness() is True
     dependency.available = False
     assert await kernel.readiness() is True
-    kernel._readiness_checked_at = 0.0
+    kernel._readiness_checked_at = time.monotonic() - 31
     assert await kernel.readiness() is False
+
+
+@pytest.mark.asyncio
+async def test_real_dependency_readiness_probes_even_when_monotonic_epoch_is_near_zero(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dependency = Dependency()
+    probe_calls = 0
+
+    async def probe() -> bool:
+        nonlocal probe_calls
+        probe_calls += 1
+        return True
+
+    dependency.probe = probe  # type: ignore[method-assign]
+    monkeypatch.setattr(time, "monotonic", lambda: 0.5)
+    kernel = InvocationKernel(
+        settings=settings(mock_data=False, api_key="secret", readiness_cache_seconds=10),
+        operations={name: (lambda: None) for name in TOOL_MANIFESTS},
+        dependency=dependency,
+    )
+    assert kernel.cached_dependency_ready is None
+    assert await kernel.readiness() is True
+    assert probe_calls == 1
 
 
 @pytest.mark.asyncio
@@ -237,7 +269,7 @@ async def test_pending_invocation_capacity_is_bounded() -> None:
     first = asyncio.create_task(kernel.invoke("list_accounts", {}))
     await entered.wait()
     second = asyncio.create_task(kernel.invoke("list_accounts", {}))
-    await asyncio.sleep(0)
+    await _wait_until(lambda: kernel._admitted_invocations == 2)
 
     with pytest.raises(ApplicationError) as captured:
         await kernel.invoke("list_accounts", {})
@@ -276,12 +308,12 @@ async def test_cached_unavailable_dependency_blocks_io() -> None:
         called = True
 
     kernel = InvocationKernel(
-        settings=settings(mock_data=False),
+        settings=settings(mock_data=False, api_key="secret"),
         operations={"list_accounts": read},
         dependency=Dependency(),
     )
     kernel._readiness_value = False
-    kernel._readiness_checked_at = 1.0
+    kernel._readiness_checked_at = time.monotonic()
     with pytest.raises(ApplicationError) as captured:
         await kernel.invoke("list_accounts", {})
     assert captured.value.code is ErrorCode.DEPENDENCY_UNAVAILABLE
