@@ -63,4 +63,4 @@ class UpstreamError(ApplicationError):
     write_outcome_ambiguous: bool = False
 
     def _constructor_args(self) -> tuple[object, ...]:
-        return (*super()._constructor_args(), self.write_outcome_ambiguous)
+        return (*ApplicationError._constructor_args(self), self.write_outcome_ambiguous)
