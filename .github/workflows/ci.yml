@@ -156,6 +156,8 @@ jobs:
             skills/ci-cd-architect/tools/check_consumer_trust_hygiene.py \
             skills/mcp-server-architect/tools/inspect_existing_project.py \
             skills/mcp-server-architect/tools/plan_existing_project.py \
+            skills/mcp-server-architect/tools/capture_mcp_contract.py \
+            skills/mcp-server-architect/tools/compare_mcp_contracts.py \
             contracts/validate_upstream_contract.py \
             contracts/validate_live_backend_test_policy.py \
             contracts/validate_trusted_executable_sources.py
@@ -265,6 +267,48 @@ jobs:
             -r requirements/dev-linux-x64-py312.lock
           python -m pip install --no-deps --only-binary=:all: --require-hashes \
             -r requirements/build-linux-x64.lock
+      - name: Resolve trusted ai-skills contract authority
+        id: artifact-trusted-ai-skills
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import re
+          from pathlib import Path
+
+          text = Path("trusted-executable-sources.lock.yaml").read_text(encoding="utf-8")
+          marker = "  - id: ai-skills-authority\n"
+          try:
+              block = text.split(marker, 1)[1]
+          except IndexError as exc:
+              raise SystemExit("ai-skills-authority is missing from trusted executable source lock") from exc
+          repository = re.search(r"^    repository: ([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)\s*$", block, re.MULTILINE)
+          revision = re.search(r"^    revision: ([0-9a-f]{40})\s*$", block, re.MULTILINE)
+          if repository is None or revision is None:
+              raise SystemExit("trusted ai-skills repository/revision is malformed")
+          print(f"repository={repository.group(1)}")
+          print(f"revision={revision.group(1)}")
+          PY
+      - name: Checkout trusted ai-skills contract authority
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          repository: ${{ steps.artifact-trusted-ai-skills.outputs.repository }}
+          ref: ${{ steps.artifact-trusted-ai-skills.outputs.revision }}
+          path: .trusted/artifact-ai-skills
+          persist-credentials: false
+      - name: Verify exact contract authority outside candidate tree
+        env:
+          TRUSTED_REVISION: ${{ steps.artifact-trusted-ai-skills.outputs.revision }}
+        run: |
+          set -euo pipefail
+          mv .trusted/artifact-ai-skills "$RUNNER_TEMP/artifact-ai-skills"
+          rmdir .trusted
+          test "$(git -C "$RUNNER_TEMP/artifact-ai-skills" rev-parse HEAD)" = "$TRUSTED_REVISION"
+          python "$RUNNER_TEMP/artifact-ai-skills/contracts/validate_trusted_executable_sources.py" \
+            trusted-executable-sources.lock.yaml \
+            --repository-root . \
+            --authority-root "ai-skills-authority=$RUNNER_TEMP/artifact-ai-skills" \
+            --require-authority
       - name: Build exact application wheel
         run: |
           set -euo pipefail
@@ -347,6 +391,24 @@ jobs:
           test "$REVISION" = "$SOURCE_SHA"
           docker run --rm --entrypoint python "kontomierz-mcp:${SOURCE_SHA}" -c \
             "import os, kontomierz_mcp; assert os.geteuid() != 0; print(kontomierz_mcp.__version__)"
+      - name: Capture public contract from exact release wheel
+        run: |
+          set -euo pipefail
+          WHEEL="$(find dist -maxdepth 1 -type f -name 'kontomierz_mcp-*.whl' -print -quit)"
+          WHEEL_NAME="$(basename "$WHEEL")"
+          WHEEL_DIGEST="sha256:$(sha256sum "$WHEEL" | awk '{print $1}')"
+          python "$RUNNER_TEMP/artifact-ai-skills/skills/mcp-server-architect/tools/capture_mcp_contract.py" \
+            --output dist/MCP_PUBLIC_CONTRACT.json \
+            --working-directory . \
+            --expected-source-revision "$SOURCE_SHA" \
+            --expected-artifact-digest "$WHEEL_DIGEST" \
+            -- \
+            .artifact-venv/bin/python scripts/mcp_contract_probe.py \
+            --executable .artifact-venv/bin/kontomierz-mcp \
+            --source-revision "$SOURCE_SHA" \
+            --artifact-identity "$WHEEL_NAME" \
+            --artifact-digest "$WHEEL_DIGEST"
+          python -m json.tool dist/MCP_PUBLIC_CONTRACT.json >/dev/null
       - name: Close release artifact set
         run: |
           set -euo pipefail
@@ -372,6 +434,7 @@ jobs:
               -name 'kontomierz_mcp-*.whl' -o \
               -name 'kontomierz-mcp-image.tar.gz' -o \
               -name 'SHA256SUMS' -o \
+              -name 'MCP_PUBLIC_CONTRACT.json' -o \
               -name 'IMAGE_METADATA.json' -o \
               -name 'BUILD_METADATA' -o \
               -name '*.lock' \
@@ -387,6 +450,7 @@ jobs:
             dist/wheelhouse/
             dist/kontomierz-mcp-image.tar.gz
             dist/SHA256SUMS
+            dist/MCP_PUBLIC_CONTRACT.json
             dist/RELEASE_SHA256SUMS
             dist/IMAGE_METADATA.json
             dist/BUILD_METADATA
