@@ -99,6 +99,14 @@ class KontomierzClient:
                 retryable=not write,
                 details=details,
             )
+        if 300 <= response.status_code < 400:
+            raise UpstreamError(
+                ErrorCode.UPSTREAM_FAILURE,
+                "Kontomierz returned an unexpected redirect",
+                retryable=False,
+                details={"status": response.status_code},
+                write_outcome_ambiguous=write,
+            )
         if response.status_code >= 500:
             raise UpstreamError(
                 ErrorCode.DEPENDENCY_UNAVAILABLE,
@@ -192,9 +200,14 @@ class KontomierzClient:
         return payload
 
     @staticmethod
-    def _created_marker() -> dict[str, bool]:
-        """Represent known create success when upstream did not identify the new resource."""
-        return {"created": True, "reconciliation_required": True}
+    def _raise_unidentified_create() -> None:
+        """Fail closed when a create succeeded but no stable new-resource identity was returned."""
+        raise UpstreamError(
+            ErrorCode.UPSTREAM_FAILURE,
+            "Kontomierz accepted the create but did not identify the new resource",
+            retryable=False,
+            write_outcome_ambiguous=True,
+        )
 
     async def get_user_accounts(self) -> list[dict[str, Any]]:
         payload = await self._request("GET", "user_accounts.json")
@@ -217,7 +230,7 @@ class KontomierzClient:
             body["user_account[user_name]"] = user_name
         payload = await self._request("POST", "user_accounts/create_wallet.json", body=body)
         if payload is None:
-            return self._created_marker()
+            self._raise_unidentified_create()
         return self._response_object(payload, "user_account", write=True)
 
     async def update_wallet(self, wallet_id: int, **fields: Any) -> dict[str, Any]:
@@ -249,7 +262,7 @@ class KontomierzClient:
         body = {f"money_transaction[{key}]": value for key, value in fields.items() if value is not None}
         payload = await self._request("POST", "money_transactions.json", body=body)
         if payload is None:
-            return self._created_marker()
+            self._raise_unidentified_create()
         return self._response_object(payload, "money_transaction", write=True)
 
     async def update_money_transaction(self, transaction_id: int, **fields: Any) -> dict[str, Any]:
@@ -314,7 +327,9 @@ class KontomierzClient:
             body["budget[month_on]"] = month_on
         payload = await self._request(method, path, body=body)
         if payload is None:
-            return {"updated": True} if method == "PUT" else self._created_marker()
+            if method == "PUT":
+                return {"updated": True}
+            self._raise_unidentified_create()
         return self._response_object(payload, "budget", write=True)
 
     async def delete_budget(self, budget_id: int) -> bool:
@@ -340,7 +355,9 @@ class KontomierzClient:
 
     async def create_schedule(self, **fields: Any) -> dict[str, Any]:
         payload = await self._schedule_write("POST", "schedules.json", fields)
-        return self._created_marker() if payload is None else payload
+        if payload is None:
+            self._raise_unidentified_create()
+        return payload
 
     async def update_schedule(self, schedule_id: int, **fields: Any) -> dict[str, Any]:
         payload = await self._schedule_write("PUT", f"schedules/{schedule_id}.json", fields)
@@ -373,7 +390,6 @@ class KontomierzClient:
     async def get_wealth_points(self, start_on: str | None = None, end_on: str | None = None) -> list[dict[str, Any]]:
         payload = await self._request("GET", "wealth_points.json", query={"start_on": start_on, "end_on": end_on})
         items = self._expect_list(payload)
-        # The upstream wraps every wealth point in a per-item "wealth_point" object.
         return [item.get("wealth_point", item) for item in items]
 
     async def get_pie_chart(self, **filters: Any) -> dict[str, Any]:
