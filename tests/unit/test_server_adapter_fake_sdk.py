@@ -126,6 +126,7 @@ class ProbeCountingDependency(MockKontomierzClient):
 
 
 def install_fake_sdk(monkeypatch: pytest.MonkeyPatch) -> None:
+    FakeMCPServer.last_instance = None
     mcp = ModuleType("mcp")
     mcp_types = ModuleType("mcp.types")
     mcp_server = ModuleType("mcp.server")
@@ -149,16 +150,19 @@ async def test_every_registered_wrapper_delegates_to_the_kernel(
     write_settings: Settings,
 ) -> None:
     install_fake_sdk(monkeypatch)
+    assert set(SMOKE_SAMPLES) == set(TOOL_DEFINITIONS)
 
     for tool_name, arguments in SMOKE_SAMPLES.items():
         kernel = build_kernel(write_settings, MockKontomierzClient())
-        server = build_server(write_settings, kernel)
-        assert set(server.tools) == set(SMOKE_SAMPLES)
-        result = await server.tools[tool_name](**arguments)
-        assert result.is_error is False
-        assert result.structured_content["_meta"]["tool_name"] == tool_name
-        assert json.loads(result.content[0].text) == result.structured_content["data"]
-        await kernel.close()
+        try:
+            server = build_server(write_settings, kernel)
+            assert tool_name in server.tools
+            result = await server.tools[tool_name](**arguments)
+            assert result.is_error is False
+            assert result.structured_content["_meta"]["tool_name"] == tool_name
+            assert json.loads(result.content[0].text) == result.structured_content["data"]
+        finally:
+            await kernel.close()
 
 
 @pytest.mark.asyncio
@@ -166,16 +170,17 @@ async def test_tool_error_is_an_explicit_stable_call_tool_result(monkeypatch: py
     install_fake_sdk(monkeypatch)
     settings = Settings(api_key="", mock_data=True, enable_write_operations=False)
     kernel = build_kernel(settings, MockKontomierzClient())
-    server = build_server(settings, kernel)
+    try:
+        server = build_server(settings, kernel)
+        result = await server.tools["create_wallet"](currency_balance="1", currency_name="PLN")
 
-    result = await server.tools["create_wallet"](currency_balance="1", currency_name="PLN")
-
-    assert result.is_error is True
-    assert result.structured_content["error"]["code"] == "AUTHORIZATION_FAILED"
-    assert result.structured_content["error"]["retryable"] is False
-    assert json.loads(result.content[0].text) == result.structured_content
-    assert "secret" not in result.content[0].text.lower()
-    await kernel.close()
+        assert result.is_error is True
+        assert result.structured_content["error"]["code"] == "AUTHORIZATION_FAILED"
+        assert result.structured_content["error"]["retryable"] is False
+        assert json.loads(result.content[0].text) == result.structured_content
+        assert "secret" not in result.content[0].text.lower()
+    finally:
+        await kernel.close()
 
 
 @pytest.mark.asyncio
