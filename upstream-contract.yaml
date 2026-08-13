@@ -84,11 +84,12 @@ observations:
     date_formats: []
     success_statuses: [200]
     response_body: empty
-    delete_semantics: Deleted budget disappears from the subsequent budget listing.
+    delete_semantics: Deleted test-owned budget disappears from the subsequent budget listing.
     credential_placement: query
     confidence: observed
     evidence:
       - tests/external/test_real_kontomierz_contract.py::test_real_budget_write_round_trip
+      - tests/external/conftest.py::live_backend_cleanup_guard
   - operation: list_scheduled_transactions
     method: GET
     endpoint: scheduled_transactions.json
@@ -223,11 +224,12 @@ observations:
     date_formats: []
     success_statuses: [200]
     response_body: empty
-    delete_semantics: Subsequent GET of the deleted transaction returns 404.
+    delete_semantics: Deleted test-owned transaction no longer appears in subsequent bounded transaction listings.
     credential_placement: query
     confidence: observed
     evidence:
       - tests/external/test_real_kontomierz_contract.py::test_real_transaction_write_round_trip
+      - tests/external/conftest.py::live_backend_cleanup_guard
   - operation: list_wealth_points
     method: GET
     endpoint: wealth_points.json
