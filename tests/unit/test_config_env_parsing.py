@@ -21,7 +21,7 @@ def test_env_file_removes_only_one_matching_surrounding_quote_pair(tmp_path: Pat
         "DOUBLE": "quoted-value",
         "SINGLE": "single-value",
         "TRAILING": 'kept"',
-        "MISMATCH": '"kept\'',
+        "MISMATCH": "\"kept'",
     }
 
 
