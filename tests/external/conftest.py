@@ -10,12 +10,55 @@ from tests.external import test_real_kontomierz_contract as live
 
 _LIVE_MODULE = "test_real_kontomierz_contract.py"
 _DELETE_OK = {200, 404}
+_DISPOSABLE_WALLET_ENV = "KONTOMIERZ_DISPOSABLE_WALLET_ID"
+_EXCLUSIVE_TARGET_ENV = "KONTOMIERZ_EXCLUSIVE_DISPOSABLE_ACCOUNT"
 
 
 def _live_opted_in() -> bool:
     return (
         os.environ.get("KONTOMIERZ_EXTERNAL_TESTS") == "1" and os.environ.get("KONTOMIERZ_ALLOW_REAL_MUTATIONS") == "1"
     )
+
+
+def _required_disposable_wallet_id() -> int:
+    if os.environ.get(_EXCLUSIVE_TARGET_ENV) != "1":
+        pytest.fail(
+            f"Live mutations require {_EXCLUSIVE_TARGET_ENV}=1 to assert that no unrelated actor uses the disposable account"
+        )
+    raw = os.environ.get(_DISPOSABLE_WALLET_ENV, "").strip()
+    try:
+        wallet_id = int(raw)
+    except ValueError:
+        pytest.fail(f"{_DISPOSABLE_WALLET_ENV} must be a positive integer from the disposable account")
+    if wallet_id <= 0:
+        pytest.fail(f"{_DISPOSABLE_WALLET_ENV} must be a positive integer from the disposable account")
+    return wallet_id
+
+
+def _verify_disposable_target(client: httpx.Client, key: str) -> int:
+    """Bind the credential to an expected wallet before any live cleanup or mutation."""
+    expected_wallet_id = _required_disposable_wallet_id()
+    response = live._get(client, key, "user_accounts.json")
+    response.raise_for_status()
+    payload = response.json()
+    if not isinstance(payload, list):
+        pytest.fail("Disposable-target verification returned an unexpected user_accounts response")
+    wallet_ids: set[int] = set()
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        candidate = item.get("user_account", item)
+        if not isinstance(candidate, dict):
+            continue
+        value = candidate.get("id")
+        if type(value) is int and value > 0:
+            wallet_ids.add(value)
+    if expected_wallet_id not in wallet_ids:
+        pytest.fail(
+            f"Authenticated Kontomierz account does not contain expected disposable wallet {expected_wallet_id}; "
+            "refusing live mutations"
+        )
+    return expected_wallet_id
 
 
 def _budget_ids(client: httpx.Client, key: str) -> set[int]:
@@ -154,7 +197,15 @@ def _cleanup_marked_resources(client: httpx.Client, key: str) -> list[str]:
     return issues
 
 
-def _cleanup_new_budgets(client: httpx.Client, key: str, baseline: set[int]) -> list[str]:
+def _cleanup_new_budgets(
+    client: httpx.Client,
+    key: str,
+    baseline: set[int],
+    *,
+    verified_disposable_wallet_id: int | None,
+) -> list[str]:
+    if verified_disposable_wallet_id is None or verified_disposable_wallet_id <= 0:
+        return ["budget cleanup refused: exclusive disposable target was not verified"]
     issues: list[str] = []
     try:
         created = _budget_ids(client, key) - baseline
@@ -172,13 +223,14 @@ def _cleanup_new_budgets(client: httpx.Client, key: str, baseline: set[int]) -> 
 
 @pytest.fixture(autouse=True)
 def live_backend_cleanup_guard(request: pytest.FixtureRequest) -> Iterator[None]:
-    """Pre-clean the unique namespace and verify post-test cleanup for deliberate live runs."""
+    """Pre-clean a verified exclusive disposable account and confirm post-test cleanup."""
     if request.node.path.name != _LIVE_MODULE or not _live_opted_in():
         yield
         return
 
     key = live._load_api_key()
     with live._client() as client:
+        verified_wallet_id = _verify_disposable_target(client, key)
         setup_issues = _cleanup_marked_resources(client, key)
         if setup_issues:
             pytest.fail("Live-backend pre-clean could not be confirmed: " + "; ".join(setup_issues))
@@ -192,6 +244,13 @@ def live_backend_cleanup_guard(request: pytest.FixtureRequest) -> Iterator[None]
     finally:
         with live._client() as client:
             cleanup_issues = _cleanup_marked_resources(client, key)
-            cleanup_issues.extend(_cleanup_new_budgets(client, key, budget_baseline))
+            cleanup_issues.extend(
+                _cleanup_new_budgets(
+                    client,
+                    key,
+                    budget_baseline,
+                    verified_disposable_wallet_id=verified_wallet_id,
+                )
+            )
         if cleanup_issues:
             pytest.fail("Live-backend cleanup could not be confirmed: " + "; ".join(cleanup_issues))
