@@ -45,7 +45,10 @@ def load_env_file(path: Path, environ: dict[str, str] | None = None) -> None:
         key = key.strip()
         if not key or any(character.isspace() for character in key):
             raise ConfigurationError(f"{path}:{number}: invalid environment key")
-        target.setdefault(key, value.strip().strip('"').strip("'"))
+        parsed_value = value.strip()
+        if len(parsed_value) >= 2 and parsed_value[0] == parsed_value[-1] and parsed_value[0] in {'"', "'"}:
+            parsed_value = parsed_value[1:-1]
+        target.setdefault(key, parsed_value)
 
 
 def _bool(env: Mapping[str, str], name: str, default: bool = False) -> bool:
