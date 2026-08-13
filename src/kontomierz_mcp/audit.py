@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import sys
@@ -9,10 +10,48 @@ import time
 from dataclasses import asdict, dataclass
 from typing import TextIO
 
+from .errors import ErrorCode
+
 _AUDIT_LOGGER_NAME = "kontomierz_mcp.audit"
 _AUDIT_FAILURE_POLICY = "fail-open-result-preserving"
 _HANDLER_MARKER = "_kontomierz_audit_handler"
+_MAX_AUDIT_FIELD_BYTES = 256
+_MAX_AUDIT_EVENT_BYTES = 8192
 _logger = logging.getLogger(_AUDIT_LOGGER_NAME)
+
+_TRANSPORTS = frozenset({"unresolved", "stdio", "streamable-http"})
+_CAPABILITY_CLASSES = frozenset({"unresolved", "read", "write", "destructive"})
+_AUTHORIZATION_DECISIONS = frozenset(
+    {
+        "not-evaluated",
+        "denied",
+        "initial:allowed",
+        "initial:denied",
+        "pre-io:allowed",
+        "pre-io:denied",
+    }
+)
+_OPERATOR_GATE_DECISIONS = frozenset({"not-applicable", "allowed", "denied"})
+_DEPENDENCY_STATES = frozenset({"unknown", "ready", "unavailable"})
+_RESULT_CATEGORIES = frozenset({"SUCCESS", *(item.value for item in ErrorCode)})
+
+
+def _bounded_text(value: object, *, fallback: str = "invalid") -> str:
+    """Return bounded text, replacing oversized/unexpected values with a stable digest."""
+    if not isinstance(value, str):
+        return fallback
+    encoded = value.encode("utf-8", errors="replace")
+    if len(encoded) <= _MAX_AUDIT_FIELD_BYTES:
+        return value
+    return f"sha256:{hashlib.sha256(encoded).hexdigest()}"
+
+
+def _category(value: object, allowed: frozenset[str], fallback: str) -> str:
+    return value if isinstance(value, str) and value in allowed else fallback
+
+
+def _canonical_bytes(document: dict[str, object]) -> bytes:
+    return json.dumps(document, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
 
 def _fallback_audit_failure() -> None:
@@ -58,12 +97,53 @@ class InvocationAuditState:
     ambiguous: bool = False
 
     def document(self) -> dict[str, object]:
-        document = asdict(self)
-        document.pop("started_at", None)
-        document["duration_ms"] = int((time.monotonic() - self.started_at) * 1000)
-        document["event"] = "mcp_tool_invocation"
-        document["audit_failure_policy"] = _AUDIT_FAILURE_POLICY
-        return document
+        """Return a schema-bounded event even if state was accidentally populated with unsafe values."""
+        raw = asdict(self)
+        raw.pop("started_at", None)
+        document: dict[str, object] = {
+            "request_id": _bounded_text(raw["request_id"]),
+            "tool_name": _bounded_text(raw["tool_name"]),
+            "principal": _bounded_text(raw["principal"]),
+            "transport": _category(raw["transport"], _TRANSPORTS, "unresolved"),
+            "authenticated": bool(raw["authenticated"]),
+            "capability_id": _bounded_text(raw["capability_id"]),
+            "capability_class": _category(raw["capability_class"], _CAPABILITY_CLASSES, "unresolved"),
+            "target_identity": _bounded_text(raw["target_identity"]),
+            "resource_identity": _bounded_text(raw["resource_identity"]),
+            "argument_digest": _bounded_text(raw["argument_digest"]),
+            "policy_version": _bounded_text(raw["policy_version"]),
+            "authorization_decision": _category(
+                raw["authorization_decision"], _AUTHORIZATION_DECISIONS, "not-evaluated"
+            ),
+            "authorization_reason": _bounded_text(raw["authorization_reason"]),
+            "operator_gate_decision": _category(
+                raw["operator_gate_decision"], _OPERATOR_GATE_DECISIONS, "not-applicable"
+            ),
+            "dependency_state": _category(raw["dependency_state"], _DEPENDENCY_STATES, "unknown"),
+            "result_category": _category(raw["result_category"], _RESULT_CATEGORIES, "INTERNAL_ERROR"),
+            "cancelled": bool(raw["cancelled"]),
+            "saturated": bool(raw["saturated"]),
+            "ambiguous": bool(raw["ambiguous"]),
+            "duration_ms": max(0, int((time.monotonic() - self.started_at) * 1000)),
+            "event": "mcp_tool_invocation",
+            "audit_failure_policy": _AUDIT_FAILURE_POLICY,
+        }
+        encoded = _canonical_bytes(document)
+        if len(encoded) <= _MAX_AUDIT_EVENT_BYTES:
+            return document
+
+        return {
+            "event": "mcp_tool_invocation",
+            "audit_failure_policy": _AUDIT_FAILURE_POLICY,
+            "request_id": _bounded_text(document["request_id"]),
+            "tool_name": _bounded_text(document["tool_name"]),
+            "result_category": document["result_category"],
+            "duration_ms": document["duration_ms"],
+            "cancelled": document["cancelled"],
+            "saturated": document["saturated"],
+            "ambiguous": document["ambiguous"],
+            "event_overflow_sha256": f"sha256:{hashlib.sha256(encoded).hexdigest()}",
+        }
 
 
 def configure_audit_sink(*, stream: TextIO | None = None, replace: bool = False) -> logging.Logger:
@@ -87,7 +167,7 @@ def configure_audit_sink(*, stream: TextIO | None = None, replace: bool = False)
 
 def emit_invocation_audit(state: InvocationAuditState) -> None:
     """Emit a stable JSON audit line without credentials or protected response bodies."""
-    payload = json.dumps(state.document(), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    payload = _canonical_bytes(state.document()).decode("utf-8")
     try:
         configure_audit_sink().info(payload)
     except Exception:
