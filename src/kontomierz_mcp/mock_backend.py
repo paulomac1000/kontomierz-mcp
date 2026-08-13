@@ -7,7 +7,7 @@ against a live account (see docs/upstream-api.md).
 from __future__ import annotations
 
 from copy import deepcopy
-from datetime import date
+from datetime import date, datetime
 from typing import Any
 
 from .errors import ApplicationError, ErrorCode
@@ -75,6 +75,7 @@ class MockKontomierzClient:
                 "limit": "600.00",
                 "amount": "0.0",
                 "category_id": 1,
+                "month_on": "01-08-2026",
             }
         ]
         self.schedules = [
@@ -109,6 +110,29 @@ class MockKontomierzClient:
             if value.get("id") == identifier:
                 return value
         raise ApplicationError(ErrorCode.RESOURCE_NOT_FOUND, f"Resource {identifier} was not found")
+
+    @staticmethod
+    def _positive_page(value: Any, name: str, *, allow_zero: bool = False) -> int | None:
+        if allow_zero and value in {None, 0, "0"}:
+            return None
+        if isinstance(value, bool):
+            raise ApplicationError(ErrorCode.INVALID_PARAMETER, f"{name} must be a positive integer")
+        try:
+            result = int(value)
+        except (TypeError, ValueError) as exc:
+            raise ApplicationError(ErrorCode.INVALID_PARAMETER, f"{name} must be a positive integer") from exc
+        if result <= 0:
+            raise ApplicationError(ErrorCode.INVALID_PARAMETER, f"{name} must be a positive integer")
+        return result
+
+    @staticmethod
+    def _upstream_date(value: str | None) -> date | None:
+        if not value:
+            return None
+        try:
+            return datetime.strptime(value, "%d-%m-%Y").date()
+        except ValueError as exc:
+            raise ApplicationError(ErrorCode.INVALID_PARAMETER, "mock upstream date must be DD-MM-YYYY") from exc
 
     def get_user_accounts(self) -> list[dict[str, Any]]:
         return [deepcopy(account) for account in self.accounts]
@@ -186,20 +210,21 @@ class MockKontomierzClient:
         return True
 
     def get_categories(self, direction: str) -> list[dict[str, Any]]:
+        spending = direction == "withdrawal"
         return [
             {
                 "id": 1,
-                "name": "Mock group",
+                "name": f"Mock {direction} group",
                 "position": 1,
                 "color": "4169E1",
                 "categories": [
                     {
                         "category_group_id": 1,
-                        "id": 11,
-                        "name": "Mock category",
+                        "id": 11 if spending else 12,
+                        "name": f"Mock {direction} category",
                         "position": 1,
                         "color": "5175e3",
-                        "spending": True,
+                        "spending": spending,
                     }
                 ],
             }
@@ -216,7 +241,10 @@ class MockKontomierzClient:
         ]
 
     def get_budgets(self, month_on: str | None = None) -> list[dict[str, Any]]:
-        return deepcopy(self.budgets)
+        values = self.budgets
+        if month_on:
+            values = [value for value in values if value.get("month_on") == month_on]
+        return deepcopy(values)
 
     def create_budget(
         self,
@@ -256,11 +284,12 @@ class MockKontomierzClient:
     def get_scheduled_transactions(self, **filters: Any) -> list[dict[str, Any]]:
         paid = filters.get("schedule_group_name") == "paid"
         values = [deepcopy(item) for item in self.schedules if bool(item.get("paid")) is paid]
-        page_number = int(filters.get("page", 1))
-        per_page = filters.get("per_page")
-        if per_page:
-            start = (page_number - 1) * int(per_page)
-            values = values[start : start + int(per_page)]
+        page_number = self._positive_page(filters.get("page", 1), "page")
+        assert page_number is not None
+        per_page = self._positive_page(filters.get("per_page"), "per_page", allow_zero=True)
+        if per_page is not None:
+            start = (page_number - 1) * per_page
+            values = values[start : start + per_page]
         return [
             {
                 "schedule_id": item["id"],
@@ -313,10 +342,15 @@ class MockKontomierzClient:
         return True
 
     def get_wealth_points(self, start_on: str | None = None, end_on: str | None = None) -> list[dict[str, Any]]:
+        point_date = date(2026, 8, 1)
+        start = self._upstream_date(start_on)
+        end = self._upstream_date(end_on)
+        if (start is not None and point_date < start) or (end is not None and point_date > end):
+            return []
         return [
             {
                 "id": 1,
-                "date_on": date(2026, 8, 1).isoformat(),
+                "date_on": point_date.isoformat(),
                 "amount": "50000.00",
                 "notes": None,
             }
