@@ -21,9 +21,14 @@ All notable changes to kontomierz-mcp are recorded here.
 ### Fixed
 
 - Write bodies use `application/x-www-form-urlencoded`, matching the live Kontomierz API contract verified on 2026-08-08; known-broken JSON write mode is rejected for the real backend.
-- Plain `pytest` excludes `external` tests by default. Live-account evidence additionally requires both `KONTOMIERZ_EXTERNAL_TESTS=1` and `KONTOMIERZ_ALLOW_REAL_MUTATIONS=1` before credential access or mutation.
-- Live cleanup traverses paid and unpaid schedule groups, reconciles the unique test namespace and budget snapshot, verifies deletion, and fails instead of swallowing unconfirmed cleanup.
-- Empty-body create success never guesses a stable ID from non-unique descriptions/categories and returns a reconciliation-required marker.
+- Plain `pytest` excludes `external` tests by default. Live-account mutation evidence requires both explicit mutation opt-ins plus `KONTOMIERZ_EXCLUSIVE_DISPOSABLE_ACCOUNT=1` and an expected `KONTOMIERZ_DISPOSABLE_WALLET_ID` that is verified against the authenticated account before cleanup or mutation.
+- Live cleanup traverses paid and unpaid schedule groups, reconciles the unique test namespace and budget snapshot only inside the verified exclusive disposable account, verifies deletion, and fails instead of swallowing unconfirmed cleanup.
+- Empty-body create success never guesses a stable ID from non-unique descriptions/categories and is surfaced as a non-retryable ambiguous outcome that requires reconciliation.
+- Upstream redirects are rejected explicitly; redirects observed after a mutation request are treated as potentially ambiguous rather than successful.
+- Readiness uses an explicit never-checked sentinel rather than a numeric monotonic-time sentinel, so a process started near a monotonic epoch cannot cache a false initial state.
+- Audit events enforce closed categorical values, 256-byte free-form field bounds, and a hard 8 KiB serialized-event ceiling.
+- Decimal inputs are bounded before fixed-point formatting so scientific notation cannot expand into an unbounded request value.
+- HTTP application lifespan owns and closes the shared kernel exactly once.
 - Wealth points are unwrapped from their verified per-item `{"wealth_point": {...}}` upstream shape.
 - Restored full schedule `repeat`/`holidays` descriptions and locked them with regression tests.
 - Streamable HTTP smoke allows slow startup without weakening its bounded timeout.
