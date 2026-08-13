@@ -86,7 +86,7 @@ def test_final_http_app_rejects_bad_host_origin_and_oversized_body_before_kernel
         assert kernel.invoke_calls == 0
 
 
-def test_final_http_app_rejects_missing_or_duplicate_bearer_before_kernel_io() -> None:
+def test_final_http_app_rejects_missing_wrong_or_duplicate_bearer_before_kernel_io() -> None:
     kernel = SpyKernel()
     app = create_http_app(settings(), kernel=kernel)  # type: ignore[arg-type]
 
@@ -97,6 +97,18 @@ def test_final_http_app_rejects_missing_or_duplicate_bearer_before_kernel_io() -
             content=b"{}",
         )
         assert missing.status_code == 401
+        assert kernel.invoke_calls == 0
+
+        wrong = client.post(
+            "/mcp",
+            headers={
+                "authorization": f"Bearer {'c' * 32}",
+                "content-type": "application/json",
+                "accept": "application/json",
+            },
+            content=b"{}",
+        )
+        assert wrong.status_code == 401
         assert kernel.invoke_calls == 0
 
         duplicate = client.post(
@@ -124,6 +136,10 @@ def test_live_is_public_but_ready_authenticates_before_dependency_probe() -> Non
 
         missing = client.get("/health/ready")
         assert missing.status_code == 401
+        assert kernel.readiness_calls == 0
+
+        wrong = client.get("/health/ready", headers={"authorization": f"Bearer {'c' * 32}"})
+        assert wrong.status_code == 401
         assert kernel.readiness_calls == 0
 
         ready = client.get("/health/ready", headers={"authorization": f"Bearer {TOKEN}"})
