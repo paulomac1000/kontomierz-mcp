@@ -9,6 +9,7 @@ def test_protocol_error_document_is_stable_and_safe() -> None:
             "The write may have completed",
             retryable=False,
             suggestion="Reconcile resource state before any retry.",
+            details={"reconciliation_required": True},
         )
     )
     assert document == {
@@ -17,5 +18,6 @@ def test_protocol_error_document_is_stable_and_safe() -> None:
             "message": "The write may have completed",
             "retryable": False,
             "suggestion": "Reconcile resource state before any retry.",
+            "details": {"reconciliation_required": True},
         }
     }
