@@ -117,6 +117,16 @@ async def test_public_text_and_money_inputs_have_utf8_byte_bounds(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("amount", ["1E+999999999", "1E+20", "0.000000001"])
+async def test_money_rejects_values_that_expand_beyond_decimal_bounds(operations, amount: str) -> None:
+    ops, _ = operations
+    with pytest.raises(ApplicationError) as captured:
+        await ops["create_budget"](limit=amount, category_id=1)
+    assert captured.value.code is ErrorCode.INVALID_PARAMETER
+    assert captured.value.message == "limit must have at most 20 digits and 8 decimal places"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("balance", ["0", "-100.25"])
 async def test_wallet_balance_allows_zero_and_debt(operations, balance: str) -> None:
     ops, _ = operations
