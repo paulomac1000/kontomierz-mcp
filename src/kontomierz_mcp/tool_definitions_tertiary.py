@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from .manifest_core import (
-    _LOCAL_RETRY,
-    _LOCAL_TARGET,
+    LOCAL_RETRY,
+    LOCAL_TARGET,
     ClaimEvidence,
     ToolDefinition,
     manifest,
@@ -118,7 +118,7 @@ TERTIARY_TOOL_DEFINITIONS: dict[str, ToolDefinition] = {
             idempotent=True,
             idempotency_mechanism="natural",
             retryable=False,
-            retry_conditions=_LOCAL_RETRY,
+            retry_conditions=LOCAL_RETRY,
             concurrent_safe=True,
             concurrency_scope="process-catalog",
             timeout_ms=5_000,
@@ -139,7 +139,7 @@ TERTIARY_TOOL_DEFINITIONS: dict[str, ToolDefinition] = {
                 ),
                 reversibility="Capability discovery has no application side effect to compensate.",
             ),
-            target_binding=_LOCAL_TARGET,
+            target_binding=LOCAL_TARGET,
             target_scope="kontomierz-server",
         ),
         "Describe supported and active capabilities without contacting the upstream service.",
