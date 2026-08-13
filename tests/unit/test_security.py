@@ -157,16 +157,13 @@ async def test_bearer_middleware_default_protects_every_non_public_path() -> Non
 
 
 @pytest.mark.asyncio
-async def test_bearer_middleware_passes_unlisted_paths_to_router_without_auth() -> None:
+async def test_bearer_middleware_rejects_unlisted_paths_before_sdk_app() -> None:
     entered = False
 
     async def app(scope: dict[str, Any], receive: Any, send: Any) -> None:
-        del receive
+        del scope, receive, send
         nonlocal entered
         entered = True
-        assert scope["path"] == "/no/such/route"
-        await send({"type": "http.response.start", "status": 404, "headers": []})
-        await send({"type": "http.response.body", "body": b""})
 
     middleware = BearerPrincipalMiddleware(app, http_settings(), protected_paths=frozenset({"/mcp", "/health/ready"}))
 
@@ -180,7 +177,8 @@ async def test_bearer_middleware_passes_unlisted_paths_to_router_without_auth() 
 
     await middleware({"type": "http", "path": "/no/such/route", "headers": []}, receive, send)
     assert messages[0]["status"] == 404
-    assert entered is True
+    assert messages[0]["headers"] == [(b"content-type", b"application/json"), (b"cache-control", b"no-store")]
+    assert entered is False
 
 
 @pytest.mark.asyncio
