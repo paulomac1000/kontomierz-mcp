@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from .config import Settings
+from .errors import ApplicationError, ErrorCode
 from .manifest_types import ToolManifest
 from .security import InvocationContext
 
@@ -90,13 +91,13 @@ class AuthorizationPolicy:
 
     @staticmethod
     def resource_identity(manifest: ToolManifest, arguments: dict[str, Any]) -> str:
-        """Resolve the primary resource or collection governed by one capability invocation."""
+        """Resolve the exact governed resource before authorization can succeed."""
         resource_kind, id_field = _RESOURCE_BINDINGS.get(manifest.name, ("capability", None))
         if id_field is not None:
             raw_id = arguments.get(id_field)
-            if type(raw_id) is int and raw_id > 0:
-                return f"{resource_kind}:{raw_id}"
-            return f"{resource_kind}:unresolved"
+            if type(raw_id) is not int or raw_id <= 0:
+                raise ApplicationError(ErrorCode.INVALID_PARAMETER, f"{id_field} must be a positive integer")
+            return f"{resource_kind}:{raw_id}"
         if manifest.name == "describe_kontomierz_capabilities":
             return "server:catalog"
         if manifest.name == "create_transaction":
