@@ -43,7 +43,7 @@ class InvocationKernel:
         self._target_locks: dict[str, asyncio.Lock] = {}
         self._readiness_lock = asyncio.Lock()
         self._readiness_value = settings.mock_data
-        self._readiness_checked_at = time.monotonic() if settings.mock_data else 0.0
+        self._readiness_checked_at: float | None = time.monotonic() if settings.mock_data else None
         self._closed = False
 
     @property
@@ -52,7 +52,7 @@ class InvocationKernel:
 
     @property
     def cached_dependency_ready(self) -> bool | None:
-        if self._readiness_checked_at == 0:
+        if self._readiness_checked_at is None:
             return None
         return self._readiness_value
 
@@ -60,11 +60,13 @@ class InvocationKernel:
         if not self.structurally_ready:
             return False
         now = time.monotonic()
-        if now - self._readiness_checked_at < self._settings.readiness_cache_seconds:
+        checked_at = self._readiness_checked_at
+        if checked_at is not None and now - checked_at < self._settings.readiness_cache_seconds:
             return self._readiness_value
         async with self._readiness_lock:
             now = time.monotonic()
-            if now - self._readiness_checked_at < self._settings.readiness_cache_seconds:
+            checked_at = self._readiness_checked_at
+            if checked_at is not None and now - checked_at < self._settings.readiness_cache_seconds:
                 return self._readiness_value
             probe = getattr(self._dependency, "probe", None)
             if not callable(probe):
