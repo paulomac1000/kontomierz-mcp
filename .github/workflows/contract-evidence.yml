@@ -1,0 +1,125 @@
+# ai-skills-policy-profile: trusted-ci
+name: MCP Contract Evidence
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: contract-evidence-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
+jobs:
+  candidate-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v6
+        with:
+          python-version: "3.12"
+      - name: Install hash-locked evidence environment
+        run: |
+          set -euo pipefail
+          python -m pip install --no-deps --only-binary=:all: --require-hashes \
+            -r requirements/dev-linux-x64-py312.lock
+          python -m pip install --no-deps --only-binary=:all: --require-hashes \
+            -r requirements/build-linux-x64.lock
+      - name: Resolve trusted ai-skills coordinates
+        id: trusted-ai-skills
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import re
+          from pathlib import Path
+
+          text = Path("trusted-executable-sources.lock.yaml").read_text(encoding="utf-8")
+          marker = "  - id: ai-skills-authority\n"
+          try:
+              block = text.split(marker, 1)[1]
+          except IndexError as exc:
+              raise SystemExit("ai-skills-authority is missing from trusted executable source lock") from exc
+          repository = re.search(r"^    repository: ([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)\s*$", block, re.MULTILINE)
+          revision = re.search(r"^    revision: ([0-9a-f]{40})\s*$", block, re.MULTILINE)
+          if repository is None or revision is None:
+              raise SystemExit("trusted ai-skills repository/revision is malformed")
+          print(f"repository={repository.group(1)}")
+          print(f"revision={revision.group(1)}")
+          PY
+      - name: Checkout trusted ai-skills contract authority
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          repository: ${{ steps.trusted-ai-skills.outputs.repository }}
+          ref: ${{ steps.trusted-ai-skills.outputs.revision }}
+          path: .trusted/ai-skills
+          persist-credentials: false
+      - name: Move and verify trusted authority
+        env:
+          TRUSTED_REVISION: ${{ steps.trusted-ai-skills.outputs.revision }}
+        run: |
+          set -euo pipefail
+          mv .trusted/ai-skills "$RUNNER_TEMP/ai-skills"
+          rmdir .trusted
+          test "$(git -C "$RUNNER_TEMP/ai-skills" rev-parse HEAD)" = "$TRUSTED_REVISION"
+          python "$RUNNER_TEMP/ai-skills/contracts/validate_trusted_executable_sources.py" \
+            trusted-executable-sources.lock.yaml \
+            --repository-root . \
+            --authority-root "ai-skills-authority=$RUNNER_TEMP/ai-skills" \
+            --require-authority
+      - name: Build and install exact candidate wheel
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          rm -rf dist build src/*.egg-info .contract-venv
+          python -m pip wheel --no-deps --no-build-isolation . --wheel-dir dist
+          test "$(find dist -maxdepth 1 -type f -name 'kontomierz_mcp-*.whl' | wc -l)" -eq 1
+          mkdir -p dist/wheelhouse
+          python -m pip download \
+            --no-deps --only-binary=:all: --require-hashes \
+            --dest dist/wheelhouse \
+            -r requirements/runtime-linux-x64-py312.lock
+          python -m venv .contract-venv
+          .contract-venv/bin/python -m pip install \
+            --no-index --find-links dist/wheelhouse --no-deps --only-binary=:all: --require-hashes \
+            -r requirements/runtime-linux-x64-py312.lock
+          .contract-venv/bin/python -m pip install --no-index --no-deps dist/kontomierz_mcp-*.whl
+          .contract-venv/bin/python -m pip check
+      - name: Capture exact candidate public contract with trusted authority
+        run: |
+          set -euo pipefail
+          WHEEL="$(find dist -maxdepth 1 -type f -name 'kontomierz_mcp-*.whl' -print -quit)"
+          WHEEL_NAME="$(basename "$WHEEL")"
+          WHEEL_DIGEST="sha256:$(sha256sum "$WHEEL" | awk '{print $1}')"
+          python "$RUNNER_TEMP/ai-skills/skills/mcp-server-architect/tools/capture_mcp_contract.py" \
+            --output dist/MCP_PUBLIC_CONTRACT.json \
+            --working-directory . \
+            --expected-source-revision "$CANDIDATE_SHA" \
+            --expected-artifact-digest "$WHEEL_DIGEST" \
+            -- \
+            .contract-venv/bin/python scripts/mcp_contract_probe.py \
+            --executable .contract-venv/bin/kontomierz-mcp \
+            --source-revision "$CANDIDATE_SHA" \
+            --artifact-identity "$WHEEL_NAME" \
+            --artifact-digest "$WHEEL_DIGEST"
+          python -m json.tool dist/MCP_PUBLIC_CONTRACT.json >/dev/null
+      - name: Upload candidate public-contract evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: mcp-public-contract-${{ env.CANDIDATE_SHA }}
+          path: dist/MCP_PUBLIC_CONTRACT.json
+          if-no-files-found: error
+          retention-days: 30
