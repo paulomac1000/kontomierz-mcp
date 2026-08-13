@@ -19,12 +19,13 @@ def build_operations(client: Any, settings: Settings) -> dict[str, Operation]:
     del settings  # Policy consumes the immutable Settings snapshot in the kernel, not domain dispatch.
 
     async def dispatch(name: str, arguments: dict[str, Any]) -> Any:
-        try:
-            if name in PRIMARY_NAMES:
-                return await dispatch_primary(name, arguments, client)
-            return await dispatch_secondary(name, arguments, client)
-        except KeyError as exc:
-            raise ApplicationError(ErrorCode.RESOURCE_NOT_FOUND, f"Unknown tool: {name}") from exc
+        if name in PRIMARY_NAMES:
+            dispatcher = dispatch_primary
+        elif name in TOOL_DEFINITIONS:
+            dispatcher = dispatch_secondary
+        else:
+            raise ApplicationError(ErrorCode.RESOURCE_NOT_FOUND, f"Unknown tool: {name}")
+        return await dispatcher(name, arguments, client)
 
     def bind(name: str) -> Operation:
         definition = TOOL_DEFINITIONS[name]
