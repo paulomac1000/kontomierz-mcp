@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, NoReturn
 
 import httpx
 
@@ -200,7 +200,7 @@ class KontomierzClient:
         return payload
 
     @staticmethod
-    def _raise_unidentified_create() -> None:
+    def _raise_unidentified_create() -> NoReturn:
         """Fail closed when a create succeeded but no stable new-resource identity was returned."""
         raise UpstreamError(
             ErrorCode.UPSTREAM_FAILURE,
