@@ -23,7 +23,7 @@ class ErrorCode(StrEnum):
     INTERNAL_ERROR = "INTERNAL_ERROR"
 
 
-@dataclass(slots=True)
+@dataclass(slots=True, eq=False)
 class ApplicationError(Exception):
     """A bounded error that may be exposed to an MCP client."""
 
@@ -32,6 +32,13 @@ class ApplicationError(Exception):
     retryable: bool = False
     suggestion: str | None = None
     details: dict[str, Any] | None = None
+
+    def _constructor_args(self) -> tuple[object, ...]:
+        return (self.code, self.message, self.retryable, self.suggestion, self.details)
+
+    def __reduce__(self) -> tuple[object, tuple[object, ...]]:
+        """Preserve every constructor field across copy and pickle boundaries."""
+        return (type(self), self._constructor_args())
 
     def as_dict(self) -> dict[str, Any]:
         result: dict[str, Any] = {
@@ -49,8 +56,11 @@ class ApplicationError(Exception):
         return json.dumps(self.as_dict(), ensure_ascii=False, separators=(",", ":"))
 
 
-@dataclass(slots=True)
+@dataclass(slots=True, eq=False)
 class UpstreamError(ApplicationError):
     """A dependency failure with an explicit write-outcome classification."""
 
     write_outcome_ambiguous: bool = False
+
+    def _constructor_args(self) -> tuple[object, ...]:
+        return (*super()._constructor_args(), self.write_outcome_ambiguous)
