@@ -27,6 +27,9 @@ from .manifest_types import (
     ToolParameter,
 )
 
+LOCAL_RETRY = _LOCAL_RETRY
+LOCAL_TARGET = _LOCAL_TARGET
+
 __all__ = [
     "ActiveState",
     "ClaimEvidence",
@@ -36,6 +39,8 @@ __all__ = [
     "IdempotencyMechanism",
     "Impact",
     "Latency",
+    "LOCAL_RETRY",
+    "LOCAL_TARGET",
     "RetryConditions",
     "Risk",
     "SideEffects",
@@ -43,8 +48,6 @@ __all__ = [
     "ToolDefinition",
     "ToolManifest",
     "ToolParameter",
-    "_LOCAL_RETRY",
-    "_LOCAL_TARGET",
     "manifest",
     "p",
     "project_manifest",
