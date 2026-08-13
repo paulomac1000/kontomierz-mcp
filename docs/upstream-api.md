@@ -11,7 +11,7 @@ verification: Run the explicitly opted-in external evidence suite against a disp
 
 ## Verified contract (live-account evidence, 2026-08-08)
 
-The following was proven against a live account (`https://secure.kontomierz.pl/k4`) with read probes and minimal, cleaned-up write round trips. The evidence lives in `tests/external/test_real_kontomierz_contract.py`. That suite is excluded by default and requires both `KONTOMIERZ_EXTERNAL_TESTS=1` and `KONTOMIERZ_ALLOW_REAL_MUTATIONS=1` before it reads credentials or mutates the real service.
+The following was proven against a live account (`https://secure.kontomierz.pl/k4`) with read probes and minimal, cleaned-up write round trips. The executable evidence lives in `tests/external/test_real_kontomierz_contract.py` and its autouse cleanup guard in `tests/external/conftest.py`; endpoint behavior that is only retained as a recorded historical observation is marked `confidence: recorded` in `upstream-contract.yaml`. The live suite is excluded by default and requires both `KONTOMIERZ_EXTERNAL_TESTS=1` and `KONTOMIERZ_ALLOW_REAL_MUTATIONS=1` before it reads credentials or mutates the real service.
 
 ### Authentication
 
@@ -35,9 +35,9 @@ The adapter streams successful JSON responses and caps the decoded body at 4 MiB
 |---|---|---|
 | `currencies.json` | GET | `{"currencies": [{id, name, full_name, importance}]}` |
 | `user_accounts.json` | GET | list of `{"user_account": {...}}` with `balance`/`currency_balance` as decimal strings |
-| `money_transactions.json` | GET | JSON list; honors `page`/`per_page` |
-| `money_transactions.json` | POST | form body `money_transaction[...]`; 201 with the created object; deleted records return 404 afterwards |
-| `money_transactions/{id}.json` | GET/PUT/DELETE | 200/200/200 |
+| `money_transactions.json` | GET | JSON list; accepts `page`/`per_page` parameters; termination with populated transaction data remains unverified |
+| `money_transactions.json` | POST | form body `money_transaction[...]`; 201 with the created object |
+| `money_transactions/{id}.json` | GET/PUT/DELETE | GET/PUT status behavior is retained as recorded upstream evidence; the current live cleanup guard verifies deletion of test-owned transactions by absence from subsequent bounded listings |
 | `categories.json` | GET | requires `direction` **and** `in_wallet=true`; returns `{"category_groups": [{id, name, position, color, categories: [...]}]}`; missing `in_wallet` yields plain-text `missing in_wallet=true parameter` |
 | `tags.json` | GET | `{"tags": [{"name": ...}]}` — tags have **no id** |
 | `budgets.json` | GET/POST | `{"budgets": [...]}` wrapper; `month_on` is unreliable on create (budgets landed in the current month in evidence runs); ISO month queries for far-future months can return 500 when only a virtual `other` row remains |
@@ -53,7 +53,7 @@ The adapter streams successful JSON responses and caps the decoded body at 4 MiB
 
 ### Empty-body success handling
 
-Schedule and budget create/update responses are 201/200 with an **empty body** — the upstream does not identify the created object (unlike transactions). Empty 200/201 therefore remains a known HTTP success, but a create without an upstream identity returns `{"created": true, "reconciliation_required": true}`. The adapter deliberately does not infer a stable ID by matching a schedule description or budget category after the write because those attributes are not proven unique and could identify an older or concurrent record. Consumers must reconcile through `list_scheduled_transactions` or `list_budgets` before a dependent mutation or retry. Empty updates can safely return an update marker because the stable target ID was supplied by the caller.
+Schedule and budget create/update responses are 201/200 with an **empty body** — the upstream does not identify the created object (unlike transactions). Empty 200/201 remains evidence that the HTTP request was accepted, but a create without an upstream identity is not exposed as normal success: the adapter raises a non-retryable ambiguous write outcome and the kernel returns `AMBIGUOUS_OUTCOME`. The adapter deliberately does not infer a stable ID by matching a schedule description or budget category after the write because those attributes are not proven unique and could identify an older or concurrent record. Consumers must reconcile through `list_scheduled_transactions` or `list_budgets` before a dependent mutation or retry. Empty updates can safely return an update marker because the stable target ID was supplied by the caller.
 
 ### Failure classification
 
