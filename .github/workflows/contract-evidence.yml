@@ -31,13 +31,10 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v6
         with:
           python-version: "3.12"
-      - name: Install hash-locked evidence environment
-        run: |
-          set -euo pipefail
-          python -m pip install --no-deps --only-binary=:all: --require-hashes \
-            -r requirements/dev-linux-x64-py312.lock
-          python -m pip install --no-deps --only-binary=:all: --require-hashes \
-            -r requirements/build-linux-x64.lock
+      - name: Install hash-locked build environment
+        run: >-
+          python -m pip install --no-deps --only-binary=:all: --require-hashes
+          -r requirements/build-linux-x64.lock
       - name: Resolve trusted ai-skills coordinates
         id: trusted-ai-skills
         shell: bash
@@ -75,7 +72,11 @@ jobs:
           mv .trusted/ai-skills "$RUNNER_TEMP/ai-skills"
           rmdir .trusted
           test "$(git -C "$RUNNER_TEMP/ai-skills" rev-parse HEAD)" = "$TRUSTED_REVISION"
-          python "$RUNNER_TEMP/ai-skills/contracts/validate_trusted_executable_sources.py" \
+          python -m venv "$RUNNER_TEMP/authority-venv"
+          "$RUNNER_TEMP/authority-venv/bin/python" -m pip install --require-hashes \
+            -r "$RUNNER_TEMP/ai-skills/requirements-dev-linux-x64-py312.lock"
+          "$RUNNER_TEMP/authority-venv/bin/python" \
+            "$RUNNER_TEMP/ai-skills/contracts/validate_trusted_executable_sources.py" \
             trusted-executable-sources.lock.yaml \
             --repository-root . \
             --authority-root "ai-skills-authority=$RUNNER_TEMP/ai-skills" \
@@ -104,7 +105,8 @@ jobs:
           WHEEL="$(find dist -maxdepth 1 -type f -name 'kontomierz_mcp-*.whl' -print -quit)"
           WHEEL_NAME="$(basename "$WHEEL")"
           WHEEL_DIGEST="sha256:$(sha256sum "$WHEEL" | awk '{print $1}')"
-          python "$RUNNER_TEMP/ai-skills/skills/mcp-server-architect/tools/capture_mcp_contract.py" \
+          "$RUNNER_TEMP/authority-venv/bin/python" \
+            "$RUNNER_TEMP/ai-skills/skills/mcp-server-architect/tools/capture_mcp_contract.py" \
             --output dist/MCP_PUBLIC_CONTRACT.json \
             --working-directory . \
             --expected-source-revision "$CANDIDATE_SHA" \
@@ -115,7 +117,7 @@ jobs:
             --source-revision "$CANDIDATE_SHA" \
             --artifact-identity "$WHEEL_NAME" \
             --artifact-digest "$WHEEL_DIGEST"
-          python -m json.tool dist/MCP_PUBLIC_CONTRACT.json >/dev/null
+          "$RUNNER_TEMP/authority-venv/bin/python" -m json.tool dist/MCP_PUBLIC_CONTRACT.json >/dev/null
       - name: Upload candidate public-contract evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
