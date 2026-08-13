@@ -177,11 +177,11 @@ def create_http_app(settings: Settings, kernel: InvocationKernel | None = None) 
 
     @asynccontextmanager
     async def lifespan(_app: Starlette) -> AsyncIterator[None]:
-        async with mcp.session_manager.run():
-            try:
+        try:
+            async with mcp.session_manager.run():
                 yield
-            finally:
-                await owned_kernel.close()
+        finally:
+            await owned_kernel.close()
 
     async def live(_request: Any) -> JSONResponse:
         return JSONResponse({"status": "alive"})
