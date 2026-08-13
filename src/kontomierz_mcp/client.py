@@ -390,7 +390,7 @@ class KontomierzClient:
     async def get_wealth_points(self, start_on: str | None = None, end_on: str | None = None) -> list[dict[str, Any]]:
         payload = await self._request("GET", "wealth_points.json", query={"start_on": start_on, "end_on": end_on})
         items = self._expect_list(payload)
-        return [item.get("wealth_point", item) for item in items]
+        return [self._expect_dict(item.get("wealth_point", item)) for item in items]
 
     async def get_pie_chart(self, **filters: Any) -> dict[str, Any]:
         return self._expect_dict(await self._request("GET", "charts/money_transactions.json", query=filters))
