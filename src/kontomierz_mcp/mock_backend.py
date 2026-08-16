@@ -1,7 +1,7 @@
 """Deterministic in-memory Kontomierz backend for development and tests.
 
-Response shapes mirror the real Kontomierz API contract verified on 2026-08-08
-against a live account (see docs/upstream-api.md).
+Response shapes mirror the canonical dependency contract exposed by the real HTTP
+adapter after legacy wire-format normalization (see docs/upstream-api.md).
 """
 
 from __future__ import annotations
@@ -75,7 +75,7 @@ class MockKontomierzClient:
                 "limit": "600.00",
                 "amount": "0.0",
                 "category_id": 1,
-                "month_on": "01-08-2026",
+                "month_on": "2026-08-01",
             }
         ]
         self.schedules = [
@@ -126,13 +126,13 @@ class MockKontomierzClient:
         return result
 
     @staticmethod
-    def _upstream_date(value: str | None) -> date | None:
+    def _domain_date(value: str | None) -> date | None:
         if not value:
             return None
         try:
-            return datetime.strptime(value, "%d-%m-%Y").date()
+            return datetime.strptime(value, "%Y-%m-%d").date()
         except ValueError as exc:
-            raise ApplicationError(ErrorCode.INVALID_PARAMETER, "mock upstream date must be DD-MM-YYYY") from exc
+            raise ApplicationError(ErrorCode.INVALID_PARAMETER, "mock dependency date must be YYYY-MM-DD") from exc
 
     def get_user_accounts(self) -> list[dict[str, Any]]:
         return [deepcopy(account) for account in self.accounts]
@@ -243,7 +243,7 @@ class MockKontomierzClient:
     def get_budgets(self, month_on: str | None = None) -> list[dict[str, Any]]:
         values = self.budgets
         if month_on:
-            values = [value for value in values if value.get("month_on") == month_on]
+            values = [value for value in values if str(value.get("month_on", "")).startswith(month_on)]
         return deepcopy(values)
 
     def create_budget(
@@ -259,7 +259,7 @@ class MockKontomierzClient:
             "name": "Mock budget",
             "limit": limit,
             "amount": "0.0",
-            "month_on": month_on,
+            "month_on": f"{month_on}-01" if month_on else "",
         }
         if category_id is not None:
             item["category_id"] = category_id
@@ -294,7 +294,7 @@ class MockKontomierzClient:
         return [
             {
                 "schedule_id": item["id"],
-                "transaction_on": "01-09-2026",
+                "transaction_on": "2026-09-01",
                 "description": item["description"],
                 "currency_amount": item["currency_amount"],
                 "currency_name": item["currency_name"],
@@ -344,8 +344,8 @@ class MockKontomierzClient:
 
     def get_wealth_points(self, start_on: str | None = None, end_on: str | None = None) -> list[dict[str, Any]]:
         point_date = date(2026, 8, 1)
-        start = self._upstream_date(start_on)
-        end = self._upstream_date(end_on)
+        start = self._domain_date(start_on)
+        end = self._domain_date(end_on)
         if (start is not None and point_date < start) or (end is not None and point_date > end):
             return []
         return [

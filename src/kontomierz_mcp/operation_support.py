@@ -105,7 +105,7 @@ def parse_date(value: Any, name: str, *, optional: bool = False) -> date | None:
 
 def date_value(value: Any, name: str, *, optional: bool = False) -> str | None:
     parsed = parse_date(value, name, optional=optional)
-    return None if parsed is None else parsed.strftime("%d-%m-%Y")
+    return None if parsed is None else parsed.isoformat()
 
 
 def date_range(start: Any, end: Any) -> tuple[str | None, str | None]:
@@ -114,8 +114,8 @@ def date_range(start: Any, end: Any) -> tuple[str | None, str | None]:
     if left and right and left > right:
         fail("start_on must be on or before end_on")
     return (
-        None if left is None else left.strftime("%d-%m-%Y"),
-        None if right is None else right.strftime("%d-%m-%Y"),
+        None if left is None else left.isoformat(),
+        None if right is None else right.isoformat(),
     )
 
 
@@ -127,7 +127,7 @@ def month(value: Any) -> str:
         return ""
     if re.fullmatch(r"\d{4}-(?:0[1-9]|1[0-2])", raw) is None:
         fail("month must be YYYY-MM")
-    return datetime.strptime(raw, "%Y-%m").strftime("01-%m-%Y")
+    return raw
 
 
 def page(value: Any) -> int:
