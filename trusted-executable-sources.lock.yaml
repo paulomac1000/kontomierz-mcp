@@ -15,9 +15,9 @@ sources:
       - authority_path: skills/ci-cd-architect/tools/check_consumer_trust_hygiene.py
         sha256: sha256:2732542649d10624dc14fd099df533c494abddd8136dcbe520dc017ab72deca9
       - authority_path: skills/mcp-server-architect/tools/inspect_existing_project.py
-        sha256: sha256:c7e33364d7325cdbd927f932fd15fedb5cf6dff5af25600834a35a84b6560bf8
+        sha256: sha256:c17c3dc2c421f26bf87c626fd3dbc5fd95f1991ad2a340296287a3dfe0c17bd7
       - authority_path: skills/mcp-server-architect/tools/plan_existing_project.py
-        sha256: sha256:ac4e7ce91cef045c010cc0124df88a72a1d015575ea1f62a58fea92046a6c941
+        sha256: sha256:445b02b42e66c5e44e4ab7cce2aa434ea5d47fc7d05a526cf7b3d45e7b221219
       - authority_path: skills/mcp-server-architect/tools/capture_mcp_contract.py
         sha256: sha256:4972f934cea4eecdbd6551c047ec1d59d7c171d3956403087015c7b98aaf2a0a
       - authority_path: skills/mcp-server-architect/tools/compare_mcp_contracts.py
