@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
@@ -28,9 +27,10 @@ def _http_ready() -> bool:
         headers={"Authorization": f"Bearer {token}"},
     )
     try:
-        with urlopen(request, timeout=2) as response:  # noqa: S310 - host is restricted to loopback above
+        # Host is restricted to the closed loopback allowlist above.
+        with urlopen(request, timeout=2) as response:  # noqa: S310  # nosec B310
             return response.status == 200
-    except (OSError, URLError, ValueError):
+    except (OSError, ValueError):
         return False
 
 
