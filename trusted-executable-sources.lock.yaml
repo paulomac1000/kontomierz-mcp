@@ -3,7 +3,7 @@ sources:
   - id: ai-skills
     role: auditor
     repository: paulomac1000/ai-skills
-    revision: bdf175b220d5da9ad7ea91c4b83f9dd29873b115
+    revision: f24c27509b88a40d36ac077add6e40c025c35939
     credential_access: read-only-provider
     files:
       - authority_path: skills/afds-doc-writer/validate.py
