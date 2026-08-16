@@ -14,6 +14,7 @@ from pydantic import Field
 
 from . import __version__
 from .audit import configure_audit_sink
+from .boundary_audit import emit_boundary_rejection
 from .client import KontomierzClient
 from .config import Settings
 from .errors import ApplicationError, ErrorCode
@@ -138,6 +139,12 @@ def build_server(
                 if allowed is not None and isinstance(arguments, Mapping):
                     for parameter_name in arguments:
                         if not isinstance(parameter_name, str) or parameter_name not in allowed:
+                            emit_boundary_rejection(
+                                stage="schema",
+                                result="INVALID_PARAMETER",
+                                route="mcp",
+                                authenticated=current_invocation_context() is not None,
+                            )
                             error = ApplicationError(
                                 ErrorCode.INVALID_PARAMETER,
                                 "Tool call contains an unexpected parameter",
