@@ -130,7 +130,7 @@ def date_range(start: Any, end: Any) -> tuple[str | None, str | None]:
 def month(value: Any) -> str:
     if value is None:
         return ""
-    raw = bounded_text(value, "month", max_bytes=7, allow_empty=True, strip=False)
+    raw = bounded_text(value, "month", max_bytes=32, allow_empty=True, strip=False)
     if not raw:
         return ""
     if re.fullmatch(r"\d{4}-(?:0[1-9]|1[0-2])", raw) is None:
