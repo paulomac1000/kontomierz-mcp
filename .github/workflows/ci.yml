@@ -214,8 +214,11 @@ jobs:
           assert facts["external_tests_default_excluded"] is True
           assert facts["upstream_contract_present"] is True
           assert facts["live_backend_policy_present"] is True
+          assert facts.get("container_build", {}).get("prebuilt_artifact_copy") is True
+          assert facts.get("container_build", {}).get("source_revision_binding_signal") is True
           assert plan["upstream_contract"] == "verified"
           assert plan["live_backend_safety"] == "declared"
+          assert plan.get("container_artifact_binding") == "declared"
           assert document["unknowns"] == []
           PY
       - name: Plan existing MCP adoption from trusted revision
@@ -330,9 +333,10 @@ jobs:
             --dest dist/wheelhouse \
             -r requirements/runtime-linux-x64-py312.lock
           cp requirements/runtime-linux-x64-py312.lock dist/
+          printf '%s\n' "$SOURCE_SHA" > dist/SOURCE_REVISION
           (
             cd dist
-            find . -type f \( -name '*.whl' -o -name 'runtime-linux-x64-py312.lock' \) \
+            find . -type f \( -name '*.whl' -o -name 'runtime-linux-x64-py312.lock' -o -name 'SOURCE_REVISION' \) \
               -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
             sha256sum --check SHA256SUMS
           )
@@ -388,7 +392,7 @@ jobs:
           esac
           docker pull "$BASE_IMAGE"
           docker build --pull=false \
-            --label "org.opencontainers.image.revision=${SOURCE_SHA}" \
+            --build-arg "EXPECTED_SOURCE_REVISION=${SOURCE_SHA}" \
             -t "kontomierz-mcp:${SOURCE_SHA}" .
           REVISION="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "kontomierz-mcp:${SOURCE_SHA}")"
           test "$REVISION" = "$SOURCE_SHA"
@@ -437,6 +441,7 @@ jobs:
               -name 'kontomierz_mcp-*.whl' -o \
               -name 'kontomierz-mcp-image.tar.gz' -o \
               -name 'SHA256SUMS' -o \
+              -name 'SOURCE_REVISION' -o \
               -name 'MCP_PUBLIC_CONTRACT.json' -o \
               -name 'IMAGE_METADATA.json' -o \
               -name 'BUILD_METADATA' -o \
@@ -453,6 +458,7 @@ jobs:
             dist/wheelhouse/
             dist/kontomierz-mcp-image.tar.gz
             dist/SHA256SUMS
+            dist/SOURCE_REVISION
             dist/MCP_PUBLIC_CONTRACT.json
             dist/RELEASE_SHA256SUMS
             dist/IMAGE_METADATA.json
