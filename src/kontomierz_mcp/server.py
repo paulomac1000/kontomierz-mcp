@@ -139,11 +139,17 @@ def build_server(
                 if allowed is not None and isinstance(arguments, Mapping):
                     for parameter_name in arguments:
                         if not isinstance(parameter_name, str) or parameter_name not in allowed:
+                            invocation_context = current_invocation_context()
                             emit_boundary_rejection(
+                                transport="stdio" if settings.transport == "stdio" else "streamable-http",
                                 stage="schema",
                                 result="INVALID_PARAMETER",
                                 route="mcp",
-                                authenticated=current_invocation_context() is not None,
+                                authenticated=(
+                                    invocation_context.authenticated
+                                    if invocation_context is not None
+                                    else settings.transport == "stdio"
+                                ),
                             )
                             error = ApplicationError(
                                 ErrorCode.INVALID_PARAMETER,
