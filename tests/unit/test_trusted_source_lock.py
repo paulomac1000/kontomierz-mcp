@@ -13,11 +13,11 @@ def test_ai_skills_authority_has_one_canonical_immutable_source_lock() -> None:
     assert document["schema_version"] == 1
     assert len(document["sources"]) == 1
     source = document["sources"][0]
-    assert source["id"] == "ai-skills-authority"
+    assert source["id"] == "ai-skills"
     assert source["repository"] == "paulomac1000/ai-skills"
     assert re.fullmatch(r"[0-9a-f]{40}", source["revision"])
-    assert source["credential_access"] == "none"
-    assert len(source["files"]) >= 8
+    assert source["credential_access"] == "read-only-provider"
+    assert len(source["files"]) >= 12
     assert all(re.fullmatch(r"sha256:[0-9a-f]{64}", item["sha256"]) for item in source["files"])
 
 
