@@ -39,8 +39,9 @@ def test_bounded_integer_does_not_coerce_strings() -> None:
     ["2026-8-1", "2026-08-1", "2026-8-01", " 2026-08-01", "2026-08-01 "],
 )
 def test_date_value_rejects_noncanonical_iso_spelling(value: str) -> None:
-    with pytest.raises(ApplicationError, match="deadline_on must be YYYY-MM-DD"):
+    with pytest.raises(ApplicationError) as captured:
         date_value(value, "deadline_on")
+    assert captured.value.code is ErrorCode.INVALID_PARAMETER
 
 
 def test_date_value_preserves_canonical_iso_date() -> None:
