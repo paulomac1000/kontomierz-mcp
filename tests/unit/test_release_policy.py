@@ -36,5 +36,10 @@ def test_quarantine_stage_is_unprivileged_and_smokes_exact_registry_digest() -> 
 
 def test_exact_artifact_build_binds_image_to_full_source_revision() -> None:
     ci = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
-    assert '--label "org.opencontainers.image.revision=${SOURCE_SHA}"' in ci
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    assert 'printf \'%s\\n\' "$SOURCE_SHA" > dist/SOURCE_REVISION' in ci
+    assert '--build-arg "EXPECTED_SOURCE_REVISION=${SOURCE_SHA}"' in ci
+    assert "ARG EXPECTED_SOURCE_REVISION" in dockerfile
+    assert 'test "$(cat SOURCE_REVISION)" = "$EXPECTED_SOURCE_REVISION"' in dockerfile
+    assert "org.opencontainers.image.revision=$EXPECTED_SOURCE_REVISION" in dockerfile
     assert "trusted-executable-sources.lock.yaml" in ci
