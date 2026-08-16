@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import io
+import json
+import logging
+
 import pytest
 from mcp import Client
 
+from kontomierz_mcp.audit import configure_audit_sink
 from kontomierz_mcp.config import Settings
 from kontomierz_mcp.server import build_server
 
@@ -43,14 +48,37 @@ async def test_official_client_rejects_explicit_zero_optional_id() -> None:
 
 @pytest.mark.asyncio
 async def test_official_client_rejects_unknown_tool_arguments_before_sdk_drops_them() -> None:
+    stream = io.StringIO()
+    logger = logging.getLogger("kontomierz_mcp.audit")
+    previous_handlers = list(logger.handlers)
+    previous_level = logger.level
+    previous_propagate = logger.propagate
+    configure_audit_sink(stream=stream, replace=True)
     server = build_server(Settings(api_key="", mock_data=True, enable_write_operations=False))
-    async with Client(server) as client:
-        result = await client.call_tool("list_transactions", {"surprise": "ignored"})
+    try:
+        async with Client(server) as client:
+            result = await client.call_tool("list_transactions", {"surprise": "ignored"})
+        events = [json.loads(line) for line in stream.getvalue().splitlines() if line.strip()]
+    finally:
+        logger.handlers[:] = previous_handlers
+        logger.setLevel(previous_level)
+        logger.propagate = previous_propagate
 
     assert result.is_error is True
     assert result.structured_content is not None
     assert result.structured_content["error"]["code"] == "INVALID_PARAMETER"
     assert result.structured_content["error"]["message"] == "Tool call contains an unexpected parameter"
+    assert events == [
+        {
+            "audit_failure_policy": "fail-open-result-preserving",
+            "authenticated": True,
+            "event": "mcp_boundary_rejection",
+            "result": "INVALID_PARAMETER",
+            "route": "mcp",
+            "stage": "schema",
+            "transport": "stdio",
+        }
+    ]
 
 
 @pytest.mark.asyncio
