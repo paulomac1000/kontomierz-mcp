@@ -19,8 +19,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 _RUNTIME_LOCK = ROOT / "requirements/runtime-linux-x64-py312.lock"
-_BUILD_LOCK = ROOT / "requirements/build-linux-x64.lock"
-_DEV_LOCK = ROOT / "requirements/dev-linux-x64-py312.lock"
 
 
 def _run(arguments: list[str], *, cwd: Path = ROOT, capture: bool = False) -> str:
@@ -87,7 +85,7 @@ def _run_standards(ai_skills_root: Path, temporary: Path) -> None:
             "--require-authority",
         ]
     )
-    _run([sys.executable, str(ai_skills_root / "skills/afds-doc-writer/validate.py"), "AGENTS.md", "docs"])
+    _run([sys.executable, "scripts/check_docs.py", "--ai-skills-root", str(ai_skills_root)])
     _run(
         [
             sys.executable,
