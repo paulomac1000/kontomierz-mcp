@@ -1,4 +1,4 @@
-"""Sanitized audit events for HTTP and SDK rejections before kernel invocation."""
+"""Sanitized audit events for transport and SDK rejections before kernel invocation."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ from typing import Literal
 
 from .audit import configure_audit_sink
 
+BoundaryTransport = Literal["stdio", "streamable-http"]
 BoundaryStage = Literal["authentication", "routing", "protocol", "schema"]
 BoundaryResult = Literal["HTTP_400", "HTTP_401", "HTTP_404", "INVALID_PARAMETER"]
 BoundaryRoute = Literal["mcp", "health-ready", "unknown"]
@@ -14,6 +15,7 @@ BoundaryRoute = Literal["mcp", "health-ready", "unknown"]
 
 def emit_boundary_rejection(
     *,
+    transport: BoundaryTransport,
     stage: BoundaryStage,
     result: BoundaryResult,
     route: BoundaryRoute,
@@ -23,7 +25,7 @@ def emit_boundary_rejection(
     document = {
         "event": "mcp_boundary_rejection",
         "audit_failure_policy": "fail-open-result-preserving",
-        "transport": "streamable-http",
+        "transport": transport,
         "stage": stage,
         "result": result,
         "route": route,
