@@ -1,7 +1,4 @@
 .venv/
-.artifact-venv/
-.artifact-test-venv/
-.trusted/
 .env
 .envrc
 __pycache__/
@@ -16,3 +13,8 @@ htmlcov/
 dist/
 build/
 *.log
+.artifact-venv/
+.artifact-test-venv/
+.trusted/
+.omo/
+feedback.md
