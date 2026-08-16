@@ -29,7 +29,8 @@ def _http_ready() -> bool:
     try:
         # Host is restricted to the closed loopback allowlist above.
         with urlopen(request, timeout=2) as response:  # noqa: S310  # nosec B310
-            return response.status == 200
+            status = getattr(response, "status", None)
+            return isinstance(status, int) and status == 200
     except (OSError, ValueError):
         return False
 
