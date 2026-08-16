@@ -8,13 +8,14 @@ import keyword
 import logging
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from typing import Annotated, Any
 
 from pydantic import Field
 
 from . import __version__
 from .audit import configure_audit_sink
-from .boundary_audit import emit_boundary_rejection
+from .boundary_audit import BoundaryStage, emit_boundary_rejection
 from .client import KontomierzClient
 from .config import Settings
 from .errors import ApplicationError, ErrorCode
@@ -92,6 +93,12 @@ def _close_tool_input_schemas(result: Any) -> None:
             input_schema["additionalProperties"] = False
 
 
+def _sdk_result_is_error(result: Any) -> bool:
+    if isinstance(result, Mapping):
+        return result.get("isError") is True or result.get("is_error") is True
+    return getattr(result, "is_error", False) is True
+
+
 def build_server(
     settings: Settings,
     kernel: InvocationKernel | None = None,
@@ -106,6 +113,7 @@ def build_server(
         raise RuntimeError("Install the project dependencies to run the MCP transport") from exc
 
     owned_kernel = kernel or build_kernel(settings)
+    dispatch_started: ContextVar[bool] = ContextVar("kontomierz_sdk_dispatch_started", default=False)
 
     @asynccontextmanager
     async def lifespan(_server: Any) -> AsyncIterator[dict[str, InvocationKernel]]:
@@ -123,6 +131,18 @@ def build_server(
             is_error=is_error,
         )
 
+    def audit_pre_dispatch_rejection(stage: BoundaryStage) -> None:
+        invocation_context = current_invocation_context()
+        emit_boundary_rejection(
+            transport="stdio" if settings.transport == "stdio" else "streamable-http",
+            stage=stage,
+            result="INVALID_PARAMETER",
+            route="mcp",
+            authenticated=(
+                invocation_context.authenticated if invocation_context is not None else settings.transport == "stdio"
+            ),
+        )
+
     allowed_arguments = {
         name: frozenset(parameter.name for parameter in definition.parameters)
         for name, definition in TOOL_DEFINITIONS.items()
@@ -132,36 +152,35 @@ def build_server(
         """Keep advertised tool schemas and pre-dispatch argument handling fail-closed."""
 
         async def __call__(self, context: Any, call_next: Any) -> Any:
-            if context.method == "tools/call" and isinstance(context.params, Mapping):
-                tool_name = context.params.get("name")
-                arguments = context.params.get("arguments")
-                allowed = allowed_arguments.get(tool_name) if isinstance(tool_name, str) else None
-                if allowed is not None and isinstance(arguments, Mapping):
-                    for parameter_name in arguments:
-                        if not isinstance(parameter_name, str) or parameter_name not in allowed:
-                            invocation_context = current_invocation_context()
-                            emit_boundary_rejection(
-                                transport="stdio" if settings.transport == "stdio" else "streamable-http",
-                                stage="schema",
-                                result="INVALID_PARAMETER",
-                                route="mcp",
-                                authenticated=(
-                                    invocation_context.authenticated
-                                    if invocation_context is not None
-                                    else settings.transport == "stdio"
-                                ),
-                            )
-                            error = ApplicationError(
-                                ErrorCode.INVALID_PARAMETER,
-                                "Tool call contains an unexpected parameter",
-                                suggestion="Call tools/list and use only the declared input schema.",
-                            )
-                            return call_tool_result(_error_document(error), is_error=True)
+            is_tool_call = context.method == "tools/call"
+            token = dispatch_started.set(False) if is_tool_call else None
+            try:
+                tool_name: Any = None
+                if is_tool_call and isinstance(context.params, Mapping):
+                    tool_name = context.params.get("name")
+                    arguments = context.params.get("arguments")
+                    allowed = allowed_arguments.get(tool_name) if isinstance(tool_name, str) else None
+                    if allowed is not None and isinstance(arguments, Mapping):
+                        for parameter_name in arguments:
+                            if not isinstance(parameter_name, str) or parameter_name not in allowed:
+                                audit_pre_dispatch_rejection("schema")
+                                error = ApplicationError(
+                                    ErrorCode.INVALID_PARAMETER,
+                                    "Tool call contains an unexpected parameter",
+                                    suggestion="Call tools/list and use only the declared input schema.",
+                                )
+                                return call_tool_result(_error_document(error), is_error=True)
 
-            result = await call_next(context)
-            if context.method == "tools/list":
-                _close_tool_input_schemas(result)
-            return result
+                result = await call_next(context)
+                if is_tool_call and _sdk_result_is_error(result) and not dispatch_started.get():
+                    stage: BoundaryStage = "schema" if tool_name in allowed_arguments else "protocol"
+                    audit_pre_dispatch_rejection(stage)
+                if context.method == "tools/list":
+                    _close_tool_input_schemas(result)
+                return result
+            finally:
+                if token is not None:
+                    dispatch_started.reset(token)
 
     server_kwargs: dict[str, Any] = {
         "version": __version__,
@@ -180,6 +199,7 @@ def build_server(
     mcp = MCPServer("kontomierz-mcp", **server_kwargs)
 
     async def dispatch(name: str, arguments: dict[str, Any]) -> Any:
+        dispatch_started.set(True)
         try:
             result = await owned_kernel.invoke(name, arguments, context=current_invocation_context())
             return call_tool_result(result, is_error=False)
