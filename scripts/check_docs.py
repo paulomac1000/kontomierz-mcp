@@ -17,7 +17,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     ai_skills_root = args.ai_skills_root.resolve(strict=True)
-    validator = ai_skills_root / "skills/afds-doc-writer/validate.py"
+    validator = ai_skills_root / "skills" / "afds-doc-writer" / "validate.py"
     if not validator.is_file():
         parser.error(f"trusted AFDS validator is missing: {validator}")
     try:
