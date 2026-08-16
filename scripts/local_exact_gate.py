@@ -108,14 +108,31 @@ def _run_standards(ai_skills_root: Path, temporary: Path) -> None:
     discovery = temporary / "discovery.json"
     plan = temporary / "plan.json"
     _run([sys.executable, str(mcp_tools / "inspect_existing_project.py"), ".", "--output", str(discovery)])
-    _run([sys.executable, str(mcp_tools / "plan_existing_project.py"), ".", "--target-level", "L2", "--output", str(plan)])
+    _run(
+        [
+            sys.executable,
+            str(mcp_tools / "plan_existing_project.py"),
+            ".",
+            "--target-level",
+            "L2",
+            "--output",
+            str(plan),
+        ]
+    )
     discovered = json.loads(discovery.read_text(encoding="utf-8"))
     if discovered["unknowns"]:
         raise RuntimeError("trusted discovery still reports unknowns: " + "; ".join(discovered["unknowns"]))
     if discovered["plan"].get("container_artifact_binding") != "declared":
         raise RuntimeError("container artifact source binding is not declared")
 
-    _run([sys.executable, str(contracts / "validate_upstream_contract.py"), "upstream-contract.yaml", "--require-observed"])
+    _run(
+        [
+            sys.executable,
+            str(contracts / "validate_upstream_contract.py"),
+            "upstream-contract.yaml",
+            "--require-observed",
+        ]
+    )
     _run([sys.executable, str(contracts / "validate_live_backend_test_policy.py"), "live-backend-test-policy.yaml"])
 
 
@@ -202,7 +219,14 @@ def _build_exact_image(source_sha: str) -> None:
         ]
     )
     revision = _run(
-        ["docker", "image", "inspect", "--format", '{{ index .Config.Labels "org.opencontainers.image.revision" }}', tag],
+        [
+            "docker",
+            "image",
+            "inspect",
+            "--format",
+            '{{ index .Config.Labels "org.opencontainers.image.revision" }}',
+            tag,
+        ],
         capture=True,
     )
     if revision != source_sha:
