@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from .operation_support import (
+    boolean,
     bounded_text,
     currency,
     date_range,
@@ -77,6 +78,7 @@ async def dispatch_primary(name: str, a: dict[str, Any], client: Any) -> Any:
         start, end = date_range(a.get("start_on", ""), a.get("end_on", ""))
         query = bounded_text(a.get("q", ""), "q", max_bytes=256, strip=True) or None
         tag_name = bounded_text(a.get("tag_name", ""), "tag_name", max_bytes=128, strip=True) or None
+        show_hidden = boolean(a.get("show_hidden_transactions", False), "show_hidden_transactions")
         items = await resolve(
             client.get_money_transactions(
                 page=number,
@@ -89,7 +91,7 @@ async def dispatch_primary(name: str, a: dict[str, Any], client: Any) -> Any:
                 tag_name=tag_name,
                 category_group_id=identifier(a.get("category_group_id"), "category_group_id", optional=True),
                 category_id=identifier(a.get("category_id"), "category_id", optional=True),
-                show_hidden_transactions="true" if a.get("show_hidden_transactions", False) else "false",
+                show_hidden_transactions="true" if show_hidden else "false",
             )
         )
         return paging(items, number, limit)
@@ -104,12 +106,15 @@ async def dispatch_primary(name: str, a: dict[str, Any], client: Any) -> Any:
             "tag_string": bounded_text(a.get("tag_string", ""), "tag_string", max_bytes=512),
             "name": bounded_text(a.get("name", ""), "name", max_bytes=512),
         }
-        if a.get("currency_amount"):
-            create_fields["currency_amount"] = money(a["currency_amount"], "currency_amount", positive=True)
-        if a.get("currency_name"):
-            create_fields["currency_name"] = currency(a["currency_name"])
-        if a.get("transaction_on"):
-            create_fields["transaction_on"] = date_value(a["transaction_on"], "transaction_on")
+        currency_amount = a.get("currency_amount", "")
+        if currency_amount != "":
+            create_fields["currency_amount"] = money(currency_amount, "currency_amount", positive=True)
+        currency_name = a.get("currency_name", "")
+        if currency_name != "":
+            create_fields["currency_name"] = currency(currency_name)
+        transaction_on = a.get("transaction_on", "")
+        if transaction_on != "":
+            create_fields["transaction_on"] = date_value(transaction_on, "transaction_on")
         return await resolve(client.create_money_transaction(**create_fields))
     if name == "update_transaction":
         update_fields = provided(

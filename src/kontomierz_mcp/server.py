@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import keyword
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 from typing import Annotated, Any
 
@@ -96,18 +97,6 @@ def build_server(
             if owns_kernel:
                 await owned_kernel.close()
 
-    mcp = MCPServer(
-        "kontomierz-mcp",
-        version=__version__,
-        instructions=(
-            "Use capability discovery before planning a workflow and list tools before detail or mutation calls. "
-            "Financial data is confidential. Writes require the trusted operator gate. "
-            "Streamable HTTP requires server-validated Bearer authentication. "
-            "Never retry an ambiguous write before reconciling the exact target state."
-        ),
-        lifespan=lifespan,
-    )
-
     def call_tool_result(document: dict[str, Any], *, is_error: bool) -> Any:
         body = document if is_error else document["data"]
         return CallToolResult(
@@ -115,6 +104,57 @@ def build_server(
             structured_content=document,
             is_error=is_error,
         )
+
+    allowed_arguments = {
+        name: frozenset(parameter.name for parameter in definition.parameters)
+        for name, definition in TOOL_DEFINITIONS.items()
+    }
+
+    class GovernedToolInputMiddleware:
+        """Keep advertised tool schemas and pre-dispatch argument handling fail-closed."""
+
+        async def __call__(self, context: Any, call_next: Any) -> Any:
+            if context.method == "tools/call" and isinstance(context.params, Mapping):
+                tool_name = context.params.get("name")
+                arguments = context.params.get("arguments")
+                allowed = allowed_arguments.get(tool_name) if isinstance(tool_name, str) else None
+                if allowed is not None and isinstance(arguments, Mapping):
+                    for parameter_name in arguments:
+                        if not isinstance(parameter_name, str) or parameter_name not in allowed:
+                            error = ApplicationError(
+                                ErrorCode.INVALID_PARAMETER,
+                                "Tool call contains an unexpected parameter",
+                                suggestion="Call tools/list and use only the declared input schema.",
+                            )
+                            return call_tool_result(_error_document(error), is_error=True)
+
+            result = await call_next(context)
+            if context.method == "tools/list" and isinstance(result, dict):
+                tools = result.get("tools")
+                if isinstance(tools, list):
+                    for tool in tools:
+                        if not isinstance(tool, dict):
+                            continue
+                        input_schema = tool.get("inputSchema")
+                        if isinstance(input_schema, dict):
+                            input_schema["additionalProperties"] = False
+            return result
+
+    server_kwargs: dict[str, Any] = {
+        "version": __version__,
+        "instructions": (
+            "Use capability discovery before planning a workflow and list tools before detail or mutation calls. "
+            "Financial data is confidential. Writes require the trusted operator gate. "
+            "Streamable HTTP requires server-validated Bearer authentication. "
+            "Never retry an ambiguous write before reconciling the exact target state."
+        ),
+        "lifespan": lifespan,
+    }
+    # The pinned official SDK exposes context middleware. Repository test doubles
+    # may intentionally model only the registration/transport surface.
+    if "middleware" in inspect.signature(MCPServer).parameters:
+        server_kwargs["middleware"] = [GovernedToolInputMiddleware()]
+    mcp = MCPServer("kontomierz-mcp", **server_kwargs)
 
     async def dispatch(name: str, arguments: dict[str, Any]) -> Any:
         try:

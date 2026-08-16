@@ -118,11 +118,11 @@ jobs:
           from pathlib import Path
 
           text = Path("trusted-executable-sources.lock.yaml").read_text(encoding="utf-8")
-          marker = "  - id: ai-skills-authority\n"
+          marker = "  - id: ai-skills\n"
           try:
               block = text.split(marker, 1)[1]
           except IndexError as exc:
-              raise SystemExit("ai-skills-authority is missing from trusted executable source lock") from exc
+              raise SystemExit("ai-skills is missing from trusted executable source lock") from exc
           repository = re.search(r"^    repository: ([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)\s*$", block, re.MULTILINE)
           revision = re.search(r"^    revision: ([0-9a-f]{40})\s*$", block, re.MULTILINE)
           if repository is None or revision is None:
@@ -160,7 +160,10 @@ jobs:
             skills/mcp-server-architect/tools/compare_mcp_contracts.py \
             contracts/validate_upstream_contract.py \
             contracts/validate_live_backend_test_policy.py \
-            contracts/validate_trusted_executable_sources.py
+            contracts/validate_trusted_executable_sources.py \
+            contracts/validate_external_adoption.py \
+            contracts/validate_external_trust_lock.py \
+            skills/ci-cd-architect/tools/check_github_provider_controls.py
           do
             digest="$(sha256sum "$RUNNER_TEMP/ai-skills/$path" | awk '{print $1}')"
             printf 'AUTHORITY_SHA256 %s sha256:%s\n' "$path" "$digest"
@@ -177,7 +180,7 @@ jobs:
           python "$RUNNER_TEMP/ai-skills/contracts/validate_trusted_executable_sources.py"
           trusted-executable-sources.lock.yaml
           --repository-root .
-          --authority-root "ai-skills-authority=$RUNNER_TEMP/ai-skills"
+          --authority-root "ai-skills=$RUNNER_TEMP/ai-skills"
           --require-authority
       - name: Validate governed documents with trusted AFDS validator
         run: python "$RUNNER_TEMP/ai-skills/skills/afds-doc-writer/validate.py" AGENTS.md docs
@@ -277,11 +280,11 @@ jobs:
           from pathlib import Path
 
           text = Path("trusted-executable-sources.lock.yaml").read_text(encoding="utf-8")
-          marker = "  - id: ai-skills-authority\n"
+          marker = "  - id: ai-skills\n"
           try:
               block = text.split(marker, 1)[1]
           except IndexError as exc:
-              raise SystemExit("ai-skills-authority is missing from trusted executable source lock") from exc
+              raise SystemExit("ai-skills is missing from trusted executable source lock") from exc
           repository = re.search(r"^    repository: ([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)\s*$", block, re.MULTILINE)
           revision = re.search(r"^    revision: ([0-9a-f]{40})\s*$", block, re.MULTILINE)
           if repository is None or revision is None:
@@ -307,7 +310,7 @@ jobs:
           python "$RUNNER_TEMP/artifact-ai-skills/contracts/validate_trusted_executable_sources.py" \
             trusted-executable-sources.lock.yaml \
             --repository-root . \
-            --authority-root "ai-skills-authority=$RUNNER_TEMP/artifact-ai-skills" \
+            --authority-root "ai-skills=$RUNNER_TEMP/artifact-ai-skills" \
             --require-authority
       - name: Build exact application wheel
         run: |

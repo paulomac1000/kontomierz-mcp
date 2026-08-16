@@ -5,17 +5,17 @@ type: guide
 status: evolving
 rigor: operational
 owners: [repository-maintainers]
-verification: Complete each external evidence gate on the exact candidate SHA, then run provider-backed ai-skills acceptance with independent review.
+verification: Complete each external evidence gate on the exact candidate SHA, then run externally anchored provider-backed ai-skills acceptance with independent review.
 ---
 # Production readiness handoff
 
 ## Current executable baseline
 
-The repository is a production-quality candidate before the remaining repository-administration, provider, and independent-review evidence is supplied. Runtime behavior, schemas, authentication, exact-resource authorization, audit, readiness, bounded I/O, hash-locked dependencies, packaging, official MCP transports, trusted standards validation, and the closed release artifact are exercised by the normal automated gate.
+The repository is a production-quality candidate before the remaining provider administration, live-system, provenance, and independent-review evidence is supplied. Runtime behavior, schemas, strict input handling, authentication, exact-resource authorization, audit, readiness, bounded I/O, hash-locked dependencies, packaging, official MCP transports, structural standards validation, and the closed release artifact are exercised by the normal automated gate.
 
-The runtime fails closed by default: stdio is default; Streamable HTTP is authenticated and loopback-only; writes require server-owned policy; destructive operations require exact capability/resource allowlists; model-controlled inputs and upstream/result bodies are bounded; readiness authenticates before dependency I/O; ambiguous mutation outcomes are non-retryable; audit is structured and credential-free; request diagnostics cannot expose the query-string API key at debug verbosity; plain `pytest` excludes external evidence; and production metadata/locks pin `mcp==2.0.0`.
+The runtime fails closed by default: stdio is default; Streamable HTTP is authenticated and loopback-only; writes require server-owned policy; destructive operations require exact capability/resource allowlists; tool schemas reject undeclared properties and scalar types do not rely on coercion; optional resource IDs must be positive when supplied; model-controlled inputs and upstream/result bodies are bounded; readiness authenticates before dependency I/O; ambiguous mutation outcomes are non-retryable; application-dispatched invocations are audited without credentials; request diagnostics cannot expose the query-string API key; plain `pytest` excludes external evidence; and production metadata/locks pin `mcp==2.0.0`.
 
-Real Kontomierz evidence lives in `tests/external/test_real_kontomierz_contract.py`, `upstream-contract.yaml`, and `live-backend-test-policy.yaml`. Provider/repository gaps remain deliberate `NOT IMPLEMENTED` tests in `tests/external/test_production_evidence.py`; they must be implemented from real provider/admin authority rather than skipped or fabricated.
+Real Kontomierz evidence lives in `tests/external/test_real_kontomierz_contract.py`, `upstream-contract.yaml`, and `live-backend-test-policy.yaml`. Provider/repository gaps remain deliberate external evidence requirements and must be implemented from real provider/admin authority rather than skipped or fabricated.
 
 ## Normal completion gate
 
@@ -41,25 +41,31 @@ Plain pytest excludes `external`; hosted CI additionally runs the locked graph o
 
 ## Exact artifact and Docker parity
 
-The exact-artifact job builds one wheel, materializes the Python 3.12 runtime wheelhouse, installs/tests the exact wheel outside the source tree, runs official-client stdio and authenticated HTTP smoke, builds a non-root image from verified inputs, binds `org.opencontainers.image.revision` to the full source SHA, verifies that label, smoke-tests the exact image, and closes the release bundle with checksum metadata. The Dockerfile does not rebuild project source.
+The exact-artifact job builds one wheel, materializes the Python 3.12 runtime wheelhouse, installs/tests the exact wheel outside the source tree, runs official-client stdio and authenticated HTTP smoke, builds a non-root image from verified inputs, binds `org.opencontainers.image.revision` to the full source SHA, verifies that label, smoke-tests the exact image, captures the public MCP contract from that same installed wheel, and closes the release bundle with checksum metadata. The Dockerfile does not rebuild project source.
 
 ## Live Kontomierz evidence gate
 
-Run only against an explicitly accepted disposable account:
+Run only against an explicitly accepted disposable account and include every documented live-test guard:
 
 ```bash
 KONTOMIERZ_EXTERNAL_TESTS=1 \
 KONTOMIERZ_ALLOW_REAL_MUTATIONS=1 \
+KONTOMIERZ_EXCLUSIVE_DISPOSABLE_ACCOUNT=1 \
+KONTOMIERZ_DISPOSABLE_WALLET_ID=123 \
 .venv/bin/python -m pytest -o addopts='' -m external -q tests/external/test_real_kontomierz_contract.py
 ```
 
-Both opt-ins are required before credential access. The guard pre-cleans the unique namespace, captures a budget baseline, then after each test traverses paid/unpaid schedules, reconciles transactions and new budgets, deletes discovered resources, and fails if cleanup cannot be verified.
+Both mutation opt-ins are required before credential access. The guard also verifies the expected disposable wallet in the authenticated account before any cleanup or mutation, pre-cleans the unique namespace, captures a budget baseline, and after each test reconciles/deletes test-owned schedules, transactions, and new budgets. The live run fails if cleanup cannot be confirmed.
 
 Implemented live evidence covers read shapes, form-encoded schedule/transaction/budget writes, schedule paid/unpaid transitions, schedule pagination ordering/termination, withdrawal normalization, credential rejection/success, upstream `DD-MM-YYYY` behavior, and JSON-write rejection. Remaining real-system gaps include `client_assigned_id` uniqueness/reconciliation, post-send timeout reconciliation, real rate limits, broader precision/rounding limits, readiness credential recovery, budget-copy behavior, wallet mutation response behavior, and populated transaction pagination termination.
 
-## Trusted standards authority
+## Structural standards evidence versus provider-backed acceptance
 
-`trusted-executable-sources.lock.yaml` is the single authority source. It binds the reviewed exact `paulomac1000/ai-skills` revision and SHA-256 digests for every trusted executable used by standards CI. CI resolves authority coordinates from that lock, validates the lock from the immutable external checkout, then runs AFDS, AGENTS, workflow policy, consumer-trust hygiene, MCP discovery, upstream-contract, and live-backend-policy checks. If the authority branch moves, review its delta and update this canonical lock only when the new branch head is the intended authority; a previously green run against an older lock is not evidence for the later revision.
+`trusted-executable-sources.lock.yaml` is the candidate-side executable-provenance declaration. Candidate-owned CI may resolve the declared immutable `ai-skills` revision, validate its recorded digests, and run structural standards checks from that checkout. This proves which verifier bytes ran; it does not prove provider-backed approval because the candidate controls the lock and its own CI orchestration.
+
+Provider-backed adoption must be rooted outside the candidate by calling `ai-skills/.github/workflows/consumer-acceptance.yml` at a full immutable authority SHA. The reusable workflow independently supplies the authority identity, compares it with the candidate lock, performs provider-control preflight against GitHub itself, validates exact-SHA evidence, and requires an independent review.
+
+The current state is **`provider-preflight-blocked`**: GitHub reports `main` as unprotected and reports no environments, while `.github/workflows/publish.yml` declares the protected `release` environment. Repository code cannot repair those provider settings. An administrator must establish them and then rerun the external preflight.
 
 ## Release trust and administrative gate
 
@@ -69,36 +75,30 @@ The release workflow deliberately separates candidate execution from production 
 2. `quarantine` has no production package permission. It loads/smokes the tested CI archive, pushes it to an isolated non-GHCR registry, resolves an immutable digest, removes the local image, pulls `reference@digest`, rechecks the OCI source-revision label, and smokes the pulled digest.
 3. Protected `publish` receives only the immutable quarantine reference/digest. It never checks out candidate code, downloads the archive, loads the image, or runs candidate content; it promotes the exact digest to GHCR using registry tooling, verifies the production digest, and emits a promotion attestation.
 
-Administrators must create/protect the `release` environment and configure `QUARANTINE_REGISTRY`, `QUARANTINE_REPOSITORY`, `QUARANTINE_USERNAME`, and `QUARANTINE_TOKEN`. The quarantine registry must not be production GHCR. The source tree cannot prove the actual provider scope of the secret, so `tests/external/test_production_evidence.py` intentionally requires provider-backed proof that the quarantine credential cannot mutate production.
+Administrators must create/protect the `release` environment and configure `QUARANTINE_REGISTRY`, `QUARANTINE_REPOSITORY`, `QUARANTINE_USERNAME`, and `QUARANTINE_TOKEN`. The quarantine registry must not be production GHCR. The source tree cannot prove the actual provider scope of the secret, so provider-backed evidence must prove that the quarantine credential cannot mutate production.
 
-## Provider and repository evidence gate
+## External-admin checklist
 
-The external provider suite must eventually prove:
+Before provider-backed acceptance can move beyond `provider-preflight-blocked`, an administrator must make the following provider state observable and acceptable, then rerun the trusted preflight:
 
-- the protected `release` environment has required reviewers, self-review prevention, and protected-branch policy;
-- quarantine credentials are isolated from production authority;
-- provider-backed migration/adoption assessment matches the final immutable SHA and a real independent GitHub review;
-- provider-verifiable provenance binds the original read-only CI build to that SHA/artifact.
-
-Run those placeholders only deliberately:
-
-```bash
-.venv/bin/python -m pytest -o addopts='' -m "external and evidence" -q tests/external/test_production_evidence.py
-```
-
-The command remains intentionally red until the external authorities exist. Never fabricate run IDs, reviewer IDs, registry scope, digests, or approval records.
+- repository: `paulomac1000/kontomierz-mcp`;
+- default branch: `main`, protected by provider policy with the reviewed required checks/merge policy;
+- environment: literal `release`, present in GitHub and protected by reviewed reviewer/deployment-branch rules, including self-review prevention where required by the chosen release policy;
+- quarantine credentials: scoped so they cannot mutate the production GHCR package;
+- external acceptance: caller pins the authority reusable workflow by full SHA and supplies the exact candidate SHA rather than a branch name;
+- independent review and build-provenance evidence: both bind to that exact candidate/artifact identity.
 
 ## Definition of done
 
 The candidate may be treated as fully production/adoption complete only when all of the following are true on one final immutable revision:
 
 1. normal hash-locked quality and compatibility gates pass;
-2. latest-reviewed standards and exact-artifact gates pass;
+2. the latest-reviewed structural standards and exact-artifact gates pass;
 3. required live Kontomierz evidence passes in an authorized disposable environment;
-4. all provider/repository placeholders are replaced by real executable verification and pass;
-5. release environment and quarantine registry/credential boundaries are administratively verified;
+4. provider branch/environment/credential controls are observable and pass the trusted external preflight;
+5. provider-backed acceptance is externally anchored to the intended immutable `ai-skills` workflow revision and exact candidate SHA;
 6. an independent reviewer submits the canonical review;
-7. provider-backed migration/adoption assessment and build provenance match the same SHA;
+7. provider-backed build provenance matches the same SHA/artifact;
 8. documentation/manifests claim no stronger guarantee than the evidence supports.
 
 The repository intentionally does not claim formal L2+ adoption before these conditions are met.

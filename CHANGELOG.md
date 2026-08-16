@@ -20,6 +20,7 @@ All notable changes to kontomierz-mcp are recorded here.
 
 ### Fixed
 
+- Official MCP tool inputs now use strict scalar validation and closed object schemas: numeric strings/booleans are not coerced, undeclared arguments are rejected before SDK normalization can drop them, explicit zero is rejected for optional positive IDs, and invalid falsey optional create values are not silently omitted.
 - Write bodies use `application/x-www-form-urlencoded`, matching the live Kontomierz API contract verified on 2026-08-08; known-broken JSON write mode is rejected for the real backend.
 - Plain `pytest` excludes `external` tests by default. Live-account mutation evidence requires both explicit mutation opt-ins plus `KONTOMIERZ_EXCLUSIVE_DISPOSABLE_ACCOUNT=1` and an expected `KONTOMIERZ_DISPOSABLE_WALLET_ID` that is verified against the authenticated account before cleanup or mutation.
 - Live cleanup traverses paid and unpaid schedule groups, reconciles the unique test namespace and budget snapshot only inside the verified exclusive disposable account, verifies deletion, and fails instead of swallowing unconfirmed cleanup.
@@ -44,7 +45,7 @@ All notable changes to kontomierz-mcp are recorded here.
 
 - Mock backend response shapes mirror verified real API shapes rather than convenient synthetic substitutes.
 - The real upstream write/date/pagination contract is documented in `docs/upstream-api.md` and machine-readable `upstream-contract.yaml` with live-account evidence from 2026-08-08.
-- Standards authority is canonicalized in `trusted-executable-sources.lock.yaml`; `mcp-server-architect` 1.3.0 governs this migration and the lock contains the reviewed exact `ai-skills` revision plus SHA-256 bindings for every trusted executable used by CI.
+- Candidate-owned structural standards CI declares its immutable `ai-skills` executable provenance in `trusted-executable-sources.lock.yaml`; `mcp-server-architect` 1.3.0 governs this migration and the lock contains the reviewed exact revision plus SHA-256 bindings for the trusted entrypoints it executes. Provider-backed acceptance remains externally anchored and does not trust the candidate lock as its root of authority.
 - Standards CI validates the canonical trust lock and runs consumer-trust hygiene, repository discovery, upstream/live-backend contracts, AFDS, AGENTS, and workflow-policy checks from the trusted checkout.
 - Release promotion is split into read-only artifact verification, unprivileged isolated-registry quarantine/smoke, and protected registry-to-registry production promotion. The privileged publisher never loads or executes candidate content.
 
@@ -60,7 +61,7 @@ All notable changes to kontomierz-mcp are recorded here.
 - Exact Linux x64 runtime/development wheel locks for Python 3.11–3.13 and separate build-tool lock; acceptance installs use exact SHA-256 wheel hashes without dependency resolution.
 - Exact-wheel and exact-image CI artifact path with source-revision OCI label, non-root smoke, checksummed closed bundle, protected promotion attestation, and a trusted MCP public-contract snapshot captured from that same wheel and included in the release checksum closure.
 - Real external evidence tests plus `live-backend-test-policy.yaml` and `upstream-contract.yaml`.
-- `trusted-executable-sources.lock.yaml` as the single immutable standards-authority coordinate and executable-integrity contract.
+- `trusted-executable-sources.lock.yaml` as the canonical candidate-side executable-provenance declaration, with provider-backed acceptance required to compare it against authority coordinates supplied outside the candidate repository.
 - Structural tests proving the privileged publisher cannot checkout/download/load/run candidate content and the quarantine lane remains unprivileged to production.
 
 ### Security

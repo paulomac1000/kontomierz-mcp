@@ -95,7 +95,7 @@ class ToolParameter:
 
     @property
     def signature_fragment(self) -> str:
-        annotation = f"Annotated[{self.annotation}, Field(description={self.description!r})]"
+        annotation = f"Annotated[{self.annotation}, Field(description={self.description!r}, strict=True)]"
         fragment = f"{self.name}: {annotation}"
         return fragment if self.required else f"{fragment} = {self.default!r}"
 

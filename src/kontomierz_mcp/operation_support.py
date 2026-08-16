@@ -42,6 +42,12 @@ def text(value: Any, name: str, *, max_bytes: int = 512) -> str:
     return bounded_text(value, name, max_bytes=max_bytes, allow_empty=False, strip=True)
 
 
+def boolean(value: Any, name: str) -> bool:
+    if type(value) is not bool:
+        fail(f"{name} must be a boolean")
+    return value
+
+
 @overload
 def identifier(value: Any, name: str, *, optional: Literal[False] = False) -> int: ...
 
@@ -51,7 +57,7 @@ def identifier(value: Any, name: str, *, optional: Literal[True]) -> int | None:
 
 
 def identifier(value: Any, name: str, *, optional: bool = False) -> int | None:
-    if optional and (value is None or (type(value) is int and value == 0)):
+    if optional and value is None:
         return None
     if type(value) is not int or value <= 0:
         fail(f"{name} must be a positive integer")

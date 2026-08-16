@@ -11,11 +11,13 @@ verification: Run the manifest, operation, kernel, client, security, and MCP SDK
 
 ## Inputs
 
-Stable positive numeric IDs returned by list tools are accepted by detail and mutation tools. Money is a finite decimal string plus a three-letter currency. Before normalization, decimal inputs are bounded to 64 UTF-8 bytes; after parsing, they are limited to at most 20 coefficient/integer digits and 8 decimal places so exponent notation cannot expand into an unbounded string. Wallet balances may be zero or negative because the upstream contract has not established a positive-only restriction. Public dates accept only `YYYY-MM-DD`; months accept only `YYYY-MM`. Legacy `DD-MM-YYYY` values are rejected at the public operation boundary and are produced only internally for the localized upstream contract.
+Stable positive numeric IDs returned by list tools are accepted by detail and mutation tools. Optional IDs are either omitted/`None` or strictly positive integers; explicit `0` is invalid unless a parameter documents its own zero sentinel (`per_page=0` is the current exception). Money is a finite decimal string plus a three-letter currency. Before normalization, decimal inputs are bounded to 64 UTF-8 bytes; after parsing, they are limited to at most 20 coefficient/integer digits and 8 decimal places so exponent notation cannot expand into an unbounded string. Wallet balances may be zero or negative because the upstream contract has not established a positive-only restriction. Public dates accept only `YYYY-MM-DD`; months accept only `YYYY-MM`. Legacy `DD-MM-YYYY` values are rejected at the public operation boundary and are produced only internally for the localized upstream contract.
+
+Public scalar types are strict at the official MCP boundary. Numeric strings are not accepted for integer parameters, integers/strings are not accepted for booleans, and non-strings are not accepted for string parameters. Tool input schemas advertise `additionalProperties: false`; undeclared arguments are rejected before SDK argument normalization can silently drop them. The same domain validators remain defensive when operations are invoked directly in tests or embedded code.
 
 Every public text or decimal-string input is bounded by a UTF-8 byte budget before it is copied into an upstream request. Current operation-level budgets include 64 bytes for decimal strings, 128 bytes for `client_assigned_id` and tag-name filters, 256 bytes for free-text search and wallet labels, and 512 bytes for schedule descriptions, transaction names, and tag strings. Dates, months, directions, chart kinds, and schedule-group values have narrower fixed-format bounds. These are application-enforced bounds; a client cannot bypass them by sending multibyte Unicode values whose character count is small but encoded byte size is large.
 
-For update tools, `None` means not provided. An empty string is an explicit request to clear a text field where the upstream accepts it.
+For update tools, `None` means not provided. An empty string is an explicit request to clear a text field where the upstream accepts it. Optional create fields use the same distinction: only the documented empty-string sentinel means “omit”; falsey values of another JSON type are validation errors rather than silently omitted fields.
 
 ## Outputs
 
@@ -29,7 +31,7 @@ The upstream adapter separately caps any decoded Kontomierz response body at 4 M
 
 ## Errors
 
-Tool failures return an explicit MCP `CallToolResult` with `is_error=true`, controlled text JSON, and `structured_content.error`. The error contains `code`, `message`, `retryable`, and optional `suggestion` or bounded details. SDK-added exception prefixes are not part of the contract.
+Application-dispatched tool failures return an explicit MCP `CallToolResult` with `is_error=true`, controlled text JSON, and `structured_content.error`. The error contains `code`, `message`, `retryable`, and optional `suggestion` or bounded details. Raw MCP schema/type failures may be rejected by the pinned SDK before application dispatch; undeclared arguments are rejected by the server's pre-dispatch governed-input middleware with the same application-owned structured error shape. SDK-added exception prefixes are not part of the application error contract.
 
 ## Safety, authorization, and retry
 
@@ -53,7 +55,7 @@ Because the legacy Kontomierz API requires `api_key` in the query string, applic
 
 ## Audit contract
 
-Each invocation creates exactly one bounded structured server-side audit event. It contains request ID, principal, transport, exact capability, target identity, resource identity, argument digest, authorization decision, operator-gate decision, dependency state, result category, duration, and cancellation/saturation/ambiguous flags. Credentials, raw arguments, protected result bodies, and raw upstream bodies are excluded. Free-form string fields are capped to 256 UTF-8 bytes (oversized values are replaced by a SHA-256 digest), categorical fields are validated against closed sets, and the serialized event has a hard 8 KiB ceiling.
+Each application-dispatched invocation creates exactly one bounded structured server-side audit event. It contains request ID, principal, transport, exact capability, target identity, resource identity, argument digest, authorization decision, operator-gate decision, dependency state, result category, duration, and cancellation/saturation/ambiguous flags. Credentials, raw arguments, protected result bodies, and raw upstream bodies are excluded. Protocol/schema failures that the official SDK or governed-input middleware rejects before application dispatch do not enter the invocation kernel and therefore do not claim this application audit record. Free-form string fields are capped to 256 UTF-8 bytes (oversized values are replaced by a SHA-256 digest), categorical fields are validated against closed sets, and the serialized event has a hard 8 KiB ceiling.
 
 The audit logger owns an INFO-capable handler and does not inherit the ordinary application `LOG_LEVEL`, so `LOG_LEVEL=WARNING` or stricter does not suppress invocation audit records. Audit emission is result-preserving fail-open: a logger failure after operation I/O must not transform a completed mutation into an application error that could trigger a dangerous retry. A bounded stderr failure signal is attempted when audit emission itself raises.
 
