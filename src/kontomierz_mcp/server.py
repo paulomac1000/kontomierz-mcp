@@ -74,6 +74,23 @@ def _validate_generated_definition(definition: Any) -> None:
         seen.add(parameter.name)
 
 
+def _close_tool_input_schemas(result: Any) -> None:
+    """Force closed tool-input object schemas for SDK and mapping list results."""
+    tools = result.get("tools") if isinstance(result, Mapping) else getattr(result, "tools", None)
+    if not isinstance(tools, list):
+        return
+
+    for tool in tools:
+        if isinstance(tool, Mapping):
+            input_schema = tool.get("inputSchema")
+            if input_schema is None:
+                input_schema = tool.get("input_schema")
+        else:
+            input_schema = getattr(tool, "input_schema", None)
+        if isinstance(input_schema, dict):
+            input_schema["additionalProperties"] = False
+
+
 def build_server(
     settings: Settings,
     kernel: InvocationKernel | None = None,
@@ -129,15 +146,8 @@ def build_server(
                             return call_tool_result(_error_document(error), is_error=True)
 
             result = await call_next(context)
-            if context.method == "tools/list" and isinstance(result, dict):
-                tools = result.get("tools")
-                if isinstance(tools, list):
-                    for tool in tools:
-                        if not isinstance(tool, dict):
-                            continue
-                        input_schema = tool.get("inputSchema")
-                        if isinstance(input_schema, dict):
-                            input_schema["additionalProperties"] = False
+            if context.method == "tools/list":
+                _close_tool_input_schemas(result)
             return result
 
     server_kwargs: dict[str, Any] = {

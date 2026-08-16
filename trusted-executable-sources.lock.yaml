@@ -3,7 +3,7 @@ sources:
   - id: ai-skills
     role: auditor
     repository: paulomac1000/ai-skills
-    revision: abb7dd33b18af999efa83a8d62dad074b1a691d5
+    revision: 5642088917c1fa548ffba55ce13cd2d8db987349
     credential_access: read-only-provider
     files:
       - authority_path: skills/afds-doc-writer/validate.py
@@ -29,8 +29,8 @@ sources:
       - authority_path: contracts/validate_trusted_executable_sources.py
         sha256: sha256:a97d353e99bd0ac04ce90e41b552e422cbe421e65ca27c7226894c216dfc2447
       - authority_path: contracts/validate_external_adoption.py
-        sha256: sha256:518cdc3b411064f2fcc33923e95d3082ba47a56c425d65f39f480ff011391e01
+        sha256: sha256:85750486b7bd3eff2905c4d105531863e003e693240390088bb1a9afb1cfffcb
       - authority_path: contracts/validate_external_trust_lock.py
         sha256: sha256:301952354990e9222a3a2cd587040ba10d15cf67f0458546d81138348e1dd348
       - authority_path: skills/ci-cd-architect/tools/check_github_provider_controls.py
-        sha256: sha256:2b7cf8eafda74c56535ef3dd08e199d19a02bd498650565c36629b287ecc4643
+        sha256: sha256:a0a8e513e78b1d6601eca9d7eaec112a7af120e59e74211dfacd3b5899c8c4f3

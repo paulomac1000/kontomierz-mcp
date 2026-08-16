@@ -21,6 +21,7 @@ All notable changes to kontomierz-mcp are recorded here.
 ### Fixed
 
 - Official MCP tool inputs now use strict scalar validation and closed object schemas: numeric strings/booleans are not coerced, undeclared arguments are rejected before SDK normalization can drop them, explicit zero is rejected for optional positive IDs, and invalid falsey optional create values are not silently omitted.
+- `tools/list` schema hardening now handles the official MCP SDK `ListToolsResult` model as well as mapping-shaped test adapters, so advertised input schemas remain closed after middleware processing.
 - Write bodies use `application/x-www-form-urlencoded`, matching the live Kontomierz API contract verified on 2026-08-08; known-broken JSON write mode is rejected for the real backend.
 - Plain `pytest` excludes `external` tests by default. Live-account mutation evidence requires both explicit mutation opt-ins plus `KONTOMIERZ_EXCLUSIVE_DISPOSABLE_ACCOUNT=1` and an expected `KONTOMIERZ_DISPOSABLE_WALLET_ID` that is verified against the authenticated account before cleanup or mutation.
 - Live cleanup traverses paid and unpaid schedule groups, reconciles the unique test namespace and budget snapshot only inside the verified exclusive disposable account, verifies deletion, and fails instead of swallowing unconfirmed cleanup.
@@ -46,6 +47,7 @@ All notable changes to kontomierz-mcp are recorded here.
 - Mock backend response shapes mirror verified real API shapes rather than convenient synthetic substitutes.
 - The real upstream write/date/pagination contract is documented in `docs/upstream-api.md` and machine-readable `upstream-contract.yaml` with live-account evidence from 2026-08-08.
 - Candidate-owned structural standards CI declares its immutable `ai-skills` executable provenance in `trusted-executable-sources.lock.yaml`; `mcp-server-architect` 1.3.0 governs this migration and the lock contains the reviewed exact revision plus SHA-256 bindings for the trusted entrypoints it executes. Provider-backed acceptance remains externally anchored and does not trust the candidate lock as its root of authority.
+- Provider-backed acceptance follows the authority-owned protected `consumer-acceptance-dispatch.yml` entrypoint, which calls the same-revision local `consumer-acceptance.yml`; a candidate-owned direct cross-repository reusable-workflow call is diagnostic only and is not treated as authoritative approval.
 - Standards CI validates the canonical trust lock and runs consumer-trust hygiene, repository discovery, upstream/live-backend contracts, AFDS, AGENTS, and workflow-policy checks from the trusted checkout.
 - Release promotion is split into read-only artifact verification, unprivileged isolated-registry quarantine/smoke, and protected registry-to-registry production promotion. The privileged publisher never loads or executes candidate content.
 

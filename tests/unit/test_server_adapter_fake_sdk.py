@@ -16,7 +16,7 @@ from kontomierz_mcp.config import Settings
 from kontomierz_mcp.manifests import TOOL_DEFINITIONS
 from kontomierz_mcp.mock_backend import MockKontomierzClient
 from kontomierz_mcp.mock_samples import SMOKE_SAMPLES
-from kontomierz_mcp.server import build_kernel, build_server, create_http_app
+from kontomierz_mcp.server import _close_tool_input_schemas, build_kernel, build_server, create_http_app
 
 HTTP_TOKEN = "a" * 32
 
@@ -132,6 +132,16 @@ class ProbeCountingDependency(MockKontomierzClient):
         return True
 
 
+class FakeListedTool:
+    def __init__(self) -> None:
+        self.input_schema: dict[str, Any] = {"type": "object"}
+
+
+class FakeListToolsResult:
+    def __init__(self) -> None:
+        self.tools = [FakeListedTool()]
+
+
 def install_fake_sdk(monkeypatch: pytest.MonkeyPatch) -> None:
     FakeMCPServer.last_instance = None
     mcp = ModuleType("mcp")
@@ -149,6 +159,17 @@ def install_fake_sdk(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setitem(sys.modules, "mcp.types", mcp_types)
     monkeypatch.setitem(sys.modules, "mcp.server", mcp_server)
     monkeypatch.setitem(sys.modules, "mcp.server.transport_security", mcp_transport_security)
+
+
+def test_close_tool_input_schemas_supports_sdk_and_mapping_results() -> None:
+    sdk_result = FakeListToolsResult()
+    mapping_result: dict[str, Any] = {"tools": [{"inputSchema": {"type": "object"}}]}
+
+    _close_tool_input_schemas(sdk_result)
+    _close_tool_input_schemas(mapping_result)
+
+    assert sdk_result.tools[0].input_schema["additionalProperties"] is False
+    assert mapping_result["tools"][0]["inputSchema"]["additionalProperties"] is False
 
 
 @pytest.mark.asyncio

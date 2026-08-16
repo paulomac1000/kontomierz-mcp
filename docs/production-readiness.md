@@ -5,7 +5,7 @@ type: guide
 status: evolving
 rigor: operational
 owners: [repository-maintainers]
-verification: Complete each external evidence gate on the exact candidate SHA, then run externally anchored provider-backed ai-skills acceptance with independent review.
+verification: Complete each external evidence gate on the exact candidate SHA, then run authority-owned provider-backed ai-skills acceptance with independent review.
 ---
 # Production readiness handoff
 
@@ -63,7 +63,7 @@ Implemented live evidence covers read shapes, form-encoded schedule/transaction/
 
 `trusted-executable-sources.lock.yaml` is the candidate-side executable-provenance declaration. Candidate-owned CI may resolve the declared immutable `ai-skills` revision, validate its recorded digests, and run structural standards checks from that checkout. This proves which verifier bytes ran; it does not prove provider-backed approval because the candidate controls the lock and its own CI orchestration.
 
-Provider-backed adoption must be rooted outside the candidate by calling `ai-skills/.github/workflows/consumer-acceptance.yml` at a full immutable authority SHA. The reusable workflow independently supplies the authority identity, compares it with the candidate lock, performs provider-control preflight against GitHub itself, validates exact-SHA evidence, and requires an independent review.
+Provider-backed adoption must start inside the authority repository from a protected authority ref through `.github/workflows/consumer-acceptance-dispatch.yml`. That dispatcher supplies the exact candidate repository and candidate SHA, then calls the same-revision local `consumer-acceptance.yml`. The reusable workflow verifies the authority caller/workflow repository and SHA, requires a protected authority ref, compares the externally supplied authority coordinates with the candidate trust lock, performs provider-control preflight against GitHub itself, validates exact-SHA evidence, and requires independent review. A direct candidate-owned cross-repository call to `consumer-acceptance.yml` is non-authoritative diagnostic evidence and does not satisfy provider-backed acceptance.
 
 The current state is **`provider-preflight-blocked`**: GitHub reports `main` as unprotected and reports no environments, while `.github/workflows/publish.yml` declares the protected `release` environment. Repository code cannot repair those provider settings. An administrator must establish them and then rerun the external preflight.
 
@@ -85,7 +85,7 @@ Before provider-backed acceptance can move beyond `provider-preflight-blocked`, 
 - default branch: `main`, protected by provider policy with the reviewed required checks/merge policy;
 - environment: literal `release`, present in GitHub and protected by reviewed reviewer/deployment-branch rules, including self-review prevention where required by the chosen release policy;
 - quarantine credentials: scoped so they cannot mutate the production GHCR package;
-- external acceptance: caller pins the authority reusable workflow by full SHA and supplies the exact candidate SHA rather than a branch name;
+- external acceptance: launch `paulomac1000/ai-skills/.github/workflows/consumer-acceptance-dispatch.yml` from the intended protected authority revision and supply the exact candidate repository/SHA; do not substitute a candidate-owned direct call to the reusable workflow;
 - independent review and build-provenance evidence: both bind to that exact candidate/artifact identity.
 
 ## Definition of done
@@ -96,7 +96,7 @@ The candidate may be treated as fully production/adoption complete only when all
 2. the latest-reviewed structural standards and exact-artifact gates pass;
 3. required live Kontomierz evidence passes in an authorized disposable environment;
 4. provider branch/environment/credential controls are observable and pass the trusted external preflight;
-5. provider-backed acceptance is externally anchored to the intended immutable `ai-skills` workflow revision and exact candidate SHA;
+5. authority-owned protected dispatch runs the same-revision acceptance workflow for the intended immutable `ai-skills` authority SHA and exact candidate SHA;
 6. an independent reviewer submits the canonical review;
 7. provider-backed build provenance matches the same SHA/artifact;
 8. documentation/manifests claim no stronger guarantee than the evidence supports.
