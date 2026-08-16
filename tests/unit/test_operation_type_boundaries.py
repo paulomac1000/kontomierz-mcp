@@ -3,7 +3,8 @@ from __future__ import annotations
 import pytest
 
 from kontomierz_mcp.errors import ApplicationError, ErrorCode
-from kontomierz_mcp.operation_support import bounded, bounded_text, identifier, page_limit
+from kontomierz_mcp.manifests import TOOL_DEFINITIONS
+from kontomierz_mcp.operation_support import bounded, bounded_text, date_value, identifier, page_limit
 
 
 @pytest.mark.parametrize("value", [[], {}, 1, True, None])
@@ -31,3 +32,22 @@ def test_page_limit_rejects_non_integer_types(value: object) -> None:
 def test_bounded_integer_does_not_coerce_strings() -> None:
     with pytest.raises(ApplicationError, match="must be an integer"):
         bounded("1", "repeat", {1, 2})
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["2026-8-1", "2026-08-1", "2026-8-01", " 2026-08-01", "2026-08-01 "],
+)
+def test_date_value_rejects_noncanonical_iso_spelling(value: str) -> None:
+    with pytest.raises(ApplicationError, match="deadline_on must be YYYY-MM-DD"):
+        date_value(value, "deadline_on")
+
+
+def test_date_value_preserves_canonical_iso_date() -> None:
+    assert date_value("2026-08-01", "deadline_on") == "2026-08-01"
+
+
+def test_create_schedule_usage_note_preserves_ambiguous_empty_success_contract() -> None:
+    usage_notes = TOOL_DEFINITIONS["create_schedule"].usage_notes
+    assert "AMBIGUOUS_OUTCOME" in usage_notes
+    assert "do not infer identity" in usage_notes

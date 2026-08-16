@@ -100,9 +100,11 @@ def direction(value: Any, *, allow_all: bool = False, plural: bool = False) -> s
 def parse_date(value: Any, name: str, *, optional: bool = False) -> date | None:
     if value is None and optional:
         return None
-    raw = bounded_text(value, name, max_bytes=10, allow_empty=optional, strip=True)
+    raw = bounded_text(value, name, max_bytes=10, allow_empty=optional, strip=False)
     if not raw and optional:
         return None
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", raw) is None:
+        fail(f"{name} must be YYYY-MM-DD")
     try:
         return datetime.strptime(raw, "%Y-%m-%d").date()
     except ValueError:

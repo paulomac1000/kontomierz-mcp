@@ -36,8 +36,9 @@ TERTIARY_TOOL_DEFINITIONS: dict[str, ToolDefinition] = {
             ),
         ),
         usage_notes=(
-            "The verified upstream returns an empty success body; the result therefore marks reconciliation_required "
-            "and list_scheduled_transactions must be used to obtain the created stable ID"
+            "The verified upstream returns an empty success body, so creation returns AMBIGUOUS_OUTCOME until "
+            "the exact created resource is independently reconciled; do not infer identity from non-unique "
+            "schedule fields."
         ),
     ),
     "update_schedule": ToolDefinition(
