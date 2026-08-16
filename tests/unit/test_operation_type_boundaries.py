@@ -4,7 +4,7 @@ import pytest
 
 from kontomierz_mcp.errors import ApplicationError, ErrorCode
 from kontomierz_mcp.manifests import TOOL_DEFINITIONS
-from kontomierz_mcp.operation_support import bounded, bounded_text, date_value, identifier, page_limit
+from kontomierz_mcp.operation_support import bounded, bounded_text, date_value, identifier, month, page_limit
 
 
 @pytest.mark.parametrize("value", [[], {}, 1, True, None])
@@ -46,6 +46,19 @@ def test_date_value_rejects_noncanonical_iso_spelling(value: str) -> None:
 
 def test_date_value_preserves_canonical_iso_date() -> None:
     assert date_value("2026-08-01", "deadline_on") == "2026-08-01"
+
+
+@pytest.mark.parametrize("value", ["2026-8", "2026-00", "2026-13", " 2026-08", "2026-08 "])
+def test_month_rejects_noncanonical_spelling(value: str) -> None:
+    with pytest.raises(ApplicationError) as captured:
+        month(value)
+    assert captured.value.code is ErrorCode.INVALID_PARAMETER
+
+
+def test_month_preserves_canonical_value_and_empty_sentinel() -> None:
+    assert month("2026-08") == "2026-08"
+    assert month("") == ""
+    assert month(None) == ""
 
 
 def test_create_schedule_usage_note_preserves_ambiguous_empty_success_contract() -> None:
