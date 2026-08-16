@@ -368,7 +368,7 @@ jobs:
           .artifact-test-venv/bin/python -m pip check
           mkdir -p /tmp/kontomierz-wheel-test
           cp -R \
-            tests scripts .github pyproject.toml live-backend-test-policy.yaml upstream-contract.yaml \
+            tests scripts .github Dockerfile pyproject.toml live-backend-test-policy.yaml upstream-contract.yaml \
             trusted-executable-sources.lock.yaml /tmp/kontomierz-wheel-test/
           (
             cd /tmp/kontomierz-wheel-test
