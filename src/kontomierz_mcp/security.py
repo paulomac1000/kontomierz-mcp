@@ -95,34 +95,70 @@ class BearerPrincipalMiddleware:
         if self._protected_paths is not None and scope.get("path") not in self._protected_paths:
             # Do not pass an unauthenticated request into the mounted SDK app: future SDK routes
             # must not silently become public merely because the outer router has a catch-all mount.
-            emit_boundary_rejection(stage="routing", result="HTTP_404", route="unknown", authenticated=False)
+            emit_boundary_rejection(
+                transport="streamable-http",
+                stage="routing",
+                result="HTTP_404",
+                route="unknown",
+                authenticated=False,
+            )
             await self._not_found(send)
             return
 
         values = [value for name, value in scope.get("headers", ()) if name.lower() == b"authorization"]
         if len(values) != 1 or len(values[0]) > self._MAX_AUTHORIZATION_BYTES:
-            emit_boundary_rejection(stage="authentication", result="HTTP_401", route=route, authenticated=False)
+            emit_boundary_rejection(
+                transport="streamable-http",
+                stage="authentication",
+                result="HTTP_401",
+                route=route,
+                authenticated=False,
+            )
             await self._reject(send)
             return
         try:
             header = values[0].decode("ascii")
         except UnicodeDecodeError:
-            emit_boundary_rejection(stage="authentication", result="HTTP_401", route=route, authenticated=False)
+            emit_boundary_rejection(
+                transport="streamable-http",
+                stage="authentication",
+                result="HTTP_401",
+                route=route,
+                authenticated=False,
+            )
             await self._reject(send)
             return
         scheme, separator, supplied = header.partition(" ")
         if separator != " " or scheme.lower() != "bearer" or not supplied:
-            emit_boundary_rejection(stage="authentication", result="HTTP_401", route=route, authenticated=False)
+            emit_boundary_rejection(
+                transport="streamable-http",
+                stage="authentication",
+                result="HTTP_401",
+                route=route,
+                authenticated=False,
+            )
             await self._reject(send)
             return
         try:
             supplied_bytes = supplied.encode("ascii")
         except UnicodeEncodeError:
-            emit_boundary_rejection(stage="authentication", result="HTTP_401", route=route, authenticated=False)
+            emit_boundary_rejection(
+                transport="streamable-http",
+                stage="authentication",
+                result="HTTP_401",
+                route=route,
+                authenticated=False,
+            )
             await self._reject(send)
             return
         if not hmac.compare_digest(supplied_bytes, self._token):
-            emit_boundary_rejection(stage="authentication", result="HTTP_401", route=route, authenticated=False)
+            emit_boundary_rejection(
+                transport="streamable-http",
+                stage="authentication",
+                result="HTTP_401",
+                route=route,
+                authenticated=False,
+            )
             await self._reject(send)
             return
 
@@ -142,7 +178,13 @@ class BearerPrincipalMiddleware:
         finally:
             reset_invocation_context(token)
         if response_status == 400:
-            emit_boundary_rejection(stage="protocol", result="HTTP_400", route=route, authenticated=True)
+            emit_boundary_rejection(
+                transport="streamable-http",
+                stage="protocol",
+                result="HTTP_400",
+                route=route,
+                authenticated=True,
+            )
 
     @staticmethod
     async def _not_found(send: Send) -> None:
