@@ -137,7 +137,7 @@ def _bounded_ascii_secret(value: str, name: str) -> str:
     except UnicodeEncodeError as exc:
         raise ConfigurationError(f"{name} must contain ASCII characters only") from exc
     if len(encoded) < 32:
-        raise ConfigurationError(f"{name} must contain at least 32 ASCII bytes")
+        raise ConfigurationError(f"{name} must contain at least 32 ASCII bytes (got {len(encoded)})")
     if len(encoded) > _MAX_HTTP_CREDENTIAL_BYTES:
         raise ConfigurationError(f"{name} must not exceed {_MAX_HTTP_CREDENTIAL_BYTES} ASCII bytes")
     if any(byte <= 0x20 or byte > 0x7E for byte in encoded):
