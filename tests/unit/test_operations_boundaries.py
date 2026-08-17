@@ -52,6 +52,33 @@ async def test_update_wallet_validates_converted_money_field(operations) -> None
 
 
 @pytest.mark.asyncio
+async def test_create_budget_rejects_category_group_used_as_leaf(operations) -> None:
+    ops, _ = operations
+    with pytest.raises(ApplicationError) as captured:
+        await ops["create_budget"](limit="10.00", month="2026-12", category_id=1)
+    assert captured.value.code is ErrorCode.INVALID_PARAMETER
+    assert "category_id must reference a leaf category" in captured.value.message
+    assert "category_group_id" in captured.value.message
+
+
+@pytest.mark.asyncio
+async def test_create_budget_rejects_leaf_category_used_as_group(operations) -> None:
+    ops, _ = operations
+    with pytest.raises(ApplicationError) as captured:
+        await ops["create_budget"](limit="10.00", month="2026-12", category_group_id=11)
+    assert captured.value.code is ErrorCode.INVALID_PARAMETER
+    assert "category_group_id must reference a category group" in captured.value.message
+    assert "category_id" in captured.value.message
+
+
+@pytest.mark.asyncio
+async def test_create_budget_accepts_unknown_category_ids_without_preflight_rejection(operations) -> None:
+    ops, _ = operations
+    result = await ops["create_budget"](limit="10.00", month="2026-12", category_id=99999)
+    assert result["id"] is not None
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("field", ["user_account_id", "category_id", "category_group_id"])
 async def test_negative_optional_ids_are_rejected(operations, field: str) -> None:
     ops, _ = operations

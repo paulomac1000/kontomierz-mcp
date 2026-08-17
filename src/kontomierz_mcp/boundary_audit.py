@@ -9,7 +9,7 @@ from .audit import configure_audit_sink
 
 BoundaryTransport = Literal["stdio", "streamable-http"]
 BoundaryStage = Literal["authentication", "routing", "protocol", "schema"]
-BoundaryResult = Literal["HTTP_400", "HTTP_401", "HTTP_404", "INVALID_PARAMETER"]
+BoundaryResult = Literal["HTTP_400", "HTTP_401", "HTTP_403", "HTTP_404", "HTTP_413", "HTTP_421", "INVALID_PARAMETER"]
 BoundaryRoute = Literal["mcp", "health-ready", "unknown"]
 
 

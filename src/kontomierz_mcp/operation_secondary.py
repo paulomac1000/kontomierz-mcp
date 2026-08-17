@@ -24,23 +24,51 @@ from .operation_support import (
 )
 
 
+async def _known_category_ids(client: Any) -> tuple[set[int], set[int]]:
+    groups: set[int] = set()
+    leaves: set[int] = set()
+    for direction_value in ("withdrawal", "deposit"):
+        listed = await resolve(client.get_categories(direction_value))
+        if not isinstance(listed, list):
+            continue
+        for group in listed:
+            if not isinstance(group, dict) or not isinstance(group.get("id"), int):
+                continue
+            groups.add(group["id"])
+            nested = group.get("categories")
+            if not isinstance(nested, list):
+                continue
+            for leaf in nested:
+                if isinstance(leaf, dict) and isinstance(leaf.get("id"), int):
+                    leaves.add(leaf["id"])
+    return groups, leaves
+
+
 async def dispatch_secondary(name: str, a: dict[str, Any], client: Any) -> Any:
     if name == "list_budgets":
         items = await resolve(client.get_budgets(month(a.get("month", "")) or None))
         return {"items": items, "items_in_page": len(items), "month": a.get("month") or None}
     if name == "create_budget":
-        category = identifier(a.get("category_id"), "category_id", optional=True)
-        budget_group = identifier(a.get("category_group_id"), "category_group_id", optional=True)
-        if (category is None) == (budget_group is None):
+        leaf_id = identifier(a.get("category_id"), "category_id", optional=True)
+        group_id = identifier(a.get("category_group_id"), "category_group_id", optional=True)
+        budget_limit = money(a["limit"], "limit", positive=True)
+        budget_month = month(a.get("month", ""))
+        if (leaf_id is None) == (group_id is None):
             fail("provide exactly one of category_id or category_group_id")
-        return await resolve(
-            client.create_budget(
-                money(a["limit"], "limit", positive=True),
-                category,
-                budget_group,
-                month(a.get("month", "")),
+        # Upstream rejects a category group passed as category_id with an opaque 404;
+        # reject the certain type mismatch before any mutation I/O.
+        known_groups, known_leaves = await _known_category_ids(client)
+        if leaf_id is not None and leaf_id in known_groups and leaf_id not in known_leaves:
+            fail(
+                f"category_id must reference a leaf category; {leaf_id} is a category group"
+                " (pass it as category_group_id)"
             )
-        )
+        if group_id is not None and group_id in known_leaves and group_id not in known_groups:
+            fail(
+                f"category_group_id must reference a category group; {group_id} is a leaf"
+                " category (pass it as category_id)"
+            )
+        return await resolve(client.create_budget(budget_limit, leaf_id, group_id, budget_month))
     if name == "update_budget":
         return await resolve(
             client.update_budget(

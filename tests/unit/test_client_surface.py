@@ -73,10 +73,10 @@ async def test_full_http_adapter_surface() -> None:
     assert await client.update_budget(3, "20") == {"id": 3}
     assert await client.delete_budget(3) is True
     assert await client.copy_budgets_from_last_month() is True
-    assert await client.get_scheduled_transactions(page=1) == [{"id": 4}]
-    assert await client.get_schedule(4) == {"id": 4}
-    assert await client.create_schedule(description="") == {"id": 4}
-    assert await client.update_schedule(4, description="") == {"id": 4}
+    assert await client.get_scheduled_transactions(page=1) == [{"schedule_id": 4}]
+    assert await client.get_schedule(4) == {"schedule_id": 4}
+    assert await client.create_schedule(description="") == {"schedule_id": 4}
+    assert await client.update_schedule(4, description="") == {"schedule_id": 4}
     assert await client.delete_schedule(4) is True
     assert await client.mark_schedule_paid(4, "01-08-2026") is True
     assert await client.mark_schedule_unpaid(4, "01-08-2026") is True

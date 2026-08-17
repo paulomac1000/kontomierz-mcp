@@ -18,7 +18,7 @@ SMOKE_SAMPLES: dict[str, dict[str, Any]] = {
     "list_tags": {},
     "list_currencies": {},
     "list_budgets": {},
-    "create_budget": {"limit": "100", "category_id": 1},
+    "create_budget": {"limit": "100", "category_id": 11},
     "update_budget": {"budget_id": 201, "limit": "110"},
     "delete_budget": {"budget_id": 201},
     "copy_budgets_from_last_month": {},

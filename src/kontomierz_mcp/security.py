@@ -4,14 +4,24 @@ from __future__ import annotations
 
 import hmac
 import os
+from collections.abc import Mapping
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from typing import Literal
 
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from .boundary_audit import BoundaryRoute, emit_boundary_rejection
+from .boundary_audit import BoundaryResult, BoundaryRoute, emit_boundary_rejection
 from .config import Settings
+
+# HTTP-level transport-policy rejections surfaced by the SDK app after authentication:
+# 400 malformed JSON-RPC, 403 Origin policy, 413 request-body bound, 421 Host policy.
+_PROTOCOL_REJECTIONS: Mapping[int, BoundaryResult] = {
+    400: "HTTP_400",
+    403: "HTTP_403",
+    413: "HTTP_413",
+    421: "HTTP_421",
+}
 
 Transport = Literal["stdio", "streamable-http"]
 
@@ -183,11 +193,12 @@ class BearerPrincipalMiddleware:
             await self._app(scope, receive, audited_send)
         finally:
             reset_invocation_context(token)
-        if response_status == 400:
+        protocol_result = _PROTOCOL_REJECTIONS.get(response_status) if response_status is not None else None
+        if protocol_result is not None:
             emit_boundary_rejection(
                 transport="streamable-http",
                 stage="protocol",
-                result="HTTP_400",
+                result=protocol_result,
                 route=route,
                 authenticated=True,
                 principal=self._principal,

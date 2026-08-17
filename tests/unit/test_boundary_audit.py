@@ -140,6 +140,51 @@ async def test_unknown_route_and_authenticated_protocol_400_are_audited_without_
     assert "malformed and protected" not in serialized
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [403, 413, 421])
+async def test_transport_policy_rejections_are_audited_as_protocol_events(status: int) -> None:
+    stream = io.StringIO()
+    logger = logging.getLogger("kontomierz_mcp.audit")
+    previous_handlers = list(logger.handlers)
+    previous_level = logger.level
+    previous_propagate = logger.propagate
+    configure_audit_sink(stream=stream, replace=True)
+
+    async def inner(
+        _scope: Any,
+        _receive: Any,
+        send: Callable[[dict[str, Any]], Awaitable[None]],
+    ) -> None:
+        await send({"type": "http.response.start", "status": status, "headers": []})
+        await send({"type": "http.response.body", "body": b""})
+
+    middleware = BearerPrincipalMiddleware(
+        inner,
+        _settings(),
+        public_paths=frozenset({"/health/live"}),
+        protected_paths=frozenset({"/mcp", "/health/ready"}),
+    )
+    try:
+        messages = await _invoke(middleware, path="/mcp", authorization=f"Bearer {HTTP_TOKEN}")
+        event = json.loads(stream.getvalue().strip())
+    finally:
+        logger.handlers[:] = previous_handlers
+        logger.setLevel(previous_level)
+        logger.propagate = previous_propagate
+
+    assert messages[0]["status"] == status
+    assert event == {
+        "audit_failure_policy": "fail-open-result-preserving",
+        "authenticated": True,
+        "event": "mcp_boundary_rejection",
+        "principal": "operator:test",
+        "result": f"HTTP_{status}",
+        "route": "mcp",
+        "stage": "protocol",
+        "transport": "streamable-http",
+    }
+
+
 def test_boundary_audit_sink_failure_is_swallowed_without_raising(monkeypatch: pytest.MonkeyPatch) -> None:
     from kontomierz_mcp import boundary_audit
 

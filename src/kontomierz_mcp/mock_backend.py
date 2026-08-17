@@ -306,7 +306,7 @@ class MockKontomierzClient:
     def get_schedule(self, schedule_id: int) -> dict[str, Any]:
         item = self._find(self.schedules, schedule_id)
         return {
-            "id": item["id"],
+            "schedule_id": item["id"],
             "next_deadline_on": item.get("next_deadline_on"),
             "description": item["description"],
             "currency_amount": item["currency_amount"],
@@ -320,12 +320,19 @@ class MockKontomierzClient:
     def create_schedule(self, **fields: Any) -> dict[str, Any]:
         item = {"id": self._next_id(self.schedules), "paid": False, **fields}
         self.schedules.append(item)
-        return deepcopy(item)
+        return self._public_schedule(item)
 
     def update_schedule(self, schedule_id: int, **fields: Any) -> dict[str, Any]:
         item = self._find(self.schedules, schedule_id)
         item.update({key: value for key, value in fields.items() if value is not None})
-        return deepcopy(item)
+        return self._public_schedule(item)
+
+    @staticmethod
+    def _public_schedule(item: dict[str, Any]) -> dict[str, Any]:
+        public = {key: deepcopy(value) for key, value in item.items() if key != "paid"}
+        if "id" in public and "schedule_id" not in public:
+            public["schedule_id"] = public.pop("id")
+        return public
 
     def delete_schedule(self, schedule_id: int) -> bool:
         item = self._find(self.schedules, schedule_id)

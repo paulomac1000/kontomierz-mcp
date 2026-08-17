@@ -15,6 +15,16 @@ Json = dict[str, Any] | list[Any]
 _MAX_UPSTREAM_RESPONSE_BYTES = 4 * 1024 * 1024
 
 
+def _schedule_identity(item: dict[str, Any]) -> dict[str, Any]:
+    """Expose one public schedule identity key: upstream list rows carry
+    ``schedule_id`` while single-object endpoints carry ``id``."""
+    if "id" in item and "schedule_id" not in item:
+        renamed = dict(item)
+        renamed["schedule_id"] = renamed.pop("id")
+        return renamed
+    return item
+
+
 class KontomierzClient:
     """Dependency client that owns one cancellation-aware asynchronous session."""
 
@@ -424,7 +434,7 @@ class KontomierzClient:
                 "scheduled_transactions",
             )
         )
-        return [self._canonicalize_date_fields(item, "transaction_on") for item in items]
+        return [self._canonicalize_date_fields(_schedule_identity(item), "transaction_on") for item in items]
 
     async def get_schedule(self, schedule_id: int) -> dict[str, Any]:
         item = self._response_object(
@@ -432,7 +442,7 @@ class KontomierzClient:
             "schedule",
             write=False,
         )
-        return self._canonicalize_date_fields(item, "deadline_on", "next_deadline_on")
+        return self._canonicalize_date_fields(_schedule_identity(item), "deadline_on", "next_deadline_on")
 
     async def create_schedule(self, **fields: Any) -> dict[str, Any]:
         payload = await self._schedule_write("POST", "schedules.json", fields)
@@ -453,7 +463,7 @@ class KontomierzClient:
         if payload is None:
             return None
         item = self._response_object(payload, "schedule", write=True)
-        return self._canonicalize_date_fields(item, "deadline_on", "next_deadline_on")
+        return self._canonicalize_date_fields(_schedule_identity(item), "deadline_on", "next_deadline_on")
 
     async def delete_schedule(self, schedule_id: int) -> bool:
         return bool(await self._request("DELETE", f"schedules/{schedule_id}.json", expect_json=False))
