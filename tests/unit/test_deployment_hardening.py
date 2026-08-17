@@ -158,3 +158,13 @@ def test_container_build_is_bound_to_source_revision_and_exposes_healthcheck() -
     assert "kontomierz_mcp.healthcheck" in dockerfile
     assert "dist/SOURCE_REVISION" in ci
     assert '--build-arg "EXPECTED_SOURCE_REVISION=${SOURCE_SHA}"' in ci
+
+
+def test_exact_artifact_wheel_builds_are_pinned_to_commit_timestamp() -> None:
+    ci = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    local_gate = (ROOT / "scripts/local_exact_gate.py").read_text(encoding="utf-8")
+
+    assert 'SOURCE_DATE_EPOCH="$(git log -1 --format=%ct HEAD)"' in ci
+    assert "export SOURCE_DATE_EPOCH" in ci
+    assert "SOURCE_DATE_EPOCH" in ci.split("Build exact application wheel", 1)[1].split("Materialize", 1)[0]
+    assert '"SOURCE_DATE_EPOCH": _source_date_epoch()' in local_gate

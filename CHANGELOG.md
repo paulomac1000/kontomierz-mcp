@@ -62,6 +62,7 @@ All notable changes to kontomierz-mcp are recorded here.
 - Bounded admission/concurrency, per-target write serialization, dependency-aware readiness, response-size enforcement, and conservative ambiguous-write handling.
 - Exact Linux x64 runtime/development wheel locks for Python 3.11–3.13 and separate build-tool lock; acceptance installs use exact SHA-256 wheel hashes without dependency resolution.
 - Exact-wheel and exact-image CI artifact path with source-revision OCI label, non-root smoke, checksummed closed bundle, protected promotion attestation, and a trusted MCP public-contract snapshot captured from that same wheel and included in the release checksum closure.
+- Deterministic exact-wheel builds: application wheels are built with `SOURCE_DATE_EPOCH` pinned to the source commit timestamp in CI and in `scripts/local_exact_gate.py`, so independent builds of one revision produce byte-identical wheel checksums.
 - Real external evidence tests plus `live-backend-test-policy.yaml` and `upstream-contract.yaml`.
 - `trusted-executable-sources.lock.yaml` as the canonical candidate-side executable-provenance declaration, with provider-backed acceptance required to compare it against authority coordinates supplied outside the candidate repository.
 - Structural tests proving the privileged publisher cannot checkout/download/load/run candidate content and the quarantine lane remains unprivileged to production.

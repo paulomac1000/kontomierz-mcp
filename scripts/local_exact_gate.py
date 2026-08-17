@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -21,7 +22,13 @@ ROOT = Path(__file__).resolve().parents[1]
 _RUNTIME_LOCK = ROOT / "requirements/runtime-linux-x64-py312.lock"
 
 
-def _run(arguments: list[str], *, cwd: Path = ROOT, capture: bool = False) -> str:
+def _run(
+    arguments: list[str],
+    *,
+    cwd: Path = ROOT,
+    capture: bool = False,
+    env: dict[str, str] | None = None,
+) -> str:
     completed = subprocess.run(
         arguments,
         cwd=cwd,
@@ -29,12 +36,20 @@ def _run(arguments: list[str], *, cwd: Path = ROOT, capture: bool = False) -> st
         text=True,
         capture_output=capture,
         timeout=20 * 60,
+        env={**os.environ, **env} if env is not None else None,
     )
     return completed.stdout.strip() if capture else ""
 
 
 def _source_sha() -> str:
     return _run(["git", "rev-parse", "HEAD"], capture=True)
+
+
+def _source_date_epoch() -> str:
+    epoch = _run(["git", "log", "-1", "--format=%ct", "HEAD"], capture=True)
+    if not epoch.isdigit() or int(epoch) <= 0:
+        raise RuntimeError("could not determine a valid commit timestamp for deterministic wheel builds")
+    return epoch
 
 
 def _require_clean_checkout(root: Path) -> None:
@@ -175,7 +190,10 @@ def _build_exact_image(source_sha: str) -> None:
     shutil.rmtree(ROOT / "build", ignore_errors=True)
     for egg_info in (ROOT / "src").glob("*.egg-info"):
         shutil.rmtree(egg_info, ignore_errors=True)
-    _run([sys.executable, "-m", "pip", "wheel", "--no-deps", "--no-build-isolation", ".", "--wheel-dir", "dist"])
+    _run(
+        [sys.executable, "-m", "pip", "wheel", "--no-deps", "--no-build-isolation", ".", "--wheel-dir", "dist"],
+        env={"SOURCE_DATE_EPOCH": _source_date_epoch()},
+    )
     wheelhouse = ROOT / "dist/wheelhouse"
     wheelhouse.mkdir(parents=True, exist_ok=True)
     _run(
