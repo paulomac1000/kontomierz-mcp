@@ -17,6 +17,41 @@ def operations():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("liquid", ["2", "yes", ""])
+async def test_create_wallet_rejects_non_binary_liquid(operations, liquid: str) -> None:
+    ops, _ = operations
+    with pytest.raises(ApplicationError) as captured:
+        await ops["create_wallet"](currency_balance="10.00", currency_name="pln", liquid=liquid)
+    assert captured.value.code is ErrorCode.INVALID_PARAMETER
+    assert captured.value.message == "liquid must be 0 or 1"
+
+
+@pytest.mark.asyncio
+async def test_update_wallet_converts_each_provided_field_and_rejects_bad_liquid(operations) -> None:
+    ops, _ = operations
+    updated = await ops["update_wallet"](
+        wallet_id=101,
+        currency_balance="12.50",
+        currency_name="eur",
+        user_name="savings",
+        liquid="0",
+    )
+    assert updated["id"] == 101
+    with pytest.raises(ApplicationError) as captured:
+        await ops["update_wallet"](wallet_id=101, liquid="maybe")
+    assert captured.value.code is ErrorCode.INVALID_PARAMETER
+    assert captured.value.message == "liquid must be 0 or 1"
+
+
+@pytest.mark.asyncio
+async def test_update_wallet_validates_converted_money_field(operations) -> None:
+    ops, _ = operations
+    with pytest.raises(ApplicationError) as captured:
+        await ops["update_wallet"](wallet_id=101, currency_balance="not-money")
+    assert captured.value.code is ErrorCode.INVALID_PARAMETER
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("field", ["user_account_id", "category_id", "category_group_id"])
 async def test_negative_optional_ids_are_rejected(operations, field: str) -> None:
     ops, _ = operations

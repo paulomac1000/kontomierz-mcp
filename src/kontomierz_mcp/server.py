@@ -23,7 +23,7 @@ from .kernel import InvocationKernel
 from .manifests import TOOL_DEFINITIONS
 from .mock_backend import MockKontomierzClient
 from .operations import build_operations
-from .security import BearerPrincipalMiddleware, current_invocation_context
+from .security import BearerPrincipalMiddleware, InvocationContext, current_invocation_context
 
 _logger = logging.getLogger(__name__)
 _SENSITIVE_HTTP_LOGGERS = ("httpx", "httpcore")
@@ -133,6 +133,8 @@ def build_server(
 
     def audit_pre_dispatch_rejection(stage: BoundaryStage) -> None:
         invocation_context = current_invocation_context()
+        if invocation_context is None and settings.transport == "stdio":
+            invocation_context = InvocationContext.local_stdio()
         emit_boundary_rejection(
             transport="stdio" if settings.transport == "stdio" else "streamable-http",
             stage=stage,
@@ -141,6 +143,7 @@ def build_server(
             authenticated=(
                 invocation_context.authenticated if invocation_context is not None else settings.transport == "stdio"
             ),
+            principal=invocation_context.principal if invocation_context is not None else None,
         )
 
     allowed_arguments = {

@@ -20,8 +20,13 @@ def emit_boundary_rejection(
     result: BoundaryResult,
     route: BoundaryRoute,
     authenticated: bool,
+    principal: str | None = None,
 ) -> None:
-    """Emit one constant-shape event without paths, credentials, arguments, or bodies."""
+    """Emit one constant-shape event without paths, credentials, arguments, or bodies.
+
+    Principal identity is server-side audit identity (allowed in audit records) and is
+    None whenever the request was rejected before authentication succeeded.
+    """
     document = {
         "event": "mcp_boundary_rejection",
         "audit_failure_policy": "fail-open-result-preserving",
@@ -30,6 +35,7 @@ def emit_boundary_rejection(
         "result": result,
         "route": route,
         "authenticated": authenticated,
+        "principal": principal,
     }
     payload = json.dumps(document, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     try:

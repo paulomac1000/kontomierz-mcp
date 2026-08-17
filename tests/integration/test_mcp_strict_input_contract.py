@@ -53,6 +53,8 @@ async def test_sdk_scalar_validation_failure_emits_pre_dispatch_audit() -> None:
         logger.propagate = previous_propagate
 
     assert result.is_error is True
+    principal = events[0].pop("principal")
+    assert principal is not None and principal.startswith("local-process:")
     assert events == [
         {
             "audit_failure_policy": "fail-open-result-preserving",
@@ -100,6 +102,8 @@ async def test_official_client_rejects_unknown_tool_arguments_before_sdk_drops_t
     assert result.structured_content is not None
     assert result.structured_content["error"]["code"] == "INVALID_PARAMETER"
     assert result.structured_content["error"]["message"] == "Tool call contains an unexpected parameter"
+    principal = events[0].pop("principal")
+    assert principal is not None and principal.startswith("local-process:")
     assert events == [
         {
             "audit_failure_policy": "fail-open-result-preserving",

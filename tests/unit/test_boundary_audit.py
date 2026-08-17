@@ -91,6 +91,7 @@ async def test_unauthenticated_mcp_rejection_emits_sanitized_boundary_audit() ->
         "audit_failure_policy": "fail-open-result-preserving",
         "authenticated": False,
         "event": "mcp_boundary_rejection",
+        "principal": None,
         "result": "HTTP_401",
         "route": "mcp",
         "stage": "authentication",
@@ -132,7 +133,26 @@ async def test_unknown_route_and_authenticated_protocol_400_are_audited_without_
         ("routing", "HTTP_404", "unknown"),
         ("protocol", "HTTP_400", "mcp"),
     ]
+    assert [event["principal"] for event in events] == [None, "operator:test"]
     serialized = stream.getvalue()
     assert "/private-secret-path" not in serialized
     assert HTTP_TOKEN not in serialized
     assert "malformed and protected" not in serialized
+
+
+def test_boundary_audit_sink_failure_is_swallowed_without_raising(monkeypatch: pytest.MonkeyPatch) -> None:
+    from kontomierz_mcp import boundary_audit
+
+    def broken_sink():
+        raise RuntimeError("sink unavailable")
+
+    monkeypatch.setattr(boundary_audit, "configure_audit_sink", broken_sink)
+
+    boundary_audit.emit_boundary_rejection(
+        transport="streamable-http",
+        stage="schema",
+        result="INVALID_PARAMETER",
+        route="mcp",
+        authenticated=True,
+        principal="operator:test",
+    )

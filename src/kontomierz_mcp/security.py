@@ -101,6 +101,7 @@ class BearerPrincipalMiddleware:
                 result="HTTP_404",
                 route="unknown",
                 authenticated=False,
+                principal=None,
             )
             await self._not_found(send)
             return
@@ -113,6 +114,7 @@ class BearerPrincipalMiddleware:
                 result="HTTP_401",
                 route=route,
                 authenticated=False,
+                principal=None,
             )
             await self._reject(send)
             return
@@ -125,6 +127,7 @@ class BearerPrincipalMiddleware:
                 result="HTTP_401",
                 route=route,
                 authenticated=False,
+                principal=None,
             )
             await self._reject(send)
             return
@@ -136,6 +139,7 @@ class BearerPrincipalMiddleware:
                 result="HTTP_401",
                 route=route,
                 authenticated=False,
+                principal=None,
             )
             await self._reject(send)
             return
@@ -148,6 +152,7 @@ class BearerPrincipalMiddleware:
                 result="HTTP_401",
                 route=route,
                 authenticated=False,
+                principal=None,
             )
             await self._reject(send)
             return
@@ -158,6 +163,7 @@ class BearerPrincipalMiddleware:
                 result="HTTP_401",
                 route=route,
                 authenticated=False,
+                principal=None,
             )
             await self._reject(send)
             return
@@ -184,6 +190,7 @@ class BearerPrincipalMiddleware:
                 result="HTTP_400",
                 route=route,
                 authenticated=True,
+                principal=self._principal,
             )
 
     @staticmethod

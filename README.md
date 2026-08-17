@@ -109,6 +109,11 @@ A plain pytest run excludes live/provider evidence by default:
 
 The default suite uses synthetic data. The official MCP SDK test is mandatory and fails collection when the SDK is absent.
 
+Two canonical helper commands reproduce hosted gates locally:
+
+- `scripts/local_exact_gate.py` reproduces the repository-owned standards, quality, and exact-image gates from a clean checkout on a **Python 3.12** environment (it materializes `dist/`, writes `dist/SOURCE_REVISION`, verifies `SHA256SUMS`, and builds the revision-bound Docker image). Provider-backed adoption evidence is intentionally out of scope.
+- `scripts/check_docs.py --ai-skills-root <trusted-checkout>` routes governed-document validation through the same one canonical AFDS validator command that CI runs, instead of inviting ad-hoc direct invocations.
+
 The live Kontomierz contract suite is intentionally harder to start than the normal suite. It requires a repository `.env` containing the real API key, both explicit mutation opt-ins, an assertion that the target account is an **exclusive disposable test account**, and a positive wallet ID that must exist in the authenticated account before any cleanup or mutation begins:
 
 ```bash
