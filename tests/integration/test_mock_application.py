@@ -38,6 +38,25 @@ async def test_mock_write_plan_execute_verify(write_kernel) -> None:
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_capability_discovery_matches_kernel_catalog(readonly_kernel) -> None:
-    result = await readonly_kernel.invoke("describe_kontomierz_capabilities", {})
+    result = await readonly_kernel.invoke("describe_kontomierz_capabilities", {"verbose": True})
     assert set(result["data"]["tools"]) == set(TOOL_MANIFESTS)
     assert result["data"]["supported_transports"] == ["stdio", "streamable-http"]
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_capability_discovery_defaults_to_compact_tool_summaries(readonly_kernel) -> None:
+    import json
+
+    result = await readonly_kernel.invoke("describe_kontomierz_capabilities", {})
+    data = result["data"]
+
+    assert data["detail"] == "compact"
+    assert data["verbose"] is False
+    assert set(data["tools"]) == set(TOOL_MANIFESTS)
+    summary = data["tools"]["create_wallet"]
+    assert summary["active_state"] in {"active", "disabled"}
+    assert "manifest" not in summary
+    assert "claim_evidence" not in json.dumps(data)
+    assert len(json.dumps(data, ensure_ascii=False)) < 20_000
+    assert all(isinstance(tool, str) for tool in data["active_tools"])

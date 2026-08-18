@@ -68,5 +68,10 @@ SECONDARY_TOOL_DEFINITIONS: dict[str, ToolDefinition] = {
         read_manifest("get_schedule", confidentiality="financial"),
         "Get one scheduled payment by stable numeric ID.",
         (p("schedule_id", "int", "Stable positive schedule ID."),),
+        usage_notes=(
+            "Returns the current schedule definition; list_scheduled_transactions returns"
+            " generated occurrences, so description, amount, or dates can legitimately differ"
+            " between the two views after the schedule was edited"
+        ),
     ),
 }

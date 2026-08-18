@@ -214,7 +214,7 @@ class InvocationKernel:
             protocol_versions = []
         return sdk_version, protocol_versions
 
-    def capability_document(self, context: InvocationContext | None = None) -> dict[str, Any]:
+    def capability_document(self, context: InvocationContext | None = None, *, verbose: bool = True) -> dict[str, Any]:
         dependency_ready = self.cached_dependency_ready
         projected: dict[str, ToolManifest] = {}
         for name, definition in TOOL_DEFINITIONS.items():
@@ -256,9 +256,26 @@ class InvocationKernel:
             ),
             "supported_component_count": len(tools),
             "active_component_count": len(active_tools),
-            "tools": tools,
-            "active_tools": active_tools,
+            "detail": "full" if verbose else "compact",
+            "tools": tools if verbose else self._compact_tools(projected),
+            "active_tools": active_tools if verbose else sorted(active_tools),
+            "verbose": bool(verbose),
         }
+
+    @staticmethod
+    def _compact_tools(projected: dict[str, ToolManifest]) -> dict[str, dict[str, Any]]:
+        compact: dict[str, dict[str, Any]] = {}
+        for name, manifest_value in projected.items():
+            compact[name] = {
+                "risk": manifest_value.risk,
+                "side_effects": manifest_value.side_effects,
+                "active_state": manifest_value.active_state,
+                "idempotent": manifest_value.idempotent,
+                "retryable": manifest_value.retryable,
+                "concurrent_safe": manifest_value.concurrent_safe,
+                "concurrency_scope": manifest_value.concurrency_scope,
+            }
+        return compact
 
     async def invoke(
         self,
@@ -333,9 +350,11 @@ class InvocationKernel:
         decision = self._authorization.authorize(invocation_context, manifest, arguments)
         self._bind_authorization_audit(audit, decision, phase="initial")
         if not decision.allowed:
+            # The reason states the failing server-owned policy (e.g. which capability
+            # class or resource allowlist denied access) without secrets or arguments.
             raise ApplicationError(
                 ErrorCode.AUTHORIZATION_FAILED,
-                "Calling principal is not authorized for this capability",
+                f"Calling principal is not authorized for this capability: {decision.reason}",
             )
 
         projected = project_manifest(
@@ -386,7 +405,7 @@ class InvocationKernel:
                         executed_decision = revalidated
                         operation_started = True
                         data = (
-                            self.capability_document(invocation_context)
+                            self.capability_document(invocation_context, verbose=arguments.get("verbose") is True)
                             if tool_name == _CAPABILITY_TOOL
                             else await self._run(operation, arguments)
                         )

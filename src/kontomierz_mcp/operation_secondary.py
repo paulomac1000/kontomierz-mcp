@@ -105,7 +105,9 @@ async def dispatch_secondary(name: str, a: dict[str, Any], client: Any) -> Any:
                 direction=direction(a.get("direction", "all"), allow_all=True, plural=True),
             )
         )
-        return paging(items, number, limit)
+        result = paging(items, number, limit)
+        result["window"] = "explicit" if start or end else "default"
+        return result
     if name == "get_schedule":
         return await resolve(client.get_schedule(identifier(a["schedule_id"], "schedule_id")))
     if name == "create_schedule":

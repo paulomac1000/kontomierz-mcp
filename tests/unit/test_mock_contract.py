@@ -54,3 +54,21 @@ def test_schedule_tooling_documents_window_and_reconcile_contract() -> None:
     assert "start_on/end_on" in create_notes
     assert "deadline_on" in create_notes
     assert "stay invisible" in create_notes
+
+
+@pytest.mark.asyncio
+async def test_schedule_listing_marks_default_and_explicit_window() -> None:
+    from kontomierz_mcp.config import Settings
+    from kontomierz_mcp.operations import build_operations
+
+    settings = Settings(api_key="", mock_data=True, enable_write_operations=True)
+    settings.validate()
+    ops = build_operations(MockKontomierzClient(), settings)
+
+    default = await ops["list_scheduled_transactions"](schedule_group_name="unpaid")
+    explicit = await ops["list_scheduled_transactions"](
+        schedule_group_name="unpaid", start_on="2026-08-01", end_on="2026-12-31"
+    )
+
+    assert default["window"] == "default"
+    assert explicit["window"] == "explicit"

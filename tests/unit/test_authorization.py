@@ -159,6 +159,7 @@ async def test_http_destructive_requires_exact_capability_and_resource_allowlist
     with pytest.raises(ApplicationError) as captured:
         await kernel.invoke("destroy_wallet", {"wallet_id": 124}, context=context)
     assert captured.value.code is ErrorCode.AUTHORIZATION_FAILED
+    assert "not explicitly allowlisted" in captured.value.message
     assert called == []
 
     document = kernel.capability_document(context)
@@ -300,3 +301,21 @@ def test_future_tool_without_resource_binding_fails_closed() -> None:
     assert decision.allowed is False
     assert decision.reason == "capability has no governed resource binding"
     assert policy.capability_allowed(context, manifest) is False
+
+
+@pytest.mark.asyncio
+async def test_capability_class_denial_names_the_disabled_class() -> None:
+    async def delete_budget(budget_id: int) -> dict[str, int]:
+        return {"deleted": budget_id}
+
+    settings = http_settings(
+        http_allowed_capabilities=("read", "write"),
+        enable_write_operations=True,
+    )
+    kernel = InvocationKernel(settings=settings, operations={"delete_budget": delete_budget}, dependency=Dependency())
+    context = InvocationContext.authenticated_http("operator:test")
+
+    with pytest.raises(ApplicationError) as captured:
+        await kernel.invoke("delete_budget", {"budget_id": 201}, context=context)
+    assert captured.value.code is ErrorCode.AUTHORIZATION_FAILED
+    assert "capability class destructive is not allowed for the HTTP principal" in captured.value.message

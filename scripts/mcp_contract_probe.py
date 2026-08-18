@@ -84,7 +84,7 @@ async def _capture(args: argparse.Namespace) -> dict[str, Any]:
     async with Client(stdio_client(parameters)) as client:
         listing = await client.list_tools()
         discovered = {tool.name: tool for tool in listing.tools}
-        capability_result = await client.call_tool("describe_kontomierz_capabilities", {})
+        capability_result = await client.call_tool("describe_kontomierz_capabilities", {"verbose": True})
         if capability_result.is_error:
             raise RuntimeError("capability discovery failed during public-contract probe")
         structured = capability_result.structured_content

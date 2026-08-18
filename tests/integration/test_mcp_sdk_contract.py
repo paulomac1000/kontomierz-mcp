@@ -48,11 +48,12 @@ async def test_official_in_memory_capability_document_has_full_active_state() ->
     settings = Settings(api_key="", mock_data=True, enable_write_operations=False)
     server = build_server(settings)
     async with Client(server) as client:
-        result = await client.call_tool("describe_kontomierz_capabilities", {})
+        result = await client.call_tool("describe_kontomierz_capabilities", {"verbose": True})
 
     assert result.is_error is False
     document = result.structured_content["data"]
     assert document["schema_version"] == "3.0.0"
+    assert document["detail"] == "full"
     assert document["supported_component_count"] == len(TOOL_DEFINITIONS)
     assert set(document["tools"]) == set(TOOL_DEFINITIONS)
     assert document["tools"]["create_wallet"]["manifest"]["active_state"] == "disabled"

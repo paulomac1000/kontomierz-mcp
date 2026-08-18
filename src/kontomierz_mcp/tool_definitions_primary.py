@@ -8,7 +8,13 @@ PRIMARY_TOOL_DEFINITIONS: dict[str, ToolDefinition] = {
     "list_accounts": ToolDefinition(
         read_manifest("list_accounts", confidentiality="financial"),
         "List configured accounts and wallets with balances.",
-        usage_notes="Use stable numeric IDs from this result for wallet operations",
+        usage_notes=(
+            "Use stable numeric IDs from this result for wallet operations. balance is the"
+            " account value converted to the base PLN currency; currency_balance is the value"
+            " in the account's own currency_name, so the two legitimately differ for foreign"
+            " accounts. iban is a passthrough upstream field and may contain an internal"
+            " identifier or note instead of a real IBAN for some institutions."
+        ),
     ),
     "create_wallet": ToolDefinition(
         write_manifest("create_wallet"),

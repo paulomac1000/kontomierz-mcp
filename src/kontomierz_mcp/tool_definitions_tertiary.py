@@ -38,7 +38,9 @@ TERTIARY_TOOL_DEFINITIONS: dict[str, ToolDefinition] = {
         usage_notes=(
             "The verified upstream returns an empty success body, so creation returns AMBIGUOUS_OUTCOME until "
             "the exact created resource is independently reconciled; do not infer identity from non-unique "
-            "schedule fields. Reconcile with list_scheduled_transactions passing start_on/end_on covering "
+            "schedule fields. The upstream does not deduplicate: two identical creates produce two schedules, "
+            "so never retry a create whose reconciliation is inconclusive — widen the date range first. "
+            "Reconcile with list_scheduled_transactions passing start_on/end_on covering "
             "deadline_on: without an explicit range the upstream lists only the current scheduling window, "
             "so distant deadlines stay invisible and a created schedule would look missing."
         ),
@@ -146,6 +148,19 @@ TERTIARY_TOOL_DEFINITIONS: dict[str, ToolDefinition] = {
             target_scope="kontomierz-server",
         ),
         "Describe supported and active capabilities without contacting the upstream service.",
-        usage_notes="Returns schema, server and SDK identity, transport profile, tool definitions, and active states",
+        (
+            p(
+                "verbose",
+                "bool",
+                "Return full tool manifests (large, audit-oriented). Default false returns one"
+                " compact summary line per tool; schemas come from tools/list instead.",
+                False,
+            ),
+        ),
+        usage_notes=(
+            "Default response is compact: identity, gates, and a per-tool summary without"
+            " parameters, manifests, or claim evidence. Pass verbose=true only when full"
+            " manifests are required; schemas are always available through tools/list."
+        ),
     ),
 }

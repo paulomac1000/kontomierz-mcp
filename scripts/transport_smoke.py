@@ -45,7 +45,7 @@ async def _assert_contract(client, *, http: bool) -> None:
         for parameter in definition.parameters:
             assert schema["properties"][parameter.name]["description"] == parameter.description
 
-    capabilities = await client.call_tool("describe_kontomierz_capabilities", {})
+    capabilities = await client.call_tool("describe_kontomierz_capabilities", {"verbose": True})
     assert capabilities.is_error is False
     document = capabilities.structured_content["data"]
     assert document["schema_version"] == "3.0.0"
