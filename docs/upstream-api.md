@@ -11,7 +11,7 @@ verification: Run the explicitly opted-in external evidence suite against a disp
 
 ## Verified contract (live-account evidence, 2026-08-08)
 
-The following was proven against a live account (`https://secure.kontomierz.pl/k4`) with read probes and minimal, cleaned-up write round trips. The executable evidence lives in `tests/external/test_real_kontomierz_contract.py` and its autouse cleanup guard in `tests/external/conftest.py`; endpoint behavior that is only retained as a recorded historical observation is marked `confidence: recorded` in `upstream-contract.yaml`. The live suite is excluded by default and requires both `KONTOMIERZ_EXTERNAL_TESTS=1` and `KONTOMIERZ_ALLOW_REAL_MUTATIONS=1` before it reads credentials or mutates the real service.
+The following was proven against a live account (`https://secure.kontomierz.pl/k4`) with read probes and minimal, cleaned-up write round trips. The executable evidence lives in `tests/external/test_real_kontomierz_contract.py` and its autouse cleanup guard in `tests/external/conftest.py`; endpoint behavior that is only retained as a recorded historical observation is marked `confidence: recorded` in `upstream-contract.yaml`. The live suite is excluded by default. Mutation-capable runs require both `KONTOMIERZ_EXTERNAL_TESTS=1` and `KONTOMIERZ_ALLOW_REAL_MUTATIONS=1`, plus `KONTOMIERZ_EXCLUSIVE_DISPOSABLE_ACCOUNT=1` and an expected `KONTOMIERZ_DISPOSABLE_WALLET_ID` that must be verified against the authenticated account before cleanup or mutation.
 
 ### Authentication
 
@@ -53,7 +53,9 @@ The adapter streams successful JSON responses and caps the decoded body at 4 MiB
 
 ### Empty-body success handling
 
-Schedule and budget create/update responses are 201/200 with an **empty body** — the upstream does not identify the created object (unlike transactions). Empty 200/201 remains evidence that the HTTP request was accepted, but a create without an upstream identity is not exposed as normal success: the adapter raises a non-retryable ambiguous write outcome and the kernel returns `AMBIGUOUS_OUTCOME`. The adapter deliberately does not infer a stable ID by matching a schedule description or budget category after the write because those attributes are not proven unique and could identify an older or concurrent record. Consumers must reconcile through `list_scheduled_transactions` or `list_budgets` before a dependent mutation or retry. Empty updates can safely return an update marker because the stable target ID was supplied by the caller.
+Observed schedule and budget creates return HTTP 201 with an **empty body**. That status confirms the create succeeded, but the upstream does not identify the new resource. The adapter therefore returns `{"created": true, "reconciliation_required": true}` rather than inventing a stable ID or misclassifying the confirmed 201 as an uncertain write. Consumers must reconcile through `list_scheduled_transactions` or `list_budgets` before a dependent mutation. Schedule reconciliation must use an explicit date range covering the submitted deadline because the range-less listing exposes only the current scheduling window, and identical schedule creates are not deduplicated.
+
+A timeout, transport loss, oversized/malformed successful mutation response, 5xx after mutation start, or other condition where the server cannot know whether the write completed remains `AMBIGUOUS_OUTCOME` and must not be retried automatically. Transaction creates normally return the created object; an unexpected empty transaction-create response remains fail-closed and ambiguous because that shape is not observed. Empty updates can return an update marker because the stable target ID was supplied by the caller. The wallet-create response-body shape remains unverified; if the service returns a confirmed empty 201, the runtime's generic confirmed-create policy returns the reconciliation-required marker, but this document does not claim that shape has been observed.
 
 ### Failure classification
 
@@ -61,7 +63,7 @@ Read timeout, transport loss, 429, and 5xx errors may be retry-eligible for the 
 
 ## Remaining unverified
 
-- Wallet create/update (`user_accounts/create_wallet.json`, `.../update_wallet.json`) response bodies were not exercised because they would mutate the evidence account.
+- Wallet create/update (`user_accounts/create_wallet.json`, `.../update_wallet.json`) response bodies are not represented by executable live evidence in this repository.
 - `client_assigned_id` uniqueness/retention semantics for transactions.
 - Reconciliation after an intentionally interrupted create (post-timeout state checks).
 - Rate-limit behavior was deliberately not hammered on a personal account.
