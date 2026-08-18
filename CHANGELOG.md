@@ -2,7 +2,7 @@
 
 All notable changes to kontomierz-mcp are recorded here.
 
-## 2.0.0 — Unreleased
+## 2.0.0 — 2026-08-18
 
 ### Breaking changes
 
@@ -70,6 +70,9 @@ All notable changes to kontomierz-mcp are recorded here.
 - `describe_kontomierz_capabilities` defaults to a compact capability document (identity, gates, and a per-tool summary; schemas remain available through `tools/list`). A new `verbose` boolean argument returns the previous full manifests with claim evidence for audit use. Verified live feedback showed the full document cost ~90–190 KB per call, which is impractical for LLM clients.
 - `list_accounts` usage notes now explain that `balance` is the base-PLN value while `currency_balance` is the account's own currency value, and that `iban` is an upstream passthrough that may contain an internal identifier; `get_schedule` notes explain that the schedule definition can legitimately differ from generated occurrences in the listing.
 - Observed empty-body budget/schedule creates return `{"created": true, "reconciliation_required": true}` on confirmed HTTP 201 instead of raising `AMBIGUOUS_OUTCOME`: the upstream confirms creation but does not return identity. The same marker is the runtime policy for a confirmed empty 201 wallet create, while the wallet response-body shape remains unverified by repository live evidence. Timeouts and transport losses after start remain `AMBIGUOUS_OUTCOME`, and an unexpected empty `create_transaction` response stays fail-closed until that shape is observed. `mark_schedule_paid`/`mark_schedule_unpaid` parameter notes state that `payment_date` must equal the exact scheduled occurrence date (the upstream rejects other dates, including today, with 422).
+- The release gate now requires the release SHA to be exactly the trusted default-branch tip (`rev-parse` equality) instead of an ancestry proof, so a delayed older approved run can no longer promote a stale image over a newer tip.
+- External-evidence schedule cleanup scans an explicit two-year date range (upstream format) instead of the range-less listing, so prefixed schedules with distant deadlines can no longer stay invisible to pre-cleaning and post-clean verification.
+- The `verbose` capability argument has a single declared contract: the catalog default (`false`) also defaults `capability_document` to compact, and a non-boolean `verbose` is rejected with `INVALID_PARAMETER` instead of silently selecting compact output.
 - Real external evidence tests plus `live-backend-test-policy.yaml` and `upstream-contract.yaml`.
 - `trusted-executable-sources.lock.yaml` as the canonical candidate-side executable-provenance declaration, with provider-backed acceptance required to compare it against authority coordinates supplied outside the candidate repository.
 - Structural tests proving the privileged publisher cannot checkout/download/load/run candidate content and the quarantine lane remains unprivileged to production.
