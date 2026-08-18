@@ -152,8 +152,13 @@ def test_container_build_is_bound_to_source_revision_and_exposes_healthcheck() -
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
     ci = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
 
-    assert "ARG EXPECTED_SOURCE_REVISION" in dockerfile
-    assert 'test "$(cat SOURCE_REVISION)" = "$EXPECTED_SOURCE_REVISION"' in dockerfile
+    assert "AS verified-artifacts" in dockerfile
+    assert dockerfile.count("ARG EXPECTED_SOURCE_REVISION") == 2
+    assert 'SHELL ["/bin/sh", "-c"]' in dockerfile
+    assert "read -r ACTUAL_SOURCE_REVISION < /tmp/dist/SOURCE_REVISION" in dockerfile
+    assert 'test "$ACTUAL_SOURCE_REVISION" = "$EXPECTED_SOURCE_REVISION"' in dockerfile
+    assert "COPY --from=verified-artifacts /tmp/dist/ /tmp/dist/" in dockerfile
+    assert "$(cat SOURCE_REVISION)" not in dockerfile
     assert "org.opencontainers.image.revision=$EXPECTED_SOURCE_REVISION" in dockerfile
     assert "kontomierz_mcp.healthcheck" in dockerfile
     assert "dist/SOURCE_REVISION" in ci
