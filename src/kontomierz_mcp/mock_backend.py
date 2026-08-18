@@ -159,7 +159,7 @@ class MockKontomierzClient:
             "bank_position": 1,
         }
         self.accounts.append(item)
-        return deepcopy(item)
+        return {"created": True, "reconciliation_required": True}
 
     def update_wallet(self, wallet_id: int, **fields: Any) -> dict[str, Any]:
         item = self._find(self.accounts, wallet_id)
@@ -266,7 +266,7 @@ class MockKontomierzClient:
         if category_group_id is not None:
             item["category_group_id"] = category_group_id
         self.budgets.append(item)
-        return deepcopy(item)
+        return {"created": True, "reconciliation_required": True}
 
     def update_budget(self, budget_id: int, limit: str) -> dict[str, Any]:
         item = self._find(self.budgets, budget_id)
@@ -329,7 +329,7 @@ class MockKontomierzClient:
     def create_schedule(self, **fields: Any) -> dict[str, Any]:
         item = {"id": self._next_id(self.schedules), "paid": False, **fields}
         self.schedules.append(item)
-        return self._public_schedule(item)
+        return {"created": True, "reconciliation_required": True}
 
     def update_schedule(self, schedule_id: int, **fields: Any) -> dict[str, Any]:
         item = self._find(self.schedules, schedule_id)

@@ -135,15 +135,21 @@ async def test_explicit_json_body_mode_remains_supported() -> None:
     "operation",
     [
         lambda client: client.create_wallet("0", "PLN"),
-        lambda client: client.create_money_transaction(client_assigned_id="x"),
         lambda client: client.create_budget("1.00", category_id=3),
         lambda client: client.create_schedule(description="Rent", currency_amount="1.00"),
     ],
 )
-async def test_empty_create_response_is_ambiguous(operation) -> None:
+async def test_empty_create_response_returns_reconciliation_marker(operation) -> None:
+    client = make_client(lambda _request: httpx.Response(201))
+    result = await operation(client)
+    assert result == {"created": True, "reconciliation_required": True}
+
+
+@pytest.mark.asyncio
+async def test_empty_transaction_create_stays_ambiguous_without_live_evidence() -> None:
     client = make_client(lambda _request: httpx.Response(201))
     with pytest.raises(UpstreamError) as captured:
-        await operation(client)
+        await client.create_money_transaction(client_assigned_id="x")
     assert captured.value.code is ErrorCode.UPSTREAM_FAILURE
     assert captured.value.retryable is False
     assert captured.value.write_outcome_ambiguous is True

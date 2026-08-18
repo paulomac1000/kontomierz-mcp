@@ -14,6 +14,10 @@ from .errors import ApplicationError, ErrorCode, UpstreamError
 Json = dict[str, Any] | list[Any]
 _MAX_UPSTREAM_RESPONSE_BYTES = 4 * 1024 * 1024
 
+# Verified live (201 with an empty body) for wallet, budget, and schedule creates:
+# the upstream confirms creation but never returns the new resource identity.
+_UNIDENTIFIED_CREATE_MARKER: dict[str, Any] = {"created": True, "reconciliation_required": True}
+
 
 def _schedule_identity(item: dict[str, Any]) -> dict[str, Any]:
     """Expose one public schedule identity key: upstream list rows carry
@@ -309,7 +313,7 @@ class KontomierzClient:
             body["user_account[user_name]"] = user_name
         payload = await self._request("POST", "user_accounts/create_wallet.json", body=body)
         if payload is None:
-            self._raise_unidentified_create()
+            return dict(_UNIDENTIFIED_CREATE_MARKER)
         return self._response_object(payload, "user_account", write=True)
 
     async def update_wallet(self, wallet_id: int, **fields: Any) -> dict[str, Any]:
@@ -416,7 +420,7 @@ class KontomierzClient:
         if payload is None:
             if method == "PUT":
                 return {"updated": True}
-            self._raise_unidentified_create()
+            return dict(_UNIDENTIFIED_CREATE_MARKER)
         item = self._response_object(payload, "budget", write=True)
         return self._canonicalize_date_fields(item, "month_on")
 
@@ -447,7 +451,7 @@ class KontomierzClient:
     async def create_schedule(self, **fields: Any) -> dict[str, Any]:
         payload = await self._schedule_write("POST", "schedules.json", fields)
         if payload is None:
-            self._raise_unidentified_create()
+            return dict(_UNIDENTIFIED_CREATE_MARKER)
         return payload
 
     async def update_schedule(self, schedule_id: int, **fields: Any) -> dict[str, Any]:

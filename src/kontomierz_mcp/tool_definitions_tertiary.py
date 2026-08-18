@@ -36,13 +36,14 @@ TERTIARY_TOOL_DEFINITIONS: dict[str, ToolDefinition] = {
             ),
         ),
         usage_notes=(
-            "The verified upstream returns an empty success body, so creation returns AMBIGUOUS_OUTCOME until "
-            "the exact created resource is independently reconciled; do not infer identity from non-unique "
-            "schedule fields. The upstream does not deduplicate: two identical creates produce two schedules, "
-            "so never retry a create whose reconciliation is inconclusive — widen the date range first. "
-            "Reconcile with list_scheduled_transactions passing start_on/end_on covering "
-            "deadline_on: without an explicit range the upstream lists only the current scheduling window, "
-            "so distant deadlines stay invisible and a created schedule would look missing."
+            "The verified upstream confirms creation (2xx) but returns an empty body, so the"
+            " result is created=true with reconciliation_required=true and no schedule_id;"
+            " obtain the identity with list_scheduled_transactions passing start_on/end_on"
+            " covering deadline_on — without an explicit range the upstream lists only the"
+            " current scheduling window, so distant deadlines stay invisible and a created"
+            " schedule would look missing. The upstream does not deduplicate: two identical"
+            " creates produce two schedules, so never retry a create whose reconciliation"
+            " is inconclusive — widen the date range first."
         ),
     ),
     "update_schedule": ToolDefinition(
@@ -80,7 +81,12 @@ TERTIARY_TOOL_DEFINITIONS: dict[str, ToolDefinition] = {
         "Mark a scheduled payment as paid on a specified date.",
         (
             p("schedule_id", "int", "Stable positive schedule ID."),
-            p("payment_date", "str", "Payment date in ISO YYYY-MM-DD format."),
+            p(
+                "payment_date",
+                "str",
+                "Occurrence date in ISO YYYY-MM-DD. The upstream accepts only the exact scheduled"
+                " occurrence date and rejects other dates (including today) with 422.",
+            ),
         ),
     ),
     "mark_schedule_unpaid": ToolDefinition(
@@ -88,7 +94,12 @@ TERTIARY_TOOL_DEFINITIONS: dict[str, ToolDefinition] = {
         "Mark a scheduled payment as unpaid for a specified date.",
         (
             p("schedule_id", "int", "Stable positive schedule ID."),
-            p("payment_date", "str", "Payment date in ISO YYYY-MM-DD format."),
+            p(
+                "payment_date",
+                "str",
+                "Occurrence date in ISO YYYY-MM-DD. The upstream accepts only the exact scheduled"
+                " occurrence date and rejects other dates (including today) with 422.",
+            ),
         ),
     ),
     "get_pie_chart": ToolDefinition(

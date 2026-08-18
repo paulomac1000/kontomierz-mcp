@@ -75,7 +75,7 @@ async def test_create_budget_rejects_leaf_category_used_as_group(operations) -> 
 async def test_create_budget_accepts_unknown_category_ids_without_preflight_rejection(operations) -> None:
     ops, _ = operations
     result = await ops["create_budget"](limit="10.00", month="2026-12", category_id=99999)
-    assert result["id"] is not None
+    assert result == {"created": True, "reconciliation_required": True}
 
 
 @pytest.mark.asyncio
@@ -217,9 +217,11 @@ async def test_money_rejects_values_that_expand_beyond_decimal_bounds(operations
 @pytest.mark.asyncio
 @pytest.mark.parametrize("balance", ["0", "-100.25"])
 async def test_wallet_balance_allows_zero_and_debt(operations, balance: str) -> None:
-    ops, _ = operations
+    ops, backend = operations
     result = await ops["create_wallet"](currency_balance=balance, currency_name="pln")
-    assert result["currency_balance"] == balance
+    assert result == {"created": True, "reconciliation_required": True}
+    created = [a for a in backend.accounts if a["currency_balance"] == balance]
+    assert created, "wallet state must exist for reconciliation"
 
 
 @pytest.mark.asyncio

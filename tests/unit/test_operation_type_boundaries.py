@@ -61,7 +61,9 @@ def test_month_preserves_canonical_value_and_empty_sentinel() -> None:
     assert month(None) == ""
 
 
-def test_create_schedule_usage_note_preserves_ambiguous_empty_success_contract() -> None:
+def test_create_schedule_usage_note_preserves_empty_success_contract() -> None:
     usage_notes = TOOL_DEFINITIONS["create_schedule"].usage_notes
-    assert "AMBIGUOUS_OUTCOME" in usage_notes
-    assert "do not infer identity" in usage_notes
+    assert "created=true" in usage_notes
+    assert "reconciliation_required=true" in usage_notes
+    assert "does not deduplicate" in usage_notes
+    assert "widen the date range" in usage_notes
