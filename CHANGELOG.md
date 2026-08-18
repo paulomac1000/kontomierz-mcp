@@ -1,42 +1,92 @@
 # Changelog
 
-All notable changes to the kontomierz-mcp project.
+All notable changes to kontomierz-mcp are recorded here.
 
-## [1.0.1] — 2026-07-07
+## 2.0.0 — Unreleased
+
+### Breaking changes
+
+- Replaced legacy HTTP+SSE and the unauthenticated REST bridge with stdio and loopback-only Streamable HTTP.
+- Changed public dates to ISO `YYYY-MM-DD` and budget months to `YYYY-MM`, while retaining localized upstream conversion internally; legacy `DD-MM-YYYY` public inputs are rejected.
+- Replaced pagination certainty fields with `may_have_more` and `next_page_hint` because the upstream continuation contract is unverified.
+- Replaced SDK-generated exception text with explicit structured MCP error results.
+- Changed update inputs so `None` means omission and an empty string can intentionally clear supported text fields.
+- Replaced the synchronous dependency adapter with native asynchronous I/O.
+- Streamable HTTP authorization is read-only by default; write/destructive capability classes require explicit server-side opt-in in addition to the operator write gate.
+- Destructive stdio operations now require exact server-owned capability and resource allowlists in addition to the operator write gate.
+- Streamable HTTP readiness now requires Bearer authentication because a readiness cache miss may perform upstream network I/O; `/health/live` remains public.
+- Successful response metadata now reports `target_scope` plus an opaque `target_ref` instead of the internal authorization target identity.
+- Production package metadata pins the tested MCP SDK lane to `mcp==2.0.0` instead of claiming unverified compatibility with all future 2.x releases.
 
 ### Fixed
-- **POST/PUT requests now send JSON body** instead of form-encoded data.
-  `_post()` and `_put()` in `client.py` used `data=data` which sent
-  `application/x-www-form-urlencoded` despite `Content-Type: application/json`
-  in headers. This caused 400 Bad Request from Kontomierz API on all write
-  operations (create/update wallet, transaction, budget, schedule).
-  Fixed by using `json=data` which correctly serializes dict as JSON and
-  sets the matching Content-Type header.
 
-## [1.0.0] — 2026-06-01
+- Official MCP tool inputs now use strict scalar validation and closed object schemas: numeric strings/booleans are not coerced, undeclared arguments are rejected before SDK normalization can drop them, explicit zero is rejected for optional positive IDs, and invalid falsey optional create values are not silently omitted.
+- `tools/list` schema hardening now handles the official MCP SDK `ListToolsResult` model as well as mapping-shaped test adapters, so advertised input schemas remain closed after middleware processing.
+- Write bodies use `application/x-www-form-urlencoded`, matching the live Kontomierz API contract verified on 2026-08-08; known-broken JSON write mode is rejected for the real backend.
+- Plain `pytest` excludes `external` tests by default. Live-account mutation evidence requires both explicit mutation opt-ins plus `KONTOMIERZ_EXCLUSIVE_DISPOSABLE_ACCOUNT=1` and an expected `KONTOMIERZ_DISPOSABLE_WALLET_ID` that is verified against the authenticated account before cleanup or mutation.
+- Live cleanup traverses paid and unpaid schedule groups, reconciles the unique test namespace and budget snapshot only inside the verified exclusive disposable account, verifies deletion, and fails instead of swallowing unconfirmed cleanup.
+- Confirmed 201 empty-body creates never guess a stable ID: observed budget/schedule creates return a reconciliation-required success marker, while transport loss, timeout, malformed/oversized successful mutation responses, and other uncertain post-start failures remain `AMBIGUOUS_OUTCOME`.
+- Upstream redirects are rejected explicitly; redirects observed after a mutation request are treated as potentially ambiguous rather than successful.
+- Readiness uses an explicit never-checked sentinel rather than a numeric monotonic-time sentinel, so a process started near a monotonic epoch cannot cache a false initial state.
+- Audit events enforce closed categorical values, field-specific safe identities/digests, 256-byte free-form field bounds, and a hard 8 KiB serialized-event ceiling; short protected values are never emitted verbatim.
+- Decimal inputs are bounded before fixed-point formatting so scientific notation cannot expand into an unbounded request value.
+- HTTP application lifespan owns and closes the shared kernel exactly once.
+- Wealth points are unwrapped from their verified per-item `{"wealth_point": {...}}` upstream shape.
+- Restored full schedule `repeat`/`holidays` descriptions and locked them with regression tests.
+- Streamable HTTP smoke allows slow startup without weakening its bounded timeout.
+- Composition validates frozen settings before constructing a real dependency client; unsafe base URLs fail before dependency creation.
+- Logging tests restore global logger state and real request diagnostics stay at WARNING+ to protect the query-string API key.
+- Mock transaction contract tests call the synchronous mock API synchronously.
+- Exact-artifact Docker source-label verification uses a valid Docker Go-template expression.
+- ID-bound capabilities reject missing, boolean, floating-point, zero, negative, or string identifiers before authorization can claim an exact resource binding.
+- Mock schedule pagination rejects floating-point page/per-page values instead of silently truncating them with `int()`.
+- MCP public-contract evidence is generated from the same exact wheel that is tested, smoke-tested, image-bundled, and released; the snapshot is no longer produced from a separately rebuilt wheel with a different digest.
+
+### Changed
+
+- Mock backend response shapes mirror verified real API shapes rather than convenient synthetic substitutes.
+- The real upstream write/date/pagination contract is documented in `docs/upstream-api.md` and machine-readable `upstream-contract.yaml` with live-account evidence from 2026-08-08.
+- Candidate-owned structural standards CI declares its immutable `ai-skills` executable provenance in `trusted-executable-sources.lock.yaml`; `mcp-server-architect` 1.3.0 governs this migration and the lock contains the reviewed exact revision plus SHA-256 bindings for the trusted entrypoints it executes. Provider-backed acceptance remains externally anchored and does not trust the candidate lock as its root of authority.
+- Provider-backed acceptance follows the authority-owned protected `consumer-acceptance-dispatch.yml` entrypoint, which calls the same-revision local `consumer-acceptance.yml`; a candidate-owned direct cross-repository reusable-workflow call is diagnostic only and is not treated as authoritative approval.
+- Standards CI validates the canonical trust lock and runs consumer-trust hygiene, repository discovery, upstream/live-backend contracts, AFDS, AGENTS, and workflow-policy checks from the trusted checkout.
+- Release promotion is split into read-only artifact verification, unprivileged isolated-registry quarantine/smoke, and protected registry-to-registry production promotion. The privileged publisher never loads or executes candidate content.
 
 ### Added
-- Initial release with 27 MCP tools covering all Kontomierz.pl API endpoints
-- **Accounts**: list, create, update, destroy wallets
-- **Transactions**: list (with pagination), get, create, update, delete
-- **Budgets**: list, create, update, delete, copy_from_last_month
-- **Schedules**: list (with pagination), get, create, update, delete, mark_paid, mark_unpaid
-- **Reference**: categories, tags, currencies
-- **Charts/Wealth**: pie_chart, wealth_points
-- **Capabilities**: describe_kontomierz_capabilities introspection tool
-- Three-port architecture (health:9100, SSE:9101, REST API:9102)
-- Tool manifests with Risk Consistency Matrix (L2+)
-- Structured error responses (code, message, retryable, suggestion)
-- Dynamic risk prefix injection from manifests
-- SanitizingFormatter + RequestIdFilter in logging
-- Write guard (ENABLE_WRITE_OPERATIONS=false default)
-- Pagination metadata (page, limit, has_more, next_offset, total)
-- SSE safety check (MCP_UNSAFE_PUBLIC_ACCESS_CONFIRMED)
-- Client connection validation at startup
-- ReuseHTTPServer with SO_REUSEADDR
-- Per-tool invocation counter on health endpoint
-- Response payload sanitization
-- GET /api/tools/{name}/manifest REST endpoint
-- 169 tests (unit + integration + compliance), ≥92% coverage
-- Smoke + E2E tests with dynamic skip
-- Docker support
+
+- One governed catalog for tool signatures, descriptions, schemas, versions, manifests, active state, and registration.
+- Complete multi-axis capability manifests and supported-versus-active capability discovery.
+- Explicit application-owned authorization binding principal, exact capability, immutable target, exact resource identity, and normalized arguments, with pre-I/O revalidation.
+- Narrow destructive authorization on both transports with explicit capability and exact-resource allowlists.
+- One structured server-side audit event per invocation without credentials or protected result bodies.
+- Intentional Streamable HTTP Host/Origin policy, stateless mode, bounded request bodies, authenticated readiness, and adversarial pre-I/O tests.
+- Bounded admission/concurrency, per-target write serialization, dependency-aware readiness, response-size enforcement, and conservative ambiguous-write handling.
+- Exact Linux x64 runtime/development wheel locks for Python 3.11–3.13 and separate build-tool lock; acceptance installs use exact SHA-256 wheel hashes without dependency resolution.
+- Exact-wheel and exact-image CI artifact path with source-revision OCI label, non-root smoke, checksummed closed bundle, protected promotion attestation, and a trusted MCP public-contract snapshot captured from that same wheel and included in the release checksum closure.
+- Deterministic exact-wheel builds: application wheels are built with `SOURCE_DATE_EPOCH` pinned to the source commit timestamp in CI and in `scripts/local_exact_gate.py`, so independent builds of one revision produce byte-identical wheel checksums.
+- `create_budget` pre-mutation category-type validation: passing a category group id as `category_id` (or a leaf id as `category_group_id`) now fails closed with an explicit `INVALID_PARAMETER` message before any write I/O, instead of surfacing an opaque upstream 404. Unknown ids are still forwarded unchanged.
+- Uniform public schedule identity: upstream list rows use `schedule_id` while single-object schedule endpoints use `id`; the adapter now exposes `schedule_id` on every public schedule object (get/create/update) so resource identity is consistent with the `schedule_id` tool parameters. The deterministic mock mirrors the same contract.
+- Boundary audit now also records HTTP-level transport-policy rejections (403 Origin policy, 413 request-body bound, 421 Host policy) as `protocol`-stage events with the authenticated principal, in addition to the existing 400/401/404/schema coverage.
+- Documented the upstream scheduling window: `scheduled_transactions` without explicit `start_on`/`end_on` returns only the nearest occurrences, so distant deadlines are invisible. `list_scheduled_transactions` and `create_schedule` usage notes now instruct reconciling with an explicit date range covering `deadline_on` after a create, and the deterministic mock honors explicit date bounds the same way the live API does. The listing response now also carries a `window` field (`default` or `explicit`) so clients can see when they are looking at the default window, and `create_schedule` notes state that the upstream does not deduplicate identical creates.
+- `describe_kontomierz_capabilities` defaults to a compact capability document (identity, gates, and a per-tool summary; schemas remain available through `tools/list`). A new `verbose` boolean argument returns the previous full manifests with claim evidence for audit use. Verified live feedback showed the full document cost ~90–190 KB per call, which is impractical for LLM clients.
+- `list_accounts` usage notes now explain that `balance` is the base-PLN value while `currency_balance` is the account's own currency value, and that `iban` is an upstream passthrough that may contain an internal identifier; `get_schedule` notes explain that the schedule definition can legitimately differ from generated occurrences in the listing.
+- Observed empty-body budget/schedule creates return `{"created": true, "reconciliation_required": true}` on confirmed HTTP 201 instead of raising `AMBIGUOUS_OUTCOME`: the upstream confirms creation but does not return identity. The same marker is the runtime policy for a confirmed empty 201 wallet create, while the wallet response-body shape remains unverified by repository live evidence. Timeouts and transport losses after start remain `AMBIGUOUS_OUTCOME`, and an unexpected empty `create_transaction` response stays fail-closed until that shape is observed. `mark_schedule_paid`/`mark_schedule_unpaid` parameter notes state that `payment_date` must equal the exact scheduled occurrence date (the upstream rejects other dates, including today, with 422).
+- Real external evidence tests plus `live-backend-test-policy.yaml` and `upstream-contract.yaml`.
+- `trusted-executable-sources.lock.yaml` as the canonical candidate-side executable-provenance declaration, with provider-backed acceptance required to compare it against authority coordinates supplied outside the candidate repository.
+- Structural tests proving the privileged publisher cannot checkout/download/load/run candidate content and the quarantine lane remains unprivileged to production.
+
+### Security
+
+- Non-loopback HTTP binding remains forbidden; loopback HTTP requires request-scoped Bearer authentication and explicit server-side capability/target/resource authorization.
+- Financial reads are confidential; every mutation requires the trusted operator write gate and HTTP writes require an independently allowed capability class.
+- Destructive operations require an explicitly allowlisted capability ID and exact resource identity on both stdio and HTTP; wildcard resources are rejected.
+- Missing/invalid credentials, Host/Origin violations, oversized HTTP bodies, and unauthenticated readiness requests stop before operation/dependency I/O.
+- Any uninterpretable successful mutation response is treated as potentially completed; no mutation is declared replay-safe or automatically retryable without evidence.
+- Quarantine credentials are separated from production coordinates in workflow design. Provider-backed proof that their actual configured scope cannot mutate production remains an external administrative evidence gate.
+
+## 1.0.1 — 2026-07-07
+
+- Changed write request bodies from implicit form encoding to explicit JSON pending real-system contract verification.
+
+## 1.0.0 — 2026-06-01
+
+- Initial MCP server release.

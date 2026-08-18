@@ -1,450 +1,538 @@
-"""HTTP client for the Kontomierz.pl REST API.
+"""Asynchronous Kontomierz HTTP adapter with typed, bounded failure mapping."""
 
-Covers all documented endpoints. Authenticated via api_key query parameter.
-"""
+from __future__ import annotations
 
-import logging
-from typing import Any
+import json
+from collections.abc import Mapping
+from datetime import datetime
+from typing import Any, NoReturn
 
-import requests
+import httpx
 
-from .tools.constants import API_BASE_URL, API_TIMEOUT, HEADERS
+from .errors import ApplicationError, ErrorCode, UpstreamError
 
-_logger = logging.getLogger(__name__)
+Json = dict[str, Any] | list[Any]
+_MAX_UPSTREAM_RESPONSE_BYTES = 4 * 1024 * 1024
+
+# Verified live (201 with an empty body) for wallet, budget, and schedule creates:
+# the upstream confirms creation but never returns the new resource identity.
+_UNIDENTIFIED_CREATE_MARKER: dict[str, Any] = {"created": True, "reconciliation_required": True}
+
+
+def _schedule_identity(item: dict[str, Any]) -> dict[str, Any]:
+    """Expose one public schedule identity key: upstream list rows carry
+    ``schedule_id`` while single-object endpoints carry ``id``."""
+    if "id" in item and "schedule_id" not in item:
+        renamed = dict(item)
+        renamed["schedule_id"] = renamed.pop("id")
+        return renamed
+    return item
 
 
 class KontomierzClient:
-    """Synchronous HTTP client for Kontomierz.pl API."""
+    """Dependency client that owns one cancellation-aware asynchronous session."""
 
-    def __init__(self, api_key: str, timeout: int = API_TIMEOUT) -> None:
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        base_url: str,
+        timeout_seconds: int,
+        body_mode: str = "form",
+        client: httpx.AsyncClient | None = None,
+    ) -> None:
         self._api_key = api_key
-        self._timeout = timeout
+        self._base_url = base_url.rstrip("/")
+        self._timeout = timeout_seconds
+        self._body_mode = body_mode
+        self._client = client or httpx.AsyncClient(
+            headers={"Accept": "application/json", "User-Agent": "kontomierz-mcp/2"},
+            timeout=httpx.Timeout(timeout_seconds),
+        )
+        self._owns_client = client is None
 
-    def _params(self, **extra: Any) -> dict[str, Any]:
-        params: dict[str, Any] = {"api_key": self._api_key}
-        for k, v in extra.items():
-            if v is not None:
-                params[k] = v
-        return params
+    async def close(self) -> None:
+        if self._owns_client:
+            await self._client.aclose()
 
-    def _get(self, path: str, **params: Any) -> Any:
-        url = f"{API_BASE_URL}/{path}"
+    async def probe(self) -> bool:
+        """Check the mandatory dependency without exposing upstream details."""
         try:
-            resp = requests.get(url, headers=HEADERS, params=self._params(**params), timeout=self._timeout)
-            resp.raise_for_status()
-            return resp.json()
-        except requests.exceptions.RequestException:
-            _logger.exception("GET %s failed", url)
-            return None
-
-    def _post(self, path: str, data: dict[str, Any] | None = None) -> Any:
-        url = f"{API_BASE_URL}/{path}"
-        try:
-            if data is not None:
-                resp = requests.post(url, headers=HEADERS, params={"api_key": self._api_key}, json=data, timeout=self._timeout)
-            else:
-                resp = requests.post(url, headers=HEADERS, params={"api_key": self._api_key}, timeout=self._timeout)
-            resp.raise_for_status()
-            return resp.json()
-        except requests.exceptions.RequestException:
-            _logger.exception("POST %s failed", url)
-            return None
-
-    def _put(self, path: str, data: dict[str, Any] | None = None) -> bool:
-        url = f"{API_BASE_URL}/{path}"
-        try:
-            if data is not None:
-                resp = requests.put(url, headers=HEADERS, params=self._params(), json=data, timeout=self._timeout)
-            else:
-                resp = requests.put(url, headers=HEADERS, params=self._params(), timeout=self._timeout)
-            resp.raise_for_status()
-            return True
-        except requests.exceptions.RequestException:
-            _logger.exception("PUT %s failed", url)
+            await self.get_currencies()
+        except UpstreamError:
             return False
+        return True
 
-    def _delete(self, path: str) -> bool:
-        url = f"{API_BASE_URL}/{path}"
+    @staticmethod
+    async def _bounded_content(response: httpx.Response, *, write: bool) -> bytes:
+        declared = response.headers.get("Content-Length")
+        if declared:
+            try:
+                declared_bytes = int(declared)
+            except ValueError:
+                declared_bytes = -1
+            if declared_bytes > _MAX_UPSTREAM_RESPONSE_BYTES:
+                raise UpstreamError(
+                    ErrorCode.UPSTREAM_FAILURE,
+                    "Kontomierz response exceeded the safe size limit",
+                    retryable=False,
+                    details={"max_response_bytes": _MAX_UPSTREAM_RESPONSE_BYTES},
+                    write_outcome_ambiguous=write,
+                )
+
+        content = bytearray()
+        async for chunk in response.aiter_bytes():
+            if len(content) + len(chunk) > _MAX_UPSTREAM_RESPONSE_BYTES:
+                raise UpstreamError(
+                    ErrorCode.UPSTREAM_FAILURE,
+                    "Kontomierz response exceeded the safe size limit",
+                    retryable=False,
+                    details={"max_response_bytes": _MAX_UPSTREAM_RESPONSE_BYTES},
+                    write_outcome_ambiguous=write,
+                )
+            content.extend(chunk)
+        return bytes(content)
+
+    @staticmethod
+    def _raise_status(response: httpx.Response, *, write: bool) -> None:
+        if response.status_code in {401, 403}:
+            raise UpstreamError(ErrorCode.AUTHENTICATION_FAILED, "Kontomierz rejected the API credentials")
+        if response.status_code == 404:
+            raise UpstreamError(ErrorCode.RESOURCE_NOT_FOUND, "Kontomierz resource was not found")
+        if response.status_code in {409, 422}:
+            raise UpstreamError(
+                ErrorCode.CONFLICT,
+                "Kontomierz rejected the requested state change",
+                details={"status": response.status_code},
+            )
+        if response.status_code == 429:
+            retry_after = response.headers.get("Retry-After")
+            details = {"retry_after": retry_after} if retry_after else None
+            raise UpstreamError(
+                ErrorCode.RATE_LIMITED,
+                "Kontomierz rate limit exceeded",
+                retryable=not write,
+                details=details,
+            )
+        if 300 <= response.status_code < 400:
+            raise UpstreamError(
+                ErrorCode.UPSTREAM_FAILURE,
+                "Kontomierz returned an unexpected redirect",
+                retryable=False,
+                details={"status": response.status_code},
+                write_outcome_ambiguous=write,
+            )
+        if response.status_code >= 500:
+            raise UpstreamError(
+                ErrorCode.DEPENDENCY_UNAVAILABLE,
+                "Kontomierz service failed",
+                retryable=not write,
+                details={"status": response.status_code},
+                write_outcome_ambiguous=write,
+            )
+        if response.status_code >= 400:
+            raise UpstreamError(
+                ErrorCode.UPSTREAM_FAILURE,
+                "Kontomierz rejected the request",
+                details={"status": response.status_code},
+            )
+        if not 200 <= response.status_code < 300:
+            raise UpstreamError(
+                ErrorCode.UPSTREAM_FAILURE,
+                "Kontomierz returned an unexpected HTTP status",
+                retryable=False,
+                details={"status": response.status_code},
+                write_outcome_ambiguous=write,
+            )
+
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        query: Mapping[str, Any] | None = None,
+        body: Mapping[str, Any] | None = None,
+        expect_json: bool = True,
+    ) -> Json | bool | None:
+        params = {"api_key": self._api_key}
+        if query:
+            params.update({key: value for key, value in query.items() if value is not None and value != ""})
+        kwargs: dict[str, Any] = {
+            "method": method,
+            "url": f"{self._base_url}/{path.lstrip('/')}",
+            "params": params,
+            "timeout": self._timeout,
+        }
+        if body is not None:
+            body_key = "json" if self._body_mode == "json" else "data"
+            kwargs[body_key] = dict(body)
+        is_write = method.upper() not in {"GET", "HEAD", "OPTIONS"}
         try:
-            resp = requests.delete(url, headers=HEADERS, params=self._params(), timeout=self._timeout)
-            resp.raise_for_status()
-            return True
-        except requests.exceptions.RequestException:
-            _logger.exception("DELETE %s failed", url)
-            return False
+            async with self._client.stream(**kwargs) as response:
+                self._raise_status(response, write=is_write)
+                if not expect_json or response.status_code == 204:
+                    return True
+                content = await self._bounded_content(response, write=is_write)
+                if response.status_code in {200, 201} and not content.strip():
+                    return None
+        except UpstreamError:
+            raise
+        except httpx.TimeoutException as exc:
+            raise UpstreamError(
+                ErrorCode.TIMEOUT,
+                "Kontomierz request timed out",
+                retryable=not is_write,
+                write_outcome_ambiguous=is_write,
+            ) from exc
+        except httpx.TransportError as exc:
+            raise UpstreamError(
+                ErrorCode.DEPENDENCY_UNAVAILABLE,
+                "Kontomierz is unavailable",
+                retryable=not is_write,
+                write_outcome_ambiguous=is_write,
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise UpstreamError(
+                ErrorCode.UPSTREAM_FAILURE,
+                "Kontomierz request failed",
+                write_outcome_ambiguous=is_write,
+            ) from exc
 
-    # ------------------------------------------------------------------
-    # User Accounts
-    # ------------------------------------------------------------------
+        try:
+            payload = json.loads(content)
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise UpstreamError(
+                ErrorCode.UPSTREAM_FAILURE,
+                "Kontomierz returned invalid JSON",
+                write_outcome_ambiguous=is_write,
+            ) from exc
+        if not isinstance(payload, (dict, list)):
+            raise UpstreamError(
+                ErrorCode.UPSTREAM_FAILURE,
+                "Kontomierz returned an unsupported JSON value",
+                write_outcome_ambiguous=is_write,
+            )
+        return payload
 
-    def get_user_accounts(self) -> list[dict[str, Any]] | None:
-        resp = self._get("user_accounts.json")
-        if resp is None:
-            return None
-        return [item["user_account"] for item in resp]
+    @staticmethod
+    def _unwrap(payload: Json | bool | None, key: str) -> Any:
+        if payload is True or payload is None:
+            return payload
+        if isinstance(payload, dict):
+            return payload.get(key, payload)
+        return payload
 
-    def create_wallet(
+    @staticmethod
+    def _raise_unidentified_create() -> NoReturn:
+        """Fail closed when a create succeeded but no stable new-resource identity was returned."""
+        raise UpstreamError(
+            ErrorCode.UPSTREAM_FAILURE,
+            "Kontomierz accepted the create but did not identify the new resource",
+            retryable=False,
+            write_outcome_ambiguous=True,
+        )
+
+    @staticmethod
+    def _upstream_date(value: str | None) -> str | None:
+        """Convert one canonical public date to the legacy Kontomierz wire format."""
+        if not value:
+            return value
+        try:
+            return datetime.strptime(value, "%Y-%m-%d").strftime("%d-%m-%Y")
+        except ValueError:
+            try:
+                datetime.strptime(value, "%d-%m-%Y")
+            except ValueError as exc:
+                raise ApplicationError(
+                    ErrorCode.INTERNAL_ERROR,
+                    "Kontomierz adapter received an invalid date",
+                ) from exc
+            return value
+
+    @staticmethod
+    def _upstream_month(value: str | None) -> str | None:
+        """Convert a canonical YYYY-MM month selector to the legacy wire date."""
+        if not value:
+            return value
+        try:
+            return datetime.strptime(value, "%Y-%m").strftime("01-%m-%Y")
+        except ValueError:
+            try:
+                datetime.strptime(value, "%d-%m-%Y")
+            except ValueError as exc:
+                raise ApplicationError(
+                    ErrorCode.INTERNAL_ERROR,
+                    "Kontomierz adapter received an invalid month selector",
+                ) from exc
+            return value
+
+    @classmethod
+    def _upstream_date_fields(cls, values: Mapping[str, Any], *names: str) -> dict[str, Any]:
+        result = dict(values)
+        for name in names:
+            if name in result and result[name] is not None and result[name] != "":
+                result[name] = cls._upstream_date(result[name])
+        return result
+
+    @staticmethod
+    def _canonicalize_upstream_date(value: Any) -> Any:
+        """Normalize a localized upstream date when it appears in a response."""
+        if not isinstance(value, str):
+            return value
+        try:
+            return datetime.strptime(value, "%d-%m-%Y").date().isoformat()
+        except ValueError:
+            return value
+
+    @classmethod
+    def _canonicalize_date_fields(cls, value: dict[str, Any], *names: str) -> dict[str, Any]:
+        result = dict(value)
+        for name in names:
+            if name in result:
+                result[name] = cls._canonicalize_upstream_date(result[name])
+        return result
+
+    async def get_user_accounts(self) -> list[dict[str, Any]]:
+        payload = await self._request("GET", "user_accounts.json")
+        items = self._expect_list(payload)
+        return [self._expect_dict(item.get("user_account", item)) for item in items]
+
+    async def create_wallet(
         self,
         currency_balance: str,
         currency_name: str,
-        user_name: str = "",
+        user_name: str | None = None,
         liquid: str = "1",
-    ) -> dict[str, Any] | None:
-        data: dict[str, Any] = {
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = {
             "user_account[currency_balance]": currency_balance,
             "user_account[currency_name]": currency_name,
             "user_account[liquid]": liquid,
         }
-        if user_name:
-            data["user_account[user_name]"] = user_name
-        resp = self._post("user_accounts/create_wallet.json", data=data)
-        if resp is None:
-            return None
-        return resp.get("user_account")
+        if user_name is not None:
+            body["user_account[user_name]"] = user_name
+        payload = await self._request("POST", "user_accounts/create_wallet.json", body=body)
+        if payload is None:
+            return dict(_UNIDENTIFIED_CREATE_MARKER)
+        return self._response_object(payload, "user_account", write=True)
 
-    def update_wallet(
-        self,
-        wallet_id: int,
-        currency_balance: str = "",
-        currency_name: str = "",
-        user_name: str = "",
-        liquid: str = "",
-    ) -> dict[str, Any] | None:
-        data: dict[str, Any] = {}
-        if user_name:
-            data["user_account[user_name]"] = user_name
-        if currency_balance:
-            data["user_account[currency_balance]"] = currency_balance
-        if currency_name:
-            data["user_account[currency_name]"] = currency_name
-        if liquid:
-            data["user_account[liquid]"] = liquid
-        resp = self._post(f"user_accounts/{wallet_id}/update_wallet.json", data=data)
-        if resp is None:
-            return None
-        return resp.get("user_account")
+    async def update_wallet(self, wallet_id: int, **fields: Any) -> dict[str, Any]:
+        body = {f"user_account[{key}]": value for key, value in fields.items() if value is not None}
+        payload = await self._request("PUT", f"user_accounts/{wallet_id}/update_wallet.json", body=body)
+        if payload is None:
+            return {"updated": True, "wallet_id": wallet_id}
+        return self._response_object(payload, "user_account", write=True)
 
-    def destroy_wallet(self, wallet_id: int) -> bool:
-        return self._delete(f"user_accounts/{wallet_id}/destroy_wallet.json")
+    async def destroy_wallet(self, wallet_id: int) -> bool:
+        return bool(await self._request("DELETE", f"user_accounts/{wallet_id}/destroy_wallet.json", expect_json=False))
 
-    # ------------------------------------------------------------------
-    # Money Transactions
-    # ------------------------------------------------------------------
-
-    def get_money_transactions(
-        self,
-        page: int = 1,
-        per_page: int | None = None,
-        user_account_id: int | None = None,
-        q: str | None = None,
-        start_on: str | None = None,
-        end_on: str | None = None,
-        direction: str | None = None,
-        tag_name: str | None = None,
-        category_group_id: int | None = None,
-        category_id: int | None = None,
-        show_hidden_transactions: str | None = None,
-    ) -> list[dict[str, Any]] | None:
-        resp = self._get(
-            "money_transactions.json",
-            page=page,
-            per_page=per_page,
-            user_account_id=user_account_id,
-            q=q,
-            start_on=start_on,
-            end_on=end_on,
-            direction=direction,
-            tag_name=tag_name,
-            category_group_id=category_group_id,
-            category_id=category_id,
-            show_hidden_transactions=show_hidden_transactions,
+    async def get_money_transactions(self, **filters: Any) -> list[dict[str, Any]]:
+        query = self._upstream_date_fields(filters, "start_on", "end_on")
+        items = self._expect_list(
+            self._unwrap(
+                await self._request("GET", "money_transactions.json", query=query),
+                "money_transactions",
+            )
         )
-        if resp is None:
-            return None
-        return resp if isinstance(resp, list) else resp.get("money_transactions", resp)
+        return [self._canonicalize_date_fields(item, "transaction_on") for item in items]
 
-    def get_money_transaction(self, transaction_id: int) -> dict[str, Any] | None:
-        resp = self._get(f"money_transactions/{transaction_id}.json")
-        if resp is None:
-            return None
-        return resp.get("money_transaction", resp)
+    async def get_money_transaction(self, transaction_id: int) -> dict[str, Any]:
+        item = self._response_object(
+            await self._request("GET", f"money_transactions/{transaction_id}.json"),
+            "money_transaction",
+            write=False,
+        )
+        return self._canonicalize_date_fields(item, "transaction_on")
 
-    def create_money_transaction(
-        self,
-        client_assigned_id: str,
-        user_account_id: int | None = None,
-        category_id: int | None = None,
-        currency_amount: str = "",
-        currency_name: str = "",
-        direction: str = "withdrawal",
-        tag_string: str = "",
-        name: str = "",
-        transaction_on: str = "",
-    ) -> dict[str, Any] | None:
-        data: dict[str, Any] = {
-            "money_transaction[client_assigned_id]": client_assigned_id,
-            "money_transaction[direction]": direction,
-        }
-        if user_account_id is not None:
-            data["money_transaction[user_account_id]"] = user_account_id
-        if category_id is not None:
-            data["money_transaction[category_id]"] = category_id
-        if currency_amount:
-            data["money_transaction[currency_amount]"] = currency_amount
-        if currency_name:
-            data["money_transaction[currency_name]"] = currency_name
-        if tag_string:
-            data["money_transaction[tag_string]"] = tag_string
-        if name:
-            data["money_transaction[name]"] = name
-        if transaction_on:
-            data["money_transaction[transaction_on]"] = transaction_on
-        resp = self._post("money_transactions.json", data=data)
-        if resp is None:
-            return None
-        return resp.get("money_transaction", resp)
+    async def create_money_transaction(self, **fields: Any) -> dict[str, Any]:
+        wire_fields = self._upstream_date_fields(fields, "transaction_on")
+        body = {f"money_transaction[{key}]": value for key, value in wire_fields.items() if value is not None}
+        payload = await self._request("POST", "money_transactions.json", body=body)
+        if payload is None:
+            self._raise_unidentified_create()
+        item = self._response_object(payload, "money_transaction", write=True)
+        return self._canonicalize_date_fields(item, "transaction_on")
 
-    def update_money_transaction(
-        self,
-        transaction_id: int,
-        user_account_id: int | None = None,
-        category_id: int | None = None,
-        currency_amount: str = "",
-        currency_name: str = "",
-        direction: str = "",
-        tag_string: str = "",
-        name: str = "",
-        transaction_on: str = "",
-    ) -> dict[str, Any] | None:
-        data: dict[str, Any] = {}
-        if user_account_id is not None:
-            data["money_transaction[user_account_id]"] = user_account_id
-        if category_id is not None:
-            data["money_transaction[category_id]"] = category_id
-        if currency_amount:
-            data["money_transaction[currency_amount]"] = currency_amount
-        if currency_name:
-            data["money_transaction[currency_name]"] = currency_name
-        if direction:
-            data["money_transaction[direction]"] = direction
-        if tag_string:
-            data["money_transaction[tag_string]"] = tag_string
-        if name:
-            data["money_transaction[name]"] = name
-        if transaction_on:
-            data["money_transaction[transaction_on]"] = transaction_on
-        resp = self._post(f"money_transactions/{transaction_id}.json", data=data)
-        if resp is None:
-            return None
-        return resp.get("money_transaction", resp)
+    async def update_money_transaction(self, transaction_id: int, **fields: Any) -> dict[str, Any]:
+        wire_fields = self._upstream_date_fields(fields, "transaction_on")
+        body = {f"money_transaction[{key}]": value for key, value in wire_fields.items() if value is not None}
+        payload = await self._request("PUT", f"money_transactions/{transaction_id}.json", body=body)
+        if payload is None:
+            return {"updated": True, "transaction_id": transaction_id}
+        item = self._response_object(payload, "money_transaction", write=True)
+        return self._canonicalize_date_fields(item, "transaction_on")
 
-    def delete_money_transaction(self, transaction_id: int) -> bool:
-        return self._delete(f"money_transactions/{transaction_id}.json")
+    async def delete_money_transaction(self, transaction_id: int) -> bool:
+        return bool(await self._request("DELETE", f"money_transactions/{transaction_id}.json", expect_json=False))
 
-    # ------------------------------------------------------------------
-    # Categories
-    # ------------------------------------------------------------------
+    async def get_categories(self, direction: str) -> list[dict[str, Any]]:
+        return self._expect_list(
+            self._unwrap(
+                await self._request("GET", "categories.json", query={"direction": direction, "in_wallet": "true"}),
+                "category_groups",
+            )
+        )
 
-    def get_categories(self, direction: str) -> list[dict[str, Any]] | None:
-        resp = self._get("categories.json", direction=direction, in_wallet="true")
-        if resp is None:
-            return None
-        return resp.get("category_groups", resp)
+    async def get_tags(self) -> list[dict[str, Any]]:
+        return self._expect_list(self._unwrap(await self._request("GET", "tags.json"), "tags"))
 
-    # ------------------------------------------------------------------
-    # Tags
-    # ------------------------------------------------------------------
+    async def get_currencies(self) -> list[dict[str, Any]]:
+        return self._expect_list(self._unwrap(await self._request("GET", "currencies.json"), "currencies"))
 
-    def get_tags(self) -> list[dict[str, Any]] | None:
-        resp = self._get("tags.json")
-        if resp is None:
-            return None
-        return resp.get("tags", resp)
+    async def get_budgets(self, month_on: str | None = None) -> list[dict[str, Any]]:
+        items = self._expect_list(
+            self._unwrap(
+                await self._request("GET", "budgets.json", query={"month_on": self._upstream_month(month_on)}),
+                "budgets",
+            )
+        )
+        return [self._canonicalize_date_fields(item, "month_on") for item in items]
 
-    # ------------------------------------------------------------------
-    # Budgets
-    # ------------------------------------------------------------------
-
-    def get_budgets(self, month_on: str | None = None) -> list[dict[str, Any]] | None:
-        resp = self._get("budgets.json", month_on=month_on)
-        if resp is None:
-            return None
-        return resp.get("budgets", resp)
-
-    def create_budget(
+    async def create_budget(
         self,
         limit: str,
         category_id: int | None = None,
         category_group_id: int | None = None,
         month_on: str = "",
-    ) -> dict[str, Any] | None:
-        data: dict[str, Any] = {"budget[limit]": limit}
+    ) -> dict[str, Any]:
+        return await self._budget_write("POST", "budgets.json", limit, category_id, category_group_id, month_on)
+
+    async def update_budget(self, budget_id: int, limit: str) -> dict[str, Any]:
+        return await self._budget_write("PUT", f"budgets/{budget_id}.json", limit, None, None, "")
+
+    async def _budget_write(
+        self,
+        method: str,
+        path: str,
+        limit: str,
+        category_id: int | None,
+        category_group_id: int | None,
+        month_on: str,
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = {"budget[limit]": limit}
         if category_id is not None:
-            data["budget[category_id]"] = category_id
+            body["budget[category_id]"] = category_id
         if category_group_id is not None:
-            data["budget[category_group_id]"] = category_group_id
+            body["budget[category_group_id]"] = category_group_id
         if month_on:
-            data["budget[month_on]"] = month_on
-        resp = self._post("budgets.json", data=data)
-        if resp is None:
-            return None
-        return resp.get("budget", resp)
+            body["budget[month_on]"] = self._upstream_month(month_on)
+        payload = await self._request(method, path, body=body)
+        if payload is None:
+            if method == "PUT":
+                return {"updated": True}
+            return dict(_UNIDENTIFIED_CREATE_MARKER)
+        item = self._response_object(payload, "budget", write=True)
+        return self._canonicalize_date_fields(item, "month_on")
 
-    def update_budget(self, budget_id: int, limit: str) -> dict[str, Any] | None:
-        data: dict[str, Any] = {"budget[limit]": limit}
-        resp = self._post(f"budgets/{budget_id}.json", data=data)
-        if resp is None:
-            return None
-        return resp.get("budget", resp)
+    async def delete_budget(self, budget_id: int) -> bool:
+        return bool(await self._request("DELETE", f"budgets/{budget_id}.json", expect_json=False))
 
-    def delete_budget(self, budget_id: int) -> bool:
-        return self._delete(f"budgets/{budget_id}.json")
+    async def copy_budgets_from_last_month(self) -> bool:
+        return bool(await self._request("POST", "budgets/copy_from_last_to_present_month.json", expect_json=False))
 
-    def copy_budgets_from_last_month(self) -> bool:
-        resp = self._post("budgets/copy_from_last_to_present_month.json")
-        return resp is not None
-
-    # ------------------------------------------------------------------
-    # Scheduled Transactions
-    # ------------------------------------------------------------------
-
-    def get_scheduled_transactions(
-        self,
-        schedule_group_name: str,
-        page: int = 1,
-        per_page: int | None = None,
-        start_on: str | None = None,
-        end_on: str | None = None,
-        direction: str | None = None,
-    ) -> list[dict[str, Any]] | None:
-        resp = self._get(
-            "scheduled_transactions.json",
-            schedule_group_name=schedule_group_name,
-            page=page,
-            per_page=per_page,
-            start_on=start_on,
-            end_on=end_on,
-            direction=direction,
+    async def get_scheduled_transactions(self, **filters: Any) -> list[dict[str, Any]]:
+        query = self._upstream_date_fields(filters, "start_on", "end_on")
+        items = self._expect_list(
+            self._unwrap(
+                await self._request("GET", "scheduled_transactions.json", query=query),
+                "scheduled_transactions",
+            )
         )
-        if resp is None:
+        return [self._canonicalize_date_fields(_schedule_identity(item), "transaction_on") for item in items]
+
+    async def get_schedule(self, schedule_id: int) -> dict[str, Any]:
+        item = self._response_object(
+            await self._request("GET", f"schedules/{schedule_id}.json"),
+            "schedule",
+            write=False,
+        )
+        return self._canonicalize_date_fields(_schedule_identity(item), "deadline_on", "next_deadline_on")
+
+    async def create_schedule(self, **fields: Any) -> dict[str, Any]:
+        payload = await self._schedule_write("POST", "schedules.json", fields)
+        if payload is None:
+            return dict(_UNIDENTIFIED_CREATE_MARKER)
+        return payload
+
+    async def update_schedule(self, schedule_id: int, **fields: Any) -> dict[str, Any]:
+        payload = await self._schedule_write("PUT", f"schedules/{schedule_id}.json", fields)
+        if payload is None:
+            return {"updated": True, "schedule_id": schedule_id}
+        return payload
+
+    async def _schedule_write(self, method: str, path: str, fields: Mapping[str, Any]) -> dict[str, Any] | None:
+        wire_fields = self._upstream_date_fields(fields, "deadline_on")
+        body = {f"schedule[{key}]": value for key, value in wire_fields.items() if value is not None}
+        payload = await self._request(method, path, body=body)
+        if payload is None:
             return None
-        return resp.get("scheduled_transactions", resp)
+        item = self._response_object(payload, "schedule", write=True)
+        return self._canonicalize_date_fields(_schedule_identity(item), "deadline_on", "next_deadline_on")
 
-    def get_schedule(self, schedule_id: int) -> dict[str, Any] | None:
-        resp = self._get(f"schedules/{schedule_id}.json")
-        if resp is None:
-            return None
-        return resp.get("schedule", resp)
+    async def delete_schedule(self, schedule_id: int) -> bool:
+        return bool(await self._request("DELETE", f"schedules/{schedule_id}.json", expect_json=False))
 
-    def create_schedule(
-        self,
-        direction: str,
-        deadline_on: str,
-        holidays: str,
-        description: str,
-        currency_amount: str,
-        currency_name: str,
-        repeat: str,
-    ) -> dict[str, Any] | None:
-        data: dict[str, Any] = {
-            "schedule[direction]": direction,
-            "schedule[deadline_on]": deadline_on,
-            "schedule[holidays]": holidays,
-            "schedule[description]": description,
-            "schedule[currency_amount]": currency_amount,
-            "schedule[currency_name]": currency_name,
-            "schedule[repeat]": repeat,
-        }
-        resp = self._post("schedules.json", data=data)
-        if resp is None:
-            return None
-        return resp.get("schedule", resp)
-
-    def update_schedule(
-        self,
-        schedule_id: int,
-        direction: str = "",
-        deadline_on: str = "",
-        holidays: str = "",
-        description: str = "",
-        currency_amount: str = "",
-        currency_name: str = "",
-        repeat: str = "",
-    ) -> dict[str, Any] | None:
-        data: dict[str, Any] = {}
-        if direction:
-            data["schedule[direction]"] = direction
-        if deadline_on:
-            data["schedule[deadline_on]"] = deadline_on
-        if holidays:
-            data["schedule[holidays]"] = holidays
-        if description:
-            data["schedule[description]"] = description
-        if currency_amount:
-            data["schedule[currency_amount]"] = currency_amount
-        if currency_name:
-            data["schedule[currency_name]"] = currency_name
-        if repeat:
-            data["schedule[repeat]"] = repeat
-        resp = self._post(f"schedules/{schedule_id}.json", data=data)
-        if resp is None:
-            return None
-        return resp.get("schedule", resp)
-
-    def delete_schedule(self, schedule_id: int) -> bool:
-        return self._delete(f"schedules/{schedule_id}.json")
-
-    def mark_schedule_paid(self, schedule_id: int, date: str) -> bool:
-        return self._put(f"schedules/{schedule_id}/mark_as_payed/{date}.json")
-
-    def mark_schedule_unpaid(self, schedule_id: int, date: str) -> bool:
-        return self._put(f"schedules/{schedule_id}/mark_as_unpayed/{date}.json")
-
-    # ------------------------------------------------------------------
-    # Wealth Points
-    # ------------------------------------------------------------------
-
-    def get_wealth_points(self, start_on: str | None = None, end_on: str | None = None) -> list[dict[str, Any]] | None:
-        resp = self._get("wealth_points.json", start_on=start_on, end_on=end_on)
-        if resp is None:
-            return None
-        return resp if isinstance(resp, list) else resp.get("wealth_points", resp)
-
-    # ------------------------------------------------------------------
-    # Charts
-    # ------------------------------------------------------------------
-
-    def get_pie_chart(
-        self,
-        chart_kind: str = "pie",
-        start_on: str | None = None,
-        end_on: str | None = None,
-        direction: str | None = None,
-        category_group_id: int | None = None,
-        category_id: int | None = None,
-        user_account_id: int | None = None,
-        q: str | None = None,
-        tag_name: str | None = None,
-    ) -> dict[str, Any] | None:
-        return self._get(
-            "charts/money_transactions.json",
-            chart_kind=chart_kind,
-            start_on=start_on,
-            end_on=end_on,
-            direction=direction,
-            category_group_id=category_group_id,
-            category_id=category_id,
-            user_account_id=user_account_id,
-            q=q,
-            tag_name=tag_name,
+    async def mark_schedule_paid(self, schedule_id: int, date: str) -> bool:
+        wire_date = self._upstream_date(date)
+        return bool(
+            await self._request("PUT", f"schedules/{schedule_id}/mark_as_payed/{wire_date}.json", expect_json=False)
         )
 
-    # ------------------------------------------------------------------
-    # Currencies
-    # ------------------------------------------------------------------
+    async def mark_schedule_unpaid(self, schedule_id: int, date: str) -> bool:
+        wire_date = self._upstream_date(date)
+        return bool(
+            await self._request(
+                "PUT",
+                f"schedules/{schedule_id}/mark_as_unpayed/{wire_date}.json",
+                expect_json=False,
+            )
+        )
 
-    def get_currencies(self) -> list[dict[str, Any]] | None:
-        resp = self._get("currencies.json")
-        if resp is None:
-            return None
-        return resp.get("currencies", resp)
+    async def get_wealth_points(self, start_on: str | None = None, end_on: str | None = None) -> list[dict[str, Any]]:
+        query = self._upstream_date_fields({"start_on": start_on, "end_on": end_on}, "start_on", "end_on")
+        payload = await self._request("GET", "wealth_points.json", query=query)
+        items = self._expect_list(payload)
+        return [
+            self._canonicalize_date_fields(self._expect_dict(item.get("wealth_point", item)), "date_on")
+            for item in items
+        ]
+
+    async def get_pie_chart(self, **filters: Any) -> dict[str, Any]:
+        query = self._upstream_date_fields(filters, "start_on", "end_on")
+        return self._expect_dict(await self._request("GET", "charts/money_transactions.json", query=query))
+
+    @staticmethod
+    def _response_object(payload: Json | bool | None, key: str, *, write: bool) -> dict[str, Any]:
+        if payload is None:
+            raise UpstreamError(
+                ErrorCode.UPSTREAM_FAILURE,
+                "Kontomierz returned an empty response",
+                write_outcome_ambiguous=write,
+            )
+        if not isinstance(payload, dict) or key not in payload:
+            raise UpstreamError(
+                ErrorCode.UPSTREAM_FAILURE,
+                f"Kontomierz response is missing the {key} object",
+                write_outcome_ambiguous=write,
+            )
+        return KontomierzClient._expect_dict(payload[key], write=write)
+
+    @staticmethod
+    def _expect_dict(value: Any, *, write: bool = False) -> dict[str, Any]:
+        if not isinstance(value, dict):
+            raise UpstreamError(
+                ErrorCode.UPSTREAM_FAILURE,
+                "Unexpected object response from Kontomierz",
+                write_outcome_ambiguous=write,
+            )
+        return value
+
+    @staticmethod
+    def _expect_list(value: Any, *, write: bool = False) -> list[dict[str, Any]]:
+        if not isinstance(value, list) or not all(isinstance(item, dict) for item in value):
+            raise UpstreamError(
+                ErrorCode.UPSTREAM_FAILURE,
+                "Unexpected list response from Kontomierz",
+                write_outcome_ambiguous=write,
+            )
+        return value

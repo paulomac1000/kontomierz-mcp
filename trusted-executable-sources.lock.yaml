@@ -1,0 +1,36 @@
+schema_version: 1
+sources:
+  - id: ai-skills
+    role: auditor
+    repository: paulomac1000/ai-skills
+    revision: b83a3f7357efe223e4087860103e49704055025d
+    credential_access: read-only-provider
+    files:
+      - authority_path: skills/afds-doc-writer/validate.py
+        sha256: sha256:2ca7ce6ced39098fabd7ee74ba242a554a065888455f5a318292d755b4c87751
+      - authority_path: skills/agents-md-architect/tools/audit_agents_md.py
+        sha256: sha256:2f29f41eb8fee0a2d9289a8daf9a610a9e84117cc25adde69e22b19ad5f9ee36
+      - authority_path: skills/ci-cd-architect/tools/check_github_actions_policy.py
+        sha256: sha256:35116ab4dc2ffe9a5d2833e72c2fe8252a1fcb5209570c3885fc8b9e975a84c4
+      - authority_path: skills/ci-cd-architect/tools/check_consumer_trust_hygiene.py
+        sha256: sha256:2732542649d10624dc14fd099df533c494abddd8136dcbe520dc017ab72deca9
+      - authority_path: skills/mcp-server-architect/tools/inspect_existing_project.py
+        sha256: sha256:cc85492bbc56b828e1835f54d2c8ea2246e28b8381180510f4604eead310f567
+      - authority_path: skills/mcp-server-architect/tools/plan_existing_project.py
+        sha256: sha256:445b02b42e66c5e44e4ab7cce2aa434ea5d47fc7d05a526cf7b3d45e7b221219
+      - authority_path: skills/mcp-server-architect/tools/capture_mcp_contract.py
+        sha256: sha256:4972f934cea4eecdbd6551c047ec1d59d7c171d3956403087015c7b98aaf2a0a
+      - authority_path: skills/mcp-server-architect/tools/compare_mcp_contracts.py
+        sha256: sha256:1c3b46f99537f72a8a3edc96a20a971e3312d4f1dff4335d37335210f1c17bcc
+      - authority_path: contracts/validate_upstream_contract.py
+        sha256: sha256:c011d9f0064f3ee1d5c3effaa20763b83c20d1aa017656ac00ec6bd5556eabd3
+      - authority_path: contracts/validate_live_backend_test_policy.py
+        sha256: sha256:23d9fde3565667424ddb7a6763b92908da10b265a7a311c0988e328764685e8b
+      - authority_path: contracts/validate_trusted_executable_sources.py
+        sha256: sha256:6b111ea3238d18de7b9a18cffe2371b8407a677e6054c1e3be0beeec993bb5a1
+      - authority_path: contracts/validate_external_adoption.py
+        sha256: sha256:66bdda683519ded05c24d346c83b223dba5704ea2a89cdd7f78392201f9e52a7
+      - authority_path: contracts/validate_external_trust_lock.py
+        sha256: sha256:301952354990e9222a3a2cd587040ba10d15cf67f0458546d81138348e1dd348
+      - authority_path: skills/ci-cd-architect/tools/check_github_provider_controls.py
+        sha256: sha256:a0a8e513e78b1d6601eca9d7eaec112a7af120e59e74211dfacd3b5899c8c4f3

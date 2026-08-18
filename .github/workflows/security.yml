@@ -1,0 +1,40 @@
+# ai-skills-policy-profile: trusted-ci
+name: Scheduled security assurance
+
+on:
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scheduled-security
+  cancel-in-progress: true
+
+jobs:
+  security:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v6
+        with:
+          python-version: "3.12"
+      - name: Install hash-locked security environment
+        run: |
+          set -euo pipefail
+          python -m pip install --no-deps --only-binary=:all: --require-hashes \
+            -r requirements/dev-linux-x64-py312.lock
+          python -m pip install --no-deps --only-binary=:all: --require-hashes \
+            -r requirements/build-linux-x64.lock
+          python -m pip install --no-deps --no-build-isolation -e .
+      - run: python -m pip check
+      - name: Audit shipped runtime lock
+        run: python -m pip_audit --no-deps -r requirements/runtime-linux-x64-py312.lock
+      - name: Audit development lock
+        run: python -m pip_audit --no-deps -r requirements/dev-linux-x64-py312.lock
+      - run: python -m bandit -q -lll -iii -r src/kontomierz_mcp

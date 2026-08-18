@@ -1,0 +1,6 @@
+# Exact Linux x64 build-tool wheel lock shared by Python 3.11, 3.12, and 3.13.
+# Install after the lane-specific dev lock with:
+# python -m pip install --no-deps --only-binary=:all: --require-hashes -r <this-file>
+
+setuptools==83.0.0 --hash=sha256:29b23c360f22f414dc7336bb39178cc7bcbf6021ed2733cde173f09dba19abb3
+wheel==0.47.0 --hash=sha256:212281cab4dff978f6cedd499cd893e1f620791ca6ff7107cf270781e587eced

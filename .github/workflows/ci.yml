@@ -1,108 +1,472 @@
+# ai-skills-policy-profile: trusted-ci
 name: CI
 
 on:
   push:
-    branches: [main, master]
+    branches: [main]
   pull_request:
+    branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
 
 jobs:
-  lint:
-    runs-on: ubuntu-latest
+  quality:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v6
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
-          python-version: "3.14"
-
-      - name: Install dependencies and linting tools
+          ref: ${{ env.CANDIDATE_SHA }}
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v6
+        with:
+          python-version: "3.12"
+      - name: Install hash-locked project quality environment
         run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-          pip install ruff mypy bandit
+          set -euo pipefail
+          python -m pip install --no-deps --only-binary=:all: --require-hashes \
+            -r requirements/dev-linux-x64-py312.lock
+          python -m pip install --no-deps --only-binary=:all: --require-hashes \
+            -r requirements/build-linux-x64.lock
+          python -m pip install --no-deps --no-build-isolation -e .
+      - name: Verify installed dependency graph
+        run: python -m pip check
+      - name: Verify checkout identity
+        run: test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+      - name: Ruff lint
+        run: python -m ruff check .
+      - name: Ruff format
+        run: python -m ruff format --check .
+      - name: Mypy
+        run: python -m mypy src/kontomierz_mcp
+      - name: Bandit
+        run: python -m bandit -q -r src/kontomierz_mcp
+      - name: Dependency audit
+        run: python -m pip_audit
+      - name: Test with branch coverage
+        run: >-
+          python -m pytest -m "not external"
+          --cov=kontomierz_mcp --cov-branch --cov-report=term-missing
+          --cov-report=xml
+      - name: Mock all-tools smoke
+        run: python scripts/mock_smoke.py
+      - name: Upload quality evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: quality-evidence-${{ env.CANDIDATE_SHA }}
+          path: |
+            coverage.xml
+            requirements/*.lock
+          if-no-files-found: warn
+          retention-days: 14
 
-      - name: Ruff check
-        run: ruff check .
-
-      - name: Ruff format check
-        run: ruff format --check . || echo "::warning::ruff format check skipped — pre-existing formatting differences"
-
-      - name: mypy
-        run: mypy src/kontomierz_mcp/ --disallow-any-generics --disallow-subclassing-any --disallow-untyped-calls --disallow-untyped-defs --disallow-incomplete-defs --check-untyped-defs --warn-redundant-casts --warn-unused-ignores --no-implicit-reexport --strict-equality --extra-checks
-
-      - name: bandit
-        run: bandit -c pyproject.toml -r src/kontomierz_mcp/ -ll
-
-  test:
-    runs-on: ubuntu-latest
-    needs: lint
+  compatibility:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13"]
     steps:
-      - uses: actions/checkout@v6
-
-      - name: Set up Python 3.14
-        uses: actions/setup-python@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
-          python-version: "3.14"
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-
-      - name: Run unit tests with coverage
-        run: |
-          pytest tests/unit/ -v --tb=short \
-            --cov=kontomierz_mcp \
-            --cov-report=term-missing
-
-      - name: Run integration tests
-        run: pytest tests/integration/ -v --tb=short
-
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v7
+          ref: ${{ env.CANDIDATE_SHA }}
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v6
         with:
-          files: ./coverage.xml
-          fail_ci_if_error: false
-          token: ${{ secrets.CODECOV_TOKEN }}
+          python-version: ${{ matrix.python }}
+      - name: Install lane-specific hash-locked development graph
+        shell: bash
+        run: |
+          set -euo pipefail
+          PYTAG="$(python -c 'import sys; print(f"py{sys.version_info.major}{sys.version_info.minor}")')"
+          python -m pip install --no-deps --only-binary=:all: --require-hashes \
+            -r "requirements/dev-linux-x64-${PYTAG}.lock"
+          python -m pip install --no-deps --only-binary=:all: --require-hashes \
+            -r requirements/build-linux-x64.lock
+          python -m pip install --no-deps --no-build-isolation -e .
+      - run: python -m pip check
+      - run: python -m pytest -m "not external" -q
 
-  docker-smoke:
-    runs-on: ubuntu-latest
-    needs: test
+  standards:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v6
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-
-      - name: Build Docker image
-        uses: docker/build-push-action@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
-          context: .
-          load: true
-          tags: kontomierz-mcp:test
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Smoke test — REST API health + tools
+          ref: ${{ env.CANDIDATE_SHA }}
+          persist-credentials: false
+      - name: Resolve trusted ai-skills coordinates from canonical lock
+        id: trusted-ai-skills
+        shell: bash
         run: |
-          docker run -d --rm \
-            -p 9102:9102 \
-            -e MCP_UNSAFE_PUBLIC_ACCESS_CONFIRMED=1 \
-            --name kontomierz-mcp-smoke kontomierz-mcp:test
-          sleep 5
-          curl -fsS --retry 10 --retry-delay 2 \
-            http://localhost:9102/api/health || exit 1
-          TOOLS=$(curl -s http://localhost:9102/api/tools \
-            | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['total'])")
-          [ "$TOOLS" = "27" ] \
-            || (echo "FAIL: expected 27, got $TOOLS" && exit 1)
-          docker stop kontomierz-mcp-smoke
+          set -euo pipefail
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import re
+          from pathlib import Path
+
+          text = Path("trusted-executable-sources.lock.yaml").read_text(encoding="utf-8")
+          marker = "  - id: ai-skills\n"
+          try:
+              block = text.split(marker, 1)[1]
+          except IndexError as exc:
+              raise SystemExit("ai-skills is missing from trusted executable source lock") from exc
+          repository = re.search(r"^    repository: ([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)\s*$", block, re.MULTILINE)
+          revision = re.search(r"^    revision: ([0-9a-f]{40})\s*$", block, re.MULTILINE)
+          if repository is None or revision is None:
+              raise SystemExit("trusted ai-skills repository/revision is malformed")
+          print(f"repository={repository.group(1)}")
+          print(f"revision={revision.group(1)}")
+          PY
+      - name: Checkout trusted ai-skills validators
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          repository: ${{ steps.trusted-ai-skills.outputs.repository }}
+          ref: ${{ steps.trusted-ai-skills.outputs.revision }}
+          path: .trusted/ai-skills
+          persist-credentials: false
+      - name: Move trusted verifier outside candidate tree
+        env:
+          TRUSTED_REVISION: ${{ steps.trusted-ai-skills.outputs.revision }}
+        run: |
+          set -euo pipefail
+          mv .trusted/ai-skills "$RUNNER_TEMP/ai-skills"
+          rmdir .trusted
+          test "$(git -C "$RUNNER_TEMP/ai-skills" rev-parse HEAD)" = "$TRUSTED_REVISION"
+      - name: Print trusted authority SHA256 values
+        shell: bash
+        run: |
+          set -euo pipefail
+          for path in \
+            skills/afds-doc-writer/validate.py \
+            skills/agents-md-architect/tools/audit_agents_md.py \
+            skills/ci-cd-architect/tools/check_github_actions_policy.py \
+            skills/ci-cd-architect/tools/check_consumer_trust_hygiene.py \
+            skills/mcp-server-architect/tools/inspect_existing_project.py \
+            skills/mcp-server-architect/tools/plan_existing_project.py \
+            skills/mcp-server-architect/tools/capture_mcp_contract.py \
+            skills/mcp-server-architect/tools/compare_mcp_contracts.py \
+            contracts/validate_upstream_contract.py \
+            contracts/validate_live_backend_test_policy.py \
+            contracts/validate_trusted_executable_sources.py \
+            contracts/validate_external_adoption.py \
+            contracts/validate_external_trust_lock.py \
+            skills/ci-cd-architect/tools/check_github_provider_controls.py
+          do
+            digest="$(sha256sum "$RUNNER_TEMP/ai-skills/$path" | awk '{print $1}')"
+            printf 'AUTHORITY_SHA256 %s sha256:%s\n' "$path" "$digest"
+          done
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v6
+        with:
+          python-version: "3.12"
+      - name: Install trusted validator lock
+        run: >-
+          python -m pip install --require-hashes
+          -r "$RUNNER_TEMP/ai-skills/requirements-dev-linux-x64-py312.lock"
+      - name: Validate canonical trusted executable source lock
+        run: >-
+          python "$RUNNER_TEMP/ai-skills/contracts/validate_trusted_executable_sources.py"
+          trusted-executable-sources.lock.yaml
+          --repository-root .
+          --authority-root "ai-skills=$RUNNER_TEMP/ai-skills"
+          --require-authority
+      - name: Validate governed documents with trusted AFDS validator
+        run: python "$RUNNER_TEMP/ai-skills/skills/afds-doc-writer/validate.py" AGENTS.md docs
+      - name: Audit AGENTS instructions from trusted revision
+        run: >-
+          python "$RUNNER_TEMP/ai-skills/skills/agents-md-architect/tools/audit_agents_md.py"
+          . --profile mcp-server --layout single --language en --strict
+      - name: Audit workflows from trusted revision
+        run: >-
+          python "$RUNNER_TEMP/ai-skills/skills/ci-cd-architect/tools/check_github_actions_policy.py" .
+      - name: Audit consumer trust hygiene from trusted revision
+        run: >-
+          python "$RUNNER_TEMP/ai-skills/skills/ci-cd-architect/tools/check_consumer_trust_hygiene.py" .
+      - name: Inspect existing MCP project from trusted revision
+        run: >-
+          python "$RUNNER_TEMP/ai-skills/skills/mcp-server-architect/tools/inspect_existing_project.py"
+          . --output "$RUNNER_TEMP/ai-skills-discovery.json"
+      - name: Verify discovery facts and progressive routing
+        run: |
+          python - "$RUNNER_TEMP/ai-skills-discovery.json" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          document = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+          facts = document["facts"]
+          plan = document["plan"]
+          assert facts["sdk_profile"] == "python-official-mcp"
+          assert facts["external_upstream"] is True
+          assert facts["external_tests"] is True
+          assert facts["external_tests_default_excluded"] is True
+          assert facts["upstream_contract_present"] is True
+          assert facts["live_backend_policy_present"] is True
+          assert facts.get("container_build", {}).get("prebuilt_artifact_copy") is True
+          assert facts.get("container_build", {}).get("source_revision_binding_signal") is True
+          assert plan["upstream_contract"] == "verified"
+          assert plan["live_backend_safety"] == "declared"
+          assert plan.get("container_artifact_binding") == "declared"
+          assert document["unknowns"] == []
+          PY
+      - name: Plan existing MCP adoption from trusted revision
+        run: >-
+          python "$RUNNER_TEMP/ai-skills/skills/mcp-server-architect/tools/plan_existing_project.py"
+          . --target-level L2 --output "$RUNNER_TEMP/ai-skills-plan.json"
+      - name: Verify adoption plan and exact SDK claim
+        run: |
+          python - "$RUNNER_TEMP/ai-skills-plan.json" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          document = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+          assert document["format"] == "ai-skills-mcp-adoption-plan"
+          assert document["target_level"] == "L2"
+          assert document["sdk_compatibility_claim"] == {
+              "package": "mcp",
+              "requirement": "==2.0.0",
+              "status": "exact-pin",
+          }
+          assert document["discovery"]["unknowns"] == []
+          PY
+      - name: Validate observed upstream contract from trusted revision
+        run: >-
+          python "$RUNNER_TEMP/ai-skills/contracts/validate_upstream_contract.py"
+          upstream-contract.yaml --require-observed
+      - name: Validate live-backend safety policy from trusted revision
+        run: >-
+          python "$RUNNER_TEMP/ai-skills/contracts/validate_live_backend_test_policy.py"
+          live-backend-test-policy.yaml
+
+  exact-artifact:
+    needs: [quality, compatibility, standards]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          ref: ${{ env.SOURCE_SHA }}
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v6
+        with:
+          python-version: "3.12"
+      - name: Install hash-locked build environment
+        run: |
+          set -euo pipefail
+          python -m pip install --no-deps --only-binary=:all: --require-hashes \
+            -r requirements/dev-linux-x64-py312.lock
+          python -m pip install --no-deps --only-binary=:all: --require-hashes \
+            -r requirements/build-linux-x64.lock
+      - name: Resolve trusted ai-skills contract authority
+        id: artifact-trusted-ai-skills
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import re
+          from pathlib import Path
+
+          text = Path("trusted-executable-sources.lock.yaml").read_text(encoding="utf-8")
+          marker = "  - id: ai-skills\n"
+          try:
+              block = text.split(marker, 1)[1]
+          except IndexError as exc:
+              raise SystemExit("ai-skills is missing from trusted executable source lock") from exc
+          repository = re.search(r"^    repository: ([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)\s*$", block, re.MULTILINE)
+          revision = re.search(r"^    revision: ([0-9a-f]{40})\s*$", block, re.MULTILINE)
+          if repository is None or revision is None:
+              raise SystemExit("trusted ai-skills repository/revision is malformed")
+          print(f"repository={repository.group(1)}")
+          print(f"revision={revision.group(1)}")
+          PY
+      - name: Checkout trusted ai-skills contract authority
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          repository: ${{ steps.artifact-trusted-ai-skills.outputs.repository }}
+          ref: ${{ steps.artifact-trusted-ai-skills.outputs.revision }}
+          path: .trusted/artifact-ai-skills
+          persist-credentials: false
+      - name: Verify exact contract authority outside candidate tree
+        env:
+          TRUSTED_REVISION: ${{ steps.artifact-trusted-ai-skills.outputs.revision }}
+        run: |
+          set -euo pipefail
+          mv .trusted/artifact-ai-skills "$RUNNER_TEMP/artifact-ai-skills"
+          rmdir .trusted
+          test "$(git -C "$RUNNER_TEMP/artifact-ai-skills" rev-parse HEAD)" = "$TRUSTED_REVISION"
+          python "$RUNNER_TEMP/artifact-ai-skills/contracts/validate_trusted_executable_sources.py" \
+            trusted-executable-sources.lock.yaml \
+            --repository-root . \
+            --authority-root "ai-skills=$RUNNER_TEMP/artifact-ai-skills" \
+            --require-authority
+      - name: Build exact application wheel
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          rm -rf dist build src/*.egg-info
+          SOURCE_DATE_EPOCH="$(git log -1 --format=%ct HEAD)"
+          test -n "$SOURCE_DATE_EPOCH"
+          export SOURCE_DATE_EPOCH
+          python -m pip wheel --no-deps --no-build-isolation . --wheel-dir dist
+          test "$(find dist -maxdepth 1 -type f -name 'kontomierz_mcp-*.whl' | wc -l)" -eq 1
+      - name: Materialize hash-locked runtime wheelhouse and image inputs
+        run: |
+          set -euo pipefail
+          mkdir -p dist/wheelhouse
+          python -m pip download \
+            --no-deps \
+            --only-binary=:all: \
+            --require-hashes \
+            --dest dist/wheelhouse \
+            -r requirements/runtime-linux-x64-py312.lock
+          cp requirements/runtime-linux-x64-py312.lock dist/
+          printf '%s\n' "$SOURCE_SHA" > dist/SOURCE_REVISION
+          (
+            cd dist
+            find . -type f \( -name '*.whl' -o -name 'runtime-linux-x64-py312.lock' -o -name 'SOURCE_REVISION' \) \
+              -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+            sha256sum --check SHA256SUMS
+          )
+      - name: Install runtime-only exact wheel without network
+        run: |
+          set -euo pipefail
+          rm -rf .artifact-venv
+          python -m venv .artifact-venv
+          .artifact-venv/bin/python -m pip install \
+            --no-index \
+            --find-links dist/wheelhouse \
+            --no-deps \
+            --only-binary=:all: \
+            --require-hashes \
+            -r dist/runtime-linux-x64-py312.lock
+          .artifact-venv/bin/python -m pip install --no-index --no-deps dist/kontomierz_mcp-*.whl
+          .artifact-venv/bin/python -m pip check
+          .artifact-venv/bin/python -c "import kontomierz_mcp; print(kontomierz_mcp.__version__)"
+          .artifact-venv/bin/python scripts/mock_smoke.py
+      - name: Test exact wheel outside source tree
+        run: |
+          set -euo pipefail
+          rm -rf .artifact-test-venv /tmp/kontomierz-wheel-test
+          python -m venv .artifact-test-venv
+          .artifact-test-venv/bin/python -m pip install \
+            --no-deps --only-binary=:all: --require-hashes \
+            -r requirements/dev-linux-x64-py312.lock
+          .artifact-test-venv/bin/python -m pip install --no-index --no-deps dist/kontomierz_mcp-*.whl
+          .artifact-test-venv/bin/python -m pip check
+          mkdir -p /tmp/kontomierz-wheel-test
+          cp -R \
+            tests scripts .github Dockerfile pyproject.toml live-backend-test-policy.yaml upstream-contract.yaml \
+            trusted-executable-sources.lock.yaml /tmp/kontomierz-wheel-test/
+          (
+            cd /tmp/kontomierz-wheel-test
+            "$GITHUB_WORKSPACE/.artifact-test-venv/bin/python" -m pytest -m "not external" -q
+          )
+      - name: Official Client stdio smoke from runtime-only exact wheel
+        run: >-
+          .artifact-venv/bin/python scripts/transport_smoke.py stdio
+          --executable .artifact-venv/bin/kontomierz-mcp
+      - name: Official Client authenticated HTTP smoke from runtime-only exact wheel
+        run: >-
+          .artifact-venv/bin/python scripts/transport_smoke.py streamable-http
+          --executable .artifact-venv/bin/kontomierz-mcp
+      - name: Build and smoke image from exact verified inputs
+        run: |
+          set -euo pipefail
+          BASE_IMAGE="$(awk '/^FROM / { print $2; exit }' Dockerfile)"
+          case "$BASE_IMAGE" in
+            *@sha256:*) ;;
+            *) echo "Dockerfile base image must be digest-pinned" >&2; exit 1 ;;
+          esac
+          docker pull "$BASE_IMAGE"
+          docker build --pull=false \
+            --build-arg "EXPECTED_SOURCE_REVISION=${SOURCE_SHA}" \
+            -t "kontomierz-mcp:${SOURCE_SHA}" .
+          REVISION="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "kontomierz-mcp:${SOURCE_SHA}")"
+          test "$REVISION" = "$SOURCE_SHA"
+          docker run --rm --entrypoint python "kontomierz-mcp:${SOURCE_SHA}" -c \
+            "import os, kontomierz_mcp; assert os.geteuid() != 0; print(kontomierz_mcp.__version__)"
+      - name: Capture public contract from exact release wheel
+        run: |
+          set -euo pipefail
+          WHEEL="$(find dist -maxdepth 1 -type f -name 'kontomierz_mcp-*.whl' -print -quit)"
+          WHEEL_NAME="$(basename "$WHEEL")"
+          WHEEL_DIGEST="sha256:$(sha256sum "$WHEEL" | awk '{print $1}')"
+          python "$RUNNER_TEMP/artifact-ai-skills/skills/mcp-server-architect/tools/capture_mcp_contract.py" \
+            --output dist/MCP_PUBLIC_CONTRACT.json \
+            --working-directory . \
+            --expected-source-revision "$SOURCE_SHA" \
+            --expected-artifact-digest "$WHEEL_DIGEST" \
+            -- \
+            .artifact-venv/bin/python scripts/mcp_contract_probe.py \
+            --executable .artifact-venv/bin/kontomierz-mcp \
+            --source-revision "$SOURCE_SHA" \
+            --artifact-identity "$WHEEL_NAME" \
+            --artifact-digest "$WHEEL_DIGEST"
+          python -m json.tool dist/MCP_PUBLIC_CONTRACT.json >/dev/null
+      - name: Close release artifact set
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          IMAGE_ID="$(docker image inspect --format '{{.Id}}' "kontomierz-mcp:$SOURCE_SHA")"
+          WHEEL_SHA="$(sha256sum dist/kontomierz_mcp-*.whl | awk '{print $1}')"
+          python - "$SOURCE_SHA" "$IMAGE_ID" "$WHEEL_SHA" > dist/IMAGE_METADATA.json <<'PY'
+          import json
+          import sys
+          print(json.dumps({"source_sha": sys.argv[1], "image_id": sys.argv[2], "wheel_sha256": sys.argv[3]}, sort_keys=True))
+          PY
+          docker save "kontomierz-mcp:${SOURCE_SHA}" | gzip -n > dist/kontomierz-mcp-image.tar.gz
+          cp requirements/build-linux-x64.lock dist/
+          cat > dist/BUILD_METADATA <<EOF
+          SOURCE_SHA=${SOURCE_SHA}
+          PYTHON_VERSION=3.12
+          RUNTIME_LOCK=requirements/runtime-linux-x64-py312.lock
+          BUILD_LOCK=requirements/build-linux-x64.lock
+          EOF
+          (
+            cd dist
+            find . -maxdepth 1 -type f \( \
+              -name 'kontomierz_mcp-*.whl' -o \
+              -name 'kontomierz-mcp-image.tar.gz' -o \
+              -name 'SHA256SUMS' -o \
+              -name 'SOURCE_REVISION' -o \
+              -name 'MCP_PUBLIC_CONTRACT.json' -o \
+              -name 'IMAGE_METADATA.json' -o \
+              -name 'BUILD_METADATA' -o \
+              -name '*.lock' \
+            \) -print0 | sort -z | xargs -0 sha256sum > RELEASE_SHA256SUMS
+            sha256sum --check RELEASE_SHA256SUMS
+          )
+      - name: Upload exact closed release bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-bundle-${{ env.SOURCE_SHA }}
+          path: |
+            dist/kontomierz_mcp-*.whl
+            dist/wheelhouse/
+            dist/kontomierz-mcp-image.tar.gz
+            dist/SHA256SUMS
+            dist/SOURCE_REVISION
+            dist/MCP_PUBLIC_CONTRACT.json
+            dist/RELEASE_SHA256SUMS
+            dist/IMAGE_METADATA.json
+            dist/BUILD_METADATA
+            dist/runtime-linux-x64-py312.lock
+            dist/build-linux-x64.lock
+          if-no-files-found: error
+          retention-days: 30

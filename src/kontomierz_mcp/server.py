@@ -1,330 +1,314 @@
-"""MCP server entry point — FastMCP + health endpoint + REST bridge.
+"""Composition root and MCP transport adapters."""
 
-Three-port architecture (L2+): health(9100), SSE(9101), REST API(9102).
-"""
+from __future__ import annotations
 
+import inspect
 import json
+import keyword
 import logging
-import sys
-import time
+from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
-from typing import Any
+from contextvars import ContextVar
+from typing import Annotated, Any
 
-from fastmcp import FastMCP
+from pydantic import Field
 
+from . import __version__
+from .audit import configure_audit_sink
+from .boundary_audit import BoundaryStage, emit_boundary_rejection
 from .client import KontomierzClient
-from .response import (
-    RequestIdFilter,
-    SanitizingFormatter,
-    get_invocation_counts,
-    start_tool_context,
-)
-from .tools.accounts import register_accounts_tools
-from .tools.budgets import register_budgets_tools
-from .tools.capabilities import register_capability_tools
-from .tools.charts_wealth import register_charts_wealth_tools
-from .tools.constants import (
-    HEALTH_PORT,
-    KNOWN_RISK_PREFIXES,
-    KONTOMIERZ_API_KEY,
-    LOG_LEVEL,
-    MCP_PORT,
-    REST_API_PORT,
-    TOOL_MANIFESTS,
-    TOOLS_VERSION,
-)
-from .tools.reference import register_reference_tools
-from .tools.schedules import register_schedules_tools
-from .tools.transactions import register_transactions_tools
+from .config import Settings
+from .errors import ApplicationError, ErrorCode
+from .kernel import InvocationKernel
+from .manifests import TOOL_DEFINITIONS
+from .mock_backend import MockKontomierzClient
+from .operations import build_operations
+from .security import BearerPrincipalMiddleware, InvocationContext, current_invocation_context
 
-
-def _setup_logging() -> None:
-    handler = logging.StreamHandler(sys.stderr)
-    handler.setFormatter(SanitizingFormatter("%(asctime)s [%(levelname)s] [%(request_id)s] %(name)s: %(message)s"))
-    handler.addFilter(RequestIdFilter())
-    root = logging.getLogger()
-    root.addHandler(handler)
-    root.setLevel(getattr(logging, LOG_LEVEL.upper(), logging.INFO))
-    logging.getLogger("httpx").setLevel(logging.WARNING)
-    logging.getLogger("httpcore").setLevel(logging.WARNING)
-    logging.getLogger("uvicorn").setLevel(logging.WARNING)
-
-
-_setup_logging()
 _logger = logging.getLogger(__name__)
-
-mcp = FastMCP("kontomierz-mcp")
-
-_TOOL_REGISTRY: dict[str, Any] = {}
-_CLIENT: KontomierzClient | None = None
+_SENSITIVE_HTTP_LOGGERS = ("httpx", "httpcore")
+_ALLOWED_GENERATED_ANNOTATIONS = frozenset({"str", "str | None", "int", "int | None", "bool"})
 
 
-def _get_or_create_client() -> KontomierzClient:
-    global _CLIENT
-    if _CLIENT is None:
-        _CLIENT = KontomierzClient(api_key=KONTOMIERZ_API_KEY)
-        if KONTOMIERZ_API_KEY:
-            try:
-                accounts = _CLIENT.get_user_accounts()
-                if accounts is not None:
-                    _logger.info("Kontomierz client connection validated (%d accounts)", len(accounts))
-                else:
-                    _logger.warning("Kontomierz client created but could not validate connection — API may be unreachable.")
-            except Exception as exc:
-                _logger.warning("Kontomierz client created but connection validation failed: %s", exc)
-        else:
-            _logger.warning("KONTOMIERZ_API_KEY not set — client will not authenticate.")
-    return _CLIENT
+def configure_application_logging(settings: Settings) -> None:
+    """Configure app logging without allowing dependency request URLs to expose credentials."""
+    logging.basicConfig(
+        level=getattr(logging, settings.log_level),
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    )
+    for logger_name in _SENSITIVE_HTTP_LOGGERS:
+        logging.getLogger(logger_name).setLevel(logging.WARNING)
 
 
-def _resolve_bind_host() -> str:
-    """Determine the bind host based on MCP_UNSAFE_PUBLIC_ACCESS_CONFIRMED."""
-    import os as _os
-
-    unsafe = _os.getenv("MCP_UNSAFE_PUBLIC_ACCESS_CONFIRMED", "").strip() == "1"
-    if unsafe:
-        _logger.critical(
-            "UNSAFE: Binding to 0.0.0.0 — tools exposed to all network interfaces. "  # nosec B104
-            "MCP_UNSAFE_PUBLIC_ACCESS_CONFIRMED=1 acknowledged."
+def build_kernel(settings: Settings, dependency: Any | None = None) -> InvocationKernel:
+    settings.validate()
+    if dependency is None:
+        dependency = (
+            MockKontomierzClient()
+            if settings.mock_data
+            else KontomierzClient(
+                api_key=settings.api_key,
+                base_url=settings.api_base_url,
+                timeout_seconds=settings.api_timeout_seconds,
+                body_mode=settings.body_mode,
+            )
         )
-        return "0.0.0.0"
-    return "127.0.0.1"
+    return InvocationKernel(settings=settings, operations=build_operations(dependency, settings), dependency=dependency)
 
 
-@asynccontextmanager  # type: ignore[misc]
-async def lifespan(server: FastMCP):  # type: ignore[no-untyped-def]
-    client = _get_or_create_client()
-    server._lifespan_data = {"client": client}  # type: ignore[attr-defined]
-    _logger.info("Kontomierz client initialized")
-    try:
-        yield server._lifespan_data  # type: ignore[attr-defined]
-    finally:
-        _logger.info("Shutting down")
+def _error_document(error: ApplicationError) -> dict[str, Any]:
+    return {"error": error.as_dict()}
 
 
-mcp.lifespan = lifespan  # type: ignore[attr-defined]
+def _validate_generated_definition(definition: Any) -> None:
+    """Fail closed before repository-owned catalog values enter generated Python source."""
+    if not definition.name.isidentifier() or keyword.iskeyword(definition.name):
+        raise RuntimeError(f"Invalid governed tool identifier: {definition.name!r}")
+    seen: set[str] = set()
+    for parameter in definition.parameters:
+        if (
+            not parameter.name.isidentifier()
+            or keyword.iskeyword(parameter.name)
+            or parameter.name in seen
+            or parameter.annotation not in _ALLOWED_GENERATED_ANNOTATIONS
+        ):
+            raise RuntimeError(f"Invalid governed parameter for tool {definition.name}: {parameter.name!r}")
+        seen.add(parameter.name)
 
-register_accounts_tools(mcp)
-register_transactions_tools(mcp)
-register_budgets_tools(mcp)
-register_schedules_tools(mcp)
-register_reference_tools(mcp)
-register_charts_wealth_tools(mcp)
-register_capability_tools(mcp)
 
-
-def _populate_tool_registry() -> None:
-    for loc_attr in ("_mcp_server", "_tool_manager", "_tools"):
-        loc = getattr(mcp, loc_attr, None)
-        if loc is None:
-            continue
-        for tools_attr in ("_tools", "_tool_cache"):
-            tools = getattr(loc, tools_attr, None)
-            if isinstance(tools, dict) and tools:
-                _TOOL_REGISTRY.update(tools)
-                return
-    if hasattr(mcp, "_tools") and isinstance(mcp._tools, dict) and mcp._tools:
-        _TOOL_REGISTRY.update(mcp._tools)
+def _close_tool_input_schemas(result: Any) -> None:
+    """Force closed tool-input object schemas for SDK and mapping list results."""
+    tools = result.get("tools") if isinstance(result, Mapping) else getattr(result, "tools", None)
+    if not isinstance(tools, list):
         return
-    for name in sorted(TOOL_MANIFESTS.keys()):
-        _TOOL_REGISTRY[name] = name
-    _logger.info("Tool registry populated from manifests (%d tools)", len(_TOOL_REGISTRY))
+
+    for tool in tools:
+        if isinstance(tool, Mapping):
+            input_schema = tool.get("inputSchema")
+            if input_schema is None:
+                input_schema = tool.get("input_schema")
+        else:
+            input_schema = getattr(tool, "input_schema", None)
+        if isinstance(input_schema, dict):
+            input_schema["additionalProperties"] = False
 
 
-def _inject_risk_prefixes() -> None:
-    for name, fn in _TOOL_REGISTRY.items():
-        if not callable(fn):
-            continue
-        manifest = TOOL_MANIFESTS.get(name, {})
-        risk = manifest.get("risk", "READ")
-        raw_fn = fn
-        for attr in ("fn", "func", "_func", "function"):
-            if hasattr(fn, attr):
-                inner = getattr(fn, attr)
-                if callable(inner):
-                    raw_fn = inner
-                    break
-        doc = (raw_fn.__doc__ or "").strip()
-        for prefix in KNOWN_RISK_PREFIXES:
-            if doc.startswith(prefix):
-                doc = doc[len(prefix) :].lstrip()
-                break
-        raw_fn.__doc__ = f"[{risk}] {doc}"
-        if hasattr(fn, "description"):
-            fn.description = raw_fn.__doc__.split("\n")[0].rstrip(".")
+def _sdk_result_is_error(result: Any) -> bool:
+    if isinstance(result, Mapping):
+        return result.get("isError") is True or result.get("is_error") is True
+    return getattr(result, "is_error", False) is True
 
 
-def _build_health_payload() -> dict:
-    return {
-        "status": "healthy",
-        "tool_count": len(_TOOL_REGISTRY),
-        "tools_version": TOOLS_VERSION,
-        "invocation_counts": get_invocation_counts(),
+def build_server(
+    settings: Settings,
+    kernel: InvocationKernel | None = None,
+    *,
+    owns_kernel: bool = True,
+) -> Any:
+    """Build one official MCP SDK v2 server from the governed tool catalog."""
+    try:
+        from mcp.server import MCPServer
+        from mcp.types import CallToolResult, TextContent
+    except ImportError as exc:  # pragma: no cover - dependency installation failure
+        raise RuntimeError("Install the project dependencies to run the MCP transport") from exc
+
+    owned_kernel = kernel or build_kernel(settings)
+    dispatch_started: ContextVar[bool] = ContextVar("kontomierz_sdk_dispatch_started", default=False)
+
+    @asynccontextmanager
+    async def lifespan(_server: Any) -> AsyncIterator[dict[str, InvocationKernel]]:
+        try:
+            yield {"kernel": owned_kernel}
+        finally:
+            if owns_kernel:
+                await owned_kernel.close()
+
+    def call_tool_result(document: dict[str, Any], *, is_error: bool) -> Any:
+        body = document if is_error else document["data"]
+        return CallToolResult(
+            content=[TextContent(type="text", text=json.dumps(body, ensure_ascii=False))],
+            structured_content=document,
+            is_error=is_error,
+        )
+
+    def audit_pre_dispatch_rejection(stage: BoundaryStage) -> None:
+        invocation_context = current_invocation_context()
+        if invocation_context is None and settings.transport == "stdio":
+            invocation_context = InvocationContext.local_stdio()
+        emit_boundary_rejection(
+            transport="stdio" if settings.transport == "stdio" else "streamable-http",
+            stage=stage,
+            result="INVALID_PARAMETER",
+            route="mcp",
+            authenticated=(
+                invocation_context.authenticated if invocation_context is not None else settings.transport == "stdio"
+            ),
+            principal=invocation_context.principal if invocation_context is not None else None,
+        )
+
+    allowed_arguments = {
+        name: frozenset(parameter.name for parameter in definition.parameters)
+        for name, definition in TOOL_DEFINITIONS.items()
     }
 
+    class GovernedToolInputMiddleware:
+        """Keep advertised tool schemas and pre-dispatch argument handling fail-closed."""
 
-def _start_health_server() -> None:
-    import socket
-    import threading
-    from http.server import BaseHTTPRequestHandler, HTTPServer
-
-    class HealthHandler(BaseHTTPRequestHandler):
-        def log_message(self, format, *args):  # nosec B110
-            pass
-
-        def do_GET(self):
-            body = json.dumps(_build_health_payload())
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body.encode())
-
-    class ReuseHTTPServer(HTTPServer):
-        allow_reuse_address = True
-
-        def server_bind(self):
-            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            HTTPServer.server_bind(self)
-
-    bind_host = _resolve_bind_host()
-    server = ReuseHTTPServer((bind_host, HEALTH_PORT), HealthHandler)
-    _logger.info("Health server on http://%s:%d/health", bind_host, HEALTH_PORT)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-
-
-def _start_rest_bridge() -> None:
-    import asyncio
-    import threading
-
-    try:
-        from starlette.applications import Starlette
-        from starlette.responses import JSONResponse
-        from starlette.routing import Route
-    except ImportError:
-        _logger.warning("Starlette not installed")
-        return
-
-    async def health(_r):
-        return JSONResponse(_build_health_payload())
-
-    async def list_tools(_r):
-        tools = sorted(_TOOL_REGISTRY.keys())
-        t = len(tools)
-        return JSONResponse({"total": t, "tool_count": t, "tools": tools})
-
-    async def call_tool(request):
-        tool_name = request.path_params["name"]
-        body = await request.json()
-        params = body.get("params", {})
-
-        client = _get_or_create_client()
-        if getattr(mcp, "_lifespan_data", None) is None:
-            mcp._lifespan_data = {"client": client}
-
-        start_tool_context()
-        t0 = time.monotonic()
-
-        try:
-            result = await mcp.call_tool(tool_name, params)
-        except (AttributeError, TypeError):
-            fn = _TOOL_REGISTRY.get(tool_name)
-            if fn is None or not callable(fn):
-                return JSONResponse(
-                    {
-                        "success": False,
-                        "error": {"code": "UNKNOWN_TOOL", "message": f"Unknown tool: {tool_name}", "retryable": False},
-                    },
-                    status_code=404,
-                )
+        async def __call__(self, context: Any, call_next: Any) -> Any:
+            is_tool_call = context.method == "tools/call"
+            token = dispatch_started.set(False) if is_tool_call else None
             try:
-                result_str = await fn(**params) if asyncio.iscoroutinefunction(fn) else fn(**params)
-                elapsed = int((time.monotonic() - t0) * 1000)
-                data = json.loads(result_str)
-                data.setdefault("_meta", {})["duration_ms"] = elapsed
-                return JSONResponse(data)
-            except Exception as exc:
-                return JSONResponse(
-                    {"success": False, "error": {"code": "INTERNAL_ERROR", "message": str(exc), "retryable": False}},
-                    status_code=500,
-                )
-        except Exception as exc:
-            _logger.error("call_tool error: %s", exc)
-            return JSONResponse(
-                {"success": False, "error": {"code": "INTERNAL_ERROR", "message": str(exc), "retryable": False}}, status_code=500
-            )
+                tool_name: Any = None
+                if is_tool_call and isinstance(context.params, Mapping):
+                    tool_name = context.params.get("name")
+                    arguments = context.params.get("arguments")
+                    allowed = allowed_arguments.get(tool_name) if isinstance(tool_name, str) else None
+                    if allowed is not None and isinstance(arguments, Mapping):
+                        for parameter_name in arguments:
+                            if not isinstance(parameter_name, str) or parameter_name not in allowed:
+                                audit_pre_dispatch_rejection("schema")
+                                error = ApplicationError(
+                                    ErrorCode.INVALID_PARAMETER,
+                                    "Tool call contains an unexpected parameter",
+                                    suggestion="Call tools/list and use only the declared input schema.",
+                                )
+                                return call_tool_result(_error_document(error), is_error=True)
 
-        elapsed = int((time.monotonic() - t0) * 1000)
+                result = await call_next(context)
+                if is_tool_call and _sdk_result_is_error(result) and not dispatch_started.get():
+                    stage: BoundaryStage = "schema" if tool_name in allowed_arguments else "protocol"
+                    audit_pre_dispatch_rejection(stage)
+                if context.method == "tools/list":
+                    _close_tool_input_schemas(result)
+                return result
+            finally:
+                if token is not None:
+                    dispatch_started.reset(token)
+
+    server_kwargs: dict[str, Any] = {
+        "version": __version__,
+        "instructions": (
+            "Use capability discovery before planning a workflow and list tools before detail or mutation calls. "
+            "Financial data is confidential. Writes require the trusted operator gate. "
+            "Streamable HTTP requires server-validated Bearer authentication. "
+            "Never retry an ambiguous write before reconciling the exact target state."
+        ),
+        "lifespan": lifespan,
+    }
+    # The pinned official SDK exposes context middleware. Repository test doubles
+    # may intentionally model only the registration/transport surface.
+    if "middleware" in inspect.signature(MCPServer).parameters:
+        server_kwargs["middleware"] = [GovernedToolInputMiddleware()]
+    mcp = MCPServer("kontomierz-mcp", **server_kwargs)
+
+    async def dispatch(name: str, arguments: dict[str, Any]) -> Any:
+        dispatch_started.set(True)
         try:
-            for block in result.content:
-                if hasattr(block, "text"):
-                    data = json.loads(block.text)
-                    data.setdefault("_meta", {})["duration_ms"] = elapsed
-                    return JSONResponse(data)
-        except Exception:
-            pass
-        return JSONResponse({"success": True, "data": str(result), "_meta": {"duration_ms": elapsed}})
+            result = await owned_kernel.invoke(name, arguments, context=current_invocation_context())
+            return call_tool_result(result, is_error=False)
+        except ApplicationError as exc:
+            return call_tool_result(_error_document(exc), is_error=True)
+        except Exception as exc:
+            _logger.error("Unhandled MCP adapter failure tool=%s exception_type=%s", name, type(exc).__name__)
+            error = ApplicationError(ErrorCode.INTERNAL_ERROR, "The operation failed unexpectedly")
+            return call_tool_result(_error_document(error), is_error=True)
 
-    async def manifest(request):
-        tool_name = request.path_params["name"]
-        manifest = TOOL_MANIFESTS.get(tool_name)
-        if manifest is None:
-            return JSONResponse(
-                {
-                    "success": False,
-                    "error": {"code": "UNKNOWN_TOOL", "message": f"No manifest for: {tool_name}", "retryable": False},
-                },
-                status_code=404,
-            )
-        return JSONResponse(manifest)
+    for definition in TOOL_DEFINITIONS.values():
+        _validate_generated_definition(definition)
+        namespace: dict[str, Any] = {"_dispatch": dispatch, "Annotated": Annotated, "Field": Field}
+        # Catalog identifiers/types are validated against a closed grammar immediately above.
+        exec(  # nosec B102
+            (
+                f"async def {definition.name}({definition.signature}):\n"
+                f"    return await _dispatch({definition.name!r}, locals())"
+            ),
+            namespace,
+        )
+        function = namespace[definition.name]
+        function.__doc__ = definition.description
+        function.__module__ = __name__
+        function.__kontomierz_definition__ = definition
+        mcp.tool()(function)
 
-    app = Starlette(
-        routes=[
-            Route("/health", health, methods=["GET"]),
-            Route("/api/health", health, methods=["GET"]),
-            Route("/api/tools", list_tools, methods=["GET"]),
-            Route("/api/tools/{name}", call_tool, methods=["POST"]),
-            Route("/api/tools/{name}/manifest", manifest, methods=["GET"]),
-        ]
+    return mcp
+
+
+def create_http_app(settings: Settings, kernel: InvocationKernel | None = None) -> Any:
+    """Create loopback Streamable HTTP with public liveness and authenticated readiness."""
+    from starlette.applications import Starlette
+    from starlette.middleware import Middleware
+    from starlette.responses import JSONResponse
+    from starlette.routing import Mount, Route
+
+    if not settings.streamable_http:
+        raise ValueError("create_http_app requires a Streamable HTTP Settings snapshot")
+    settings.validate()
+
+    owned_kernel = kernel or build_kernel(settings)
+    mcp = build_server(settings, owned_kernel, owns_kernel=False)
+    from mcp.server.transport_security import TransportSecuritySettings
+
+    host_header = f"[{settings.host}]" if ":" in settings.host else settings.host
+    transport_security = TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=[host_header, f"{host_header}:*"],
+        allowed_origins=[f"http://{host_header}", f"http://{host_header}:*"],
+    )
+    mcp_app = mcp.streamable_http_app(
+        stateless_http=True,
+        json_response=True,
+        max_request_body_size=settings.http_max_request_body_bytes,
+        transport_security=transport_security,
+        host=settings.host,
     )
 
-    import uvicorn
+    @asynccontextmanager
+    async def lifespan(_app: Starlette) -> AsyncIterator[None]:
+        try:
+            async with mcp.session_manager.run():
+                yield
+        finally:
+            await owned_kernel.close()
 
-    def _run():
-        uvicorn.run(app, host=_resolve_bind_host(), port=REST_API_PORT, log_level="warning")
+    async def live(_request: Any) -> JSONResponse:
+        return JSONResponse({"status": "alive"})
 
-    _logger.info("REST bridge on http://%s:%d", _resolve_bind_host(), REST_API_PORT)
-    threading.Thread(target=_run, daemon=True).start()
+    async def ready(_request: Any) -> JSONResponse:
+        is_ready = await owned_kernel.readiness()
+        return JSONResponse(
+            {"status": "ready" if is_ready else "not-ready"},
+            status_code=200 if is_ready else 503,
+        )
 
-
-def _load_dotenv() -> None:
-    """Load .env file into os.environ before any os.getenv() calls."""
-    import os as _os
-    from pathlib import Path as _Path
-
-    for _env_path in (_Path(".env"), _Path("/app/.env")):
-        if not _env_path.exists():
-            continue
-        with open(_env_path) as _f:
-            for _line in _f:
-                _line = _line.strip()
-                if _line and not _line.startswith("#") and "=" in _line:
-                    _key, _value = _line.split("=", 1)
-                    _os.environ.setdefault(_key.strip(), _value.strip().strip('"').strip("'"))
-        return  # stop after first found
+    return Starlette(
+        routes=[
+            Route("/health/live", live, methods=["GET"]),
+            Route("/health/ready", ready, methods=["GET"]),
+            Mount("/", app=mcp_app),
+        ],
+        middleware=[
+            Middleware(
+                BearerPrincipalMiddleware,
+                settings=settings,
+                public_paths=frozenset({"/health/live"}),
+                protected_paths=frozenset({"/mcp", "/health/ready"}),
+            )
+        ],
+        lifespan=lifespan,
+    )
 
 
 def main() -> None:
-    _load_dotenv()
-    _populate_tool_registry()
-    _inject_risk_prefixes()
-    _start_health_server()
-    _get_or_create_client()
-    _start_rest_bridge()
-    bind_host = _resolve_bind_host()
-    _logger.info("Starting Kontomierz MCP server (SSE on %s:%d, %d tools)", bind_host, MCP_PORT, len(_TOOL_REGISTRY))
-    mcp.run(transport="sse", host=bind_host, port=MCP_PORT)
+    settings = Settings.from_env()
+    configure_application_logging(settings)
+    configure_audit_sink()
+    kernel = build_kernel(settings)
+    if settings.transport == "stdio":
+        build_server(settings, kernel).run("stdio")
+        return
 
+    import uvicorn
 
-if __name__ == "__main__":
-    main()
+    app = create_http_app(settings, kernel)
+    _logger.info("Starting authenticated loopback Streamable HTTP on http://%s:%d/mcp", settings.host, settings.port)
+    uvicorn.run(app, host=settings.host, port=settings.port, log_level=settings.log_level.lower())

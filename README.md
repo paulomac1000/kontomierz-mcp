@@ -1,250 +1,146 @@
-# Kontomierz-MCP
+# Kontomierz MCP
 
-[![CI](https://github.com/paulomac1000/kontomierz-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/paulomac1000/kontomierz-mcp/actions/workflows/ci.yml)
-[![Docker](https://github.com/paulomac1000/kontomierz-mcp/actions/workflows/publish.yml/badge.svg)](https://github.com/paulomac1000/kontomierz-mcp/actions/workflows/publish.yml)
-[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/)
-[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+A loopback-first MCP server for the Kontomierz personal-finance API. The server exposes 27 governed tools for accounts, transactions, budgets, schedules, reference data, charts, and wealth history.
 
-MCP (Model Context Protocol) server for Kontomierz.pl — a Polish personal finance platform.
-Enables AI assistants (Claude Desktop, LibreChat, Cline) to read and manage your bank accounts,
-transactions, budgets, and scheduled payments — all through a single API. Built in Python, runs
-locally or in Docker.
+## Security and migration status
 
-## Requirements
+The current candidate is **2.0.0** because it removes legacy HTTP+SSE and the unauthenticated REST bridge, changes public date, error, pagination, response-bound, authorization, and update semantics, and switches writes to the form encoding verified against the live Kontomierz API on 2026-08-08. It is not presented as formally L2+ compliant yet. Repository-owned implementation and structural CI can be made conformant without claiming provider-backed approval. The current provider adoption state is **`provider-preflight-blocked`**: GitHub's default branch is not protected and the repository has no configured release environment, so provider-backed acceptance cannot legitimately pass until administrators establish and verify those controls.
 
-- Python 3.11+ (for local use) or Docker
-- Kontomierz.pl account with [API key](https://kontomierz.pl/profil/api)
+Financial reads are confidential. Every invocation is authenticated and then authorized server-side against the exact capability, immutable configured target, and invocation resource identity. HTTP principals are read-only by default through `MCP_HTTP_ALLOWED_CAPABILITIES=read`. Mutations require both an explicitly allowed HTTP capability class (for HTTP callers) and `ENABLE_WRITE_OPERATIONS=1` from the trusted server operator. Destructive operations are narrower on both transports: stdio requires exact capability IDs in `MCP_STDIO_ALLOWED_DESTRUCTIVE_CAPABILITIES` and exact resource IDs in `MCP_STDIO_ALLOWED_DESTRUCTIVE_RESOURCES`; HTTP additionally requires the corresponding `MCP_HTTP_ALLOWED_DESTRUCTIVE_*` allowlists. A model argument cannot establish identity, authorization, or write enablement.
 
-## Quick Start
+The server does **not** advertise `requires_confirmation=true` because no independent server-side approval authority exists yet. A started mutation with an uninterpretable outcome is never declared safely retryable. In particular, an empty-body create that does not identify the created resource is surfaced as `AMBIGUOUS_OUTCOME` and must be reconciled before any dependent mutation or retry. Each application-dispatched invocation emits one structured server-side audit record containing principal, exact capability, target identity, resource identity, policy decision, operator-gate decision, dependency state, result category, cancellation/saturation state, and correlation ID; credentials and protected response bodies are excluded. Protocol/schema failures rejected before application dispatch do not claim an invocation-kernel audit record. The audit logger owns an INFO-capable sink independent from `LOG_LEVEL` and follows an explicit result-preserving fail-open policy.
 
-### 1. Configure
+Public tool schemas are closed and scalar types are strict. Unknown arguments are rejected instead of being silently dropped by SDK normalization; integers, booleans, and strings are not cross-coerced; optional resource IDs must be positive when supplied; and invalid falsey create values are not silently treated as omission. Public text inputs have UTF-8 byte limits before upstream I/O. Successful upstream bodies are streamed with a 4 MiB decoded-body limit, and every tool manifest has a final response budget (1 MiB by default). Oversized reads fail closed; a completed mutation whose representation exceeds the tool budget returns a small reconciliation marker instead of a retry-provoking error.
+
+## Install
+
+The production/tested dependency locks target Linux x64 and Python 3.11, 3.12, or 3.13. Create a virtual environment and install the matching exact-wheel development graph plus the shared build graph before installing the project without dependency resolution:
 
 ```bash
+python3 -m venv .venv
+PYTAG="$(.venv/bin/python -c 'import sys; print(f"py{sys.version_info.major}{sys.version_info.minor}")')"
+.venv/bin/python -m pip install --no-deps --only-binary=:all: --require-hashes -r "requirements/dev-linux-x64-${PYTAG}.lock"
+.venv/bin/python -m pip install --no-deps --only-binary=:all: --require-hashes -r requirements/build-linux-x64.lock
+.venv/bin/python -m pip install --no-deps --no-build-isolation -e .
+.venv/bin/python -m pip check
 cp .env.example .env
-# Edit .env with your KONTOMIERZ_API_KEY
 ```
 
-### 2. Run with Docker
+Any of the three supported Python versions works for local development. The exact release artifact and the Docker image are materialized on the **Python 3.12 lane**: the runtime lock contains cp312 wheel digests, and `pip download` of that lock from a 3.11/3.13 interpreter resolves wheels for the running interpreter instead, failing the `--require-hashes` check. Use a Python 3.12 environment (e.g. `python3.12 -m venv .venv`) whenever reproducing the release artifact locally.
 
-**Option A — Build local image:**
+For synthetic local development:
 
 ```bash
-docker build -t kontomierz-mcp .
-docker run -d \
-  --name kontomierz-mcp \
-  -p 9100:9100 -p 9101:9101 -p 9102:9102 \
-  --env-file .env \
-  -e MCP_UNSAFE_PUBLIC_ACCESS_CONFIRMED=1 \
-  kontomierz-mcp
+KONTOMIERZ_MOCK_DATA=1 .venv/bin/kontomierz-mcp
 ```
 
-**Option B — From GitHub Container Registry (after publish):**
+The default transport is stdio. Configure an MCP host to execute `.venv/bin/kontomierz-mcp` with `KONTOMIERZ_API_KEY` in its trusted environment.
+
+Ordinary stdio writes require `ENABLE_WRITE_OPERATIONS=1`. Destructive stdio operations additionally require exact capability and resource allowlists:
 
 ```bash
-docker run -d \
-  --name kontomierz-mcp \
-  -p 9100:9100 -p 9101:9101 -p 9102:9102 \
-  --env-file .env \
-  -e MCP_UNSAFE_PUBLIC_ACCESS_CONFIRMED=1 \
-  ghcr.io/paulomac1000/kontomierz-mcp:latest
+export MCP_STDIO_ALLOWED_DESTRUCTIVE_CAPABILITIES=destroy_wallet
+export MCP_STDIO_ALLOWED_DESTRUCTIVE_RESOURCES=wallet:123
+export ENABLE_WRITE_OPERATIONS=1
 ```
 
-### 3. Run locally (Python 3.11+)
+Without both stdio destructive allowlists, destructive tools remain denied even when the global write gate is enabled.
+
+## Authenticated loopback Streamable HTTP
 
 ```bash
-pip install -e ".[dev]"
-kontomierz-mcp
+export MCP_HTTP_AUTH_TOKEN="$(.venv/bin/python -c 'import secrets; print(secrets.token_urlsafe(32))')"
+export MCP_HTTP_PRINCIPAL="local-operator"
+KONTOMIERZ_MOCK_DATA=1 \
+MCP_TRANSPORT=streamable-http \
+MCP_HOST=127.0.0.1 \
+MCP_PORT=9101 \
+MCP_HTTP_ALLOWED_CAPABILITIES=read \
+MCP_HTTP_MAX_REQUEST_BODY_BYTES=1048576 \
+.venv/bin/kontomierz-mcp
 ```
 
-## Ports
+Every supported protected HTTP endpoint (`/mcp` and `/health/ready`) requires `Authorization: Bearer <MCP_HTTP_AUTH_TOKEN>`. Unknown paths return 404 before entering the mounted MCP SDK application; `/health/live` is the only public route. The token is mapped server-side to `MCP_HTTP_PRINCIPAL`, so the model cannot choose its own principal. The principal is authorized against the exact tool, configured target, resolved resource identity, normalized argument digest, and capability policy, then revalidated immediately before operation I/O.
 
-| Port | Protocol | Purpose | Endpoint |
-|------|----------|---------|----------|
-| 9100 | HTTP | Health check | `GET /health` |
-| 9101 | SSE | MCP transport (SSE) | `/sse` |
-| 9102 | HTTP | REST API bridge | `/api/*` |
+The MCP endpoint is `/mcp`; liveness remains public at `/health/live`. Readiness at `/health/ready` requires the same Bearer authentication because a cache miss may trigger a bounded upstream probe. Non-loopback binding is rejected. The HTTP adapter explicitly configures Host and Origin policy, stateless mode, and a bounded request body.
 
-### Verify
+To permit ordinary HTTP writes, add `write` to `MCP_HTTP_ALLOWED_CAPABILITIES` **and** enable `ENABLE_WRITE_OPERATIONS=1`. To permit destructive HTTP operations, also add `destructive`, then explicitly allow each destructive capability and exact resource:
 
 ```bash
-# Health check
-curl http://localhost:9100/health
-
-# List all 27 MCP tools
-curl http://localhost:9102/api/tools
-
-# Call a tool via REST API
-curl -X POST http://localhost:9102/api/tools/list_accounts \
-  -H "Content-Type: application/json" \
-  -d '{"params":{}}'
-
-# Get tool capability manifest
-curl http://localhost:9102/api/tools/list_tags/manifest
+export MCP_HTTP_ALLOWED_CAPABILITIES=read,destructive
+export MCP_HTTP_ALLOWED_DESTRUCTIVE_CAPABILITIES=destroy_wallet
+export MCP_HTTP_ALLOWED_DESTRUCTIVE_RESOURCES=wallet:123
+export ENABLE_WRITE_OPERATIONS=1
 ```
 
-## Available Tools (27)
+Wildcards are not accepted for destructive resources. Authentication alone never grants write access.
 
-### Accounts
-| Tool | Risk | Description |
-|------|------|-------------|
-| `list_accounts` | [READ] | List all bank accounts and wallets with balances |
-| `create_wallet` | [WRITE] | Create a new cash wallet |
-| `update_wallet` | [WRITE] | Update a cash wallet |
-| `destroy_wallet` | [DESTRUCTIVE] | Delete a cash wallet |
+Write bodies use `application/x-www-form-urlencoded`, matching the live API contract verified on 2026-08-08; JSON-encoded writes are rejected upstream. Public tool dates accept ISO `YYYY-MM-DD` only and budget months accept `YYYY-MM` only. Localized upstream `DD-MM-YYYY` values are produced internally after public validation. Real-backend configuration rejects `KONTOMIERZ_BODY_MODE=json`. A non-mock API target must be an absolute HTTPS URL without embedded credentials, query, or fragment.
 
-### Transactions
-| Tool | Risk | Description |
-|------|------|-------------|
-| `list_transactions` | [READ] | List money transactions with pagination and filters |
-| `get_transaction` | [READ] | Get details of a single transaction |
-| `create_transaction` | [WRITE] | Create a new transaction in a wallet |
-| `update_transaction` | [WRITE] | Update an existing transaction |
-| `delete_transaction` | [DESTRUCTIVE] | Delete a transaction |
+Successful MCP responses expose an opaque `target_ref` plus `target_scope` in `_meta`; the internal credential-derived target identity is retained only for authorization and audit.
 
-### Budgets
-| Tool | Risk | Description |
-|------|------|-------------|
-| `list_budgets` | [READ] | List budgets for a given month |
-| `create_budget` | [WRITE] | Create a budget for a category or group |
-| `update_budget` | [WRITE] | Update a budget limit |
-| `delete_budget` | [DESTRUCTIVE] | Delete a budget |
-| `copy_budgets_from_last_month` | [WRITE] | Copy last month's budgets to current month |
+## Reproducible dependency graphs
 
-### Schedules
-| Tool | Risk | Description |
-|------|------|-------------|
-| `list_scheduled_transactions` | [READ] | List scheduled payments (unpaid/paid) with pagination |
-| `get_schedule` | [READ] | Get details of a payment schedule |
-| `create_schedule` | [WRITE] | Create a new payment schedule |
-| `update_schedule` | [WRITE] | Update a payment schedule |
-| `delete_schedule` | [DESTRUCTIVE] | Delete a payment schedule |
-| `mark_schedule_paid` | [WRITE] | Mark a scheduled payment as paid |
-| `mark_schedule_unpaid` | [WRITE] | Mark a scheduled payment as unpaid |
+`requirements/` contains exact Linux x64 wheel locks for runtime and development on Python 3.11, 3.12, and 3.13, plus a shared build-tool lock. Each requirement is pinned to an exact version and SHA-256 wheel digest. CI installs these files with `--require-hashes --no-deps --only-binary=:all:` and runs `pip check`.
 
-### Reference
-| Tool | Risk | Description |
-|------|------|-------------|
-| `list_categories` | [READ] | List category tree (withdrawal/deposit) |
-| `list_tags` | [READ] | List user tags sorted by recent usage |
-| `list_currencies` | [READ] | List currency dictionary (major/minor/trivial) |
+The exact release artifact uses the Python 3.12 runtime lock. That lock and the build lock are included in the checksummed release bundle. Package metadata pins the production MCP SDK to the tested `mcp==2.0.0` lane instead of claiming compatibility with untested future 2.x releases.
 
-### Charts & Wealth
-| Tool | Risk | Description |
-|------|------|-------------|
-| `get_pie_chart` | [READ] | Get pie chart data for transaction breakdown |
-| `list_wealth_points` | [READ] | List net worth history points |
+## Docker and release promotion
 
-### Introspection
-| Tool | Risk | Description |
-|------|------|-------------|
-| `describe_kontomierz_capabilities` | [READ] | Return full tool catalog with manifests and schema version |
+Docker consumes the already-built application wheel, hash-locked runtime wheelhouse, and copied runtime lock that CI verifies before the image build. The image runs as non-root and is built with `org.opencontainers.image.revision=<full source SHA>`; CI verifies that label and smokes the exact image before archiving it.
 
-## Configuration
+Streamable HTTP binds `127.0.0.1` only (non-loopback binding is a hard configuration invariant), so a containerized HTTP deployment cannot use ordinary port publishing: run the container with host networking (`--network host` on Linux) or bridge through a loopback sidecar. The stdio default needs no network.
 
-All configuration is via environment variables. See `.env.example` for a complete template.
+Release publication uses three distinct trust stages:
 
-### Required
+1. `verify-artifact` is read-only. It proves default-branch ancestry, checks the protected `release` environment configuration, downloads the closed CI bundle, and verifies checksums/source identity without executing candidate content.
+2. `quarantine` remains unprivileged with respect to production. It loads and smokes the exact CI image, then pushes it to an **isolated non-GHCR quarantine registry**, resolves an immutable digest, pulls that exact digest, rechecks the source-revision label, and smokes it again.
+3. `publish` runs behind the protected `release` environment. It does not checkout candidate code, download the CI archive, `docker load`, or `docker run` candidate content. It promotes only the immutable quarantine digest to production GHCR with registry tooling, verifies the production digest, and emits a promotion attestation.
 
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `KONTOMIERZ_API_KEY` | API key from kontomierz.pl/profil/api | `hz4Z8NY...` |
+Repository administrators must provide `QUARANTINE_REGISTRY` and `QUARANTINE_REPOSITORY` variables plus `QUARANTINE_USERNAME`/`QUARANTINE_TOKEN` secrets. The quarantine registry must not be `ghcr.io`, and its credential must be scoped so it cannot mutate the production package. That credential-scope property requires provider/administrator evidence and remains an explicit external gate rather than a source-code assertion.
 
-### Optional
+## Tests
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `MCP_PORT` | `9101` | MCP SSE transport port |
-| `REST_API_PORT` | `9102` | REST API bridge port |
-| `HEALTH_PORT` | `9100` | Health check HTTP port |
-| `LOG_LEVEL` | `INFO` | DEBUG, INFO, WARNING, ERROR, CRITICAL |
-| `ENABLE_WRITE_OPERATIONS` | `false` | Set to `1`/`true`/`yes`/`on` to enable write/destructive tools |
-| `MCP_UNSAFE_PUBLIC_ACCESS_CONFIRMED` | — | Set to `1` for Docker port forwarding (binds to `0.0.0.0`) |
-| `KONTOMIERZ_API_TIMEOUT` | `30` | API request timeout in seconds |
-
-## REST API
-
-The REST API on port 9102 provides HTTP access to all tools, health checks, and tool manifests.
+A plain pytest run excludes live/provider evidence by default:
 
 ```bash
-# List tools
-curl http://localhost:9102/api/tools
-
-# Get tool manifest
-curl http://localhost:9102/api/tools/create_wallet/manifest
-
-# Invoke a tool
-curl -X POST http://localhost:9102/api/tools/list_transactions \
-  -H "Content-Type: application/json" \
-  -d '{"params":{"page":"1","start_on":"01-05-2026"}}'
+.venv/bin/python -m pytest
 ```
 
-## Security
+The default suite uses synthetic data. The official MCP SDK test is mandatory and fails collection when the SDK is absent.
 
-- **Read-only by default** — `ENABLE_WRITE_OPERATIONS=false`. All write/destructive tools return `AUTH_FAILED` until explicitly enabled.
-- **Structured errors** — every error includes `code`, `message`, and `retryable` fields so AI agents can branch programmatically.
-- **Credential protection** — API key is never logged or returned in responses. Log formatter sanitizes Bearer tokens, API keys, and IP addresses.
-- **Response sanitization** — response payloads are recursively sanitized before being sent to AI clients.
-- **Localhost binding** — all ports bind to `127.0.0.1` by default. Set `MCP_UNSAFE_PUBLIC_ACCESS_CONFIRMED=1` for Docker.
+Two canonical helper commands reproduce hosted gates locally:
 
-## Standards Compliance
+- `scripts/local_exact_gate.py` reproduces the repository-owned standards, quality, and exact-image gates from a clean checkout on a **Python 3.12** environment (it materializes `dist/`, writes `dist/SOURCE_REVISION`, verifies `SHA256SUMS`, and builds the revision-bound Docker image). Wheels are built with `SOURCE_DATE_EPOCH` pinned to the commit timestamp, so rebuilding the same revision yields byte-identical checksums. Provider-backed adoption evidence is intentionally out of scope.
+- `scripts/check_docs.py --ai-skills-root <trusted-checkout>` routes governed-document validation through the same one canonical AFDS validator command that CI runs, instead of inviting ad-hoc direct invocations.
 
-| Standard | Document | Level | Description |
-|----------|----------|-------|-------------|
-| **MCP Core** | [`mcp-server-standards.md`](https://github.com/paulomac1000/ai-skills/blob/main/skills/mcp-server-architect/mcp-server-standards.md) | L2+ | Tool design, response contracts, testing hierarchy, security |
-| **CI/CD** | [`ci-cd-standard.md`](https://github.com/paulomac1000/ai-skills/blob/main/skills/ci-cd-architect/ci-cd-standard.md) | v2.0.0 | Workflows, quality gates, security scanning, dependency management |
-
-Compliance level: **L2+** (Tool Manifests, structured errors, write guard, three-port, SanitizingFormatter,
-Risk Consistency Matrix, cleanup tests, Semgrep + Dependabot).
-
-## Claude Desktop Configuration
-
-Add to your `claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "kontomierz": {
-      "url": "http://localhost:9101/sse"
-    }
-  }
-}
-```
-
-## Testing
+The live Kontomierz contract suite is intentionally harder to start than the normal suite. It requires a repository `.env` containing the real API key, both explicit mutation opt-ins, an assertion that the target account is an **exclusive disposable test account**, and a positive wallet ID that must exist in the authenticated account before any cleanup or mutation begins:
 
 ```bash
-pip install -e ".[dev]"
-
-# Unit tests (zero I/O, fast, 150 tests)
-pytest tests/unit/ -q
-
-# Integration tests (mocked client, full pipeline, 19 tests)
-pytest tests/integration/ -q
-
-# Coverage (unit + integration, requires ≥80%)
-pytest tests/unit/ tests/integration/ --cov=kontomierz_mcp --cov-report=term
-
-# Smoke tests (requires running server on port 9102)
-pytest tests/smoke/ -q
-
-# E2E tests (requires running server on port 9102)
-pytest tests/e2e/ -q
-
-# Lint, type check, security
-ruff check . && ruff format --check .
-mypy src/kontomierz_mcp/
-bandit -c pyproject.toml -r src/ -ll
+KONTOMIERZ_EXTERNAL_TESTS=1 \
+KONTOMIERZ_ALLOW_REAL_MUTATIONS=1 \
+KONTOMIERZ_EXCLUSIVE_DISPOSABLE_ACCOUNT=1 \
+KONTOMIERZ_DISPOSABLE_WALLET_ID=123 \
+.venv/bin/python -m pytest -o addopts='' -m external tests/external/test_real_kontomierz_contract.py
 ```
 
-## Quick Reference
+Do not point this suite at an ordinary personal account. The guard verifies `KONTOMIERZ_DISPOSABLE_WALLET_ID` through the authenticated `user_accounts.json` response before performing pre-clean or mutations; a mismatch fails closed. The tests then use unique descriptions, captured IDs, bounded reconciliation over both paid and unpaid schedule groups, and a final cleanup guard. Budget baseline-difference cleanup is permitted only after the exclusive disposable target has been verified. The run fails if schedule/transaction namespace cleanup or budget snapshot cleanup cannot be confirmed. Provider/repository acceptance placeholders in `tests/external/test_production_evidence.py` remain intentionally failing until the corresponding external authority exists.
 
-| Metric | Value |
-|--------|-------|
-| Python | 3.11+ (CI: 3.14) |
-| Tools | 27 (14 READ + 10 WRITE + 3 DESTRUCTIVE) |
-| Tests | 169 (150 unit + 19 integration) |
-| Coverage | 91% |
-| Lint | 0 errors (ruff + mypy + bandit) |
-| Docker | `ghcr.io/paulomac1000/kontomierz-mcp:latest` |
-| Standards | MCP Core L2+ + CI/CD v2.0.0 |
-| License | MIT |
+## Standards authority and contracts
+
+`trusted-executable-sources.lock.yaml` is the canonical **candidate-side executable-provenance declaration** for structural CI. It records the exact reviewed `paulomac1000/ai-skills` revision and SHA-256 bindings for trusted entrypoints. Candidate-owned CI may use that lock to prove which immutable verifier bytes it executed, but the lock and candidate workflow are not a provider-backed approval authority because the candidate can edit both.
+
+Provider-backed adoption must start in the `ai-skills` authority repository from a protected authority ref through `.github/workflows/consumer-acceptance-dispatch.yml`. The authority-owned dispatcher supplies the exact candidate repository/SHA and calls the same-revision local `consumer-acceptance.yml`, which verifies the authority caller/workflow identity, protected ref, candidate lock equality, provider controls, exact-SHA evidence, and independent review. A candidate-owned direct cross-repository call to `consumer-acceptance.yml` is diagnostic only and does not count as provider-backed acceptance. Until the repository's branch/environment administration permits that path, structural CI results remain diagnostic rather than an `adopted` decision.
+
+- [`trusted-executable-sources.lock.yaml`](trusted-executable-sources.lock.yaml) — immutable candidate-side executable provenance declaration
+- [`upstream-contract.yaml`](upstream-contract.yaml) — machine-readable observed Kontomierz boundary
+- [`live-backend-test-policy.yaml`](live-backend-test-policy.yaml) — fail-closed live-test safety floor
+- [`docs/system-architecture.md`](docs/system-architecture.md)
+- [`docs/tool-contract.md`](docs/tool-contract.md)
+- [`docs/upstream-api.md`](docs/upstream-api.md)
+- [`docs/ai-skills-gap-assessment.md`](docs/ai-skills-gap-assessment.md)
+- [`docs/production-readiness.md`](docs/production-readiness.md)
+
+## Compatibility note
+
+Version 2.0.0 is intentionally incompatible with the legacy 1.0.x transport and response surface. Public dates use ISO `YYYY-MM-DD`; budget months use `YYYY-MM`; pagination exposes only continuation hints; update tools distinguish omission (`None`) from an explicit empty text value; destructive stdio calls require exact server-owned allowlists; and successful `_meta` identifies the authorized target through an opaque `target_ref` rather than exposing internal target identity.

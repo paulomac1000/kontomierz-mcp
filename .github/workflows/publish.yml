@@ -1,86 +1,293 @@
-name: Create and publish a Docker image
+# ai-skills-policy-profile: protected-release
+name: Publish tested image
 
 on:
   workflow_run:
     workflows: [CI]
     types: [completed]
-    branches: [main]
-  push:
-    tags:
-      - "v*"
-  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
 
 concurrency:
-  group: publish-${{ github.ref }}
-  cancel-in-progress: true
+  group: publish-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
 
 env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+  SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
+  IMAGE: ghcr.io/${{ github.repository_owner }}/kontomierz-mcp
 
 jobs:
-  build-and-push-image:
-    runs-on: ubuntu-latest
-    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
-    permissions:
-      contents: write
-      packages: write
-      attestations: write
-      id-token: write
-
+  verify-artifact:
+    if: >-
+      ${{ github.event.workflow_run.conclusion == 'success' &&
+          github.event.workflow_run.head_branch == 'main' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v6
+      - name: Checkout trusted default branch for ancestry proof
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
-          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-
-      - name: Log in to the Container registry
-        uses: docker/login-action@v4
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract metadata (tags, labels) for Docker
-        id: meta
-        uses: docker/metadata-action@v6
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=sha,format=short
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') }}
-
-      - name: Build and push Docker image
-        id: push
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          platforms: linux/amd64,linux/arm64
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Generate artifact attestation
-        uses: actions/attest@v4
-        with:
-          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          subject-digest: ${{ steps.push.outputs.digest }}
-          push-to-registry: true
-
-      - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v3
-        with:
-          generate_release_notes: true
-          make_latest: true
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Require release SHA to be the trusted default-branch tip
+        run: |
+          set -euo pipefail
+          git cat-file -e "$HEAD_SHA^{commit}"
+          test "$(git rev-parse HEAD)" = "$HEAD_SHA"
+      - name: Require protected release environment policy
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import urllib.error
+          import urllib.request
+
+          repository = os.environ["GITHUB_REPOSITORY"]
+          request = urllib.request.Request(
+              f"https://api.github.com/repos/{repository}/environments/release",
+              headers={
+                  "Accept": "application/vnd.github+json",
+                  "Authorization": f"Bearer {os.environ['GH_TOKEN']}",
+                  "X-GitHub-Api-Version": "2026-03-10",
+              },
+          )
+          try:
+              with urllib.request.urlopen(request, timeout=10) as response:
+                  environment = json.load(response)
+          except urllib.error.HTTPError as exc:
+              if exc.code == 404:
+                  raise SystemExit(
+                      "release environment is missing; an administrator must create and protect it before publishing"
+                  ) from exc
+              raise
+
+          reviewer_rule = next(
+              (rule for rule in environment.get("protection_rules", []) if rule.get("type") == "required_reviewers"),
+              None,
+          )
+          if not reviewer_rule or not reviewer_rule.get("reviewers"):
+              raise SystemExit("release environment must require at least one deployment reviewer")
+          if reviewer_rule.get("prevent_self_review") is not True:
+              raise SystemExit("release environment must prevent self-review")
+
+          branch_policy = environment.get("deployment_branch_policy") or {}
+          if branch_policy.get("protected_branches") is not True:
+              raise SystemExit("release environment must restrict deployments to protected branches")
+          if branch_policy.get("custom_branch_policies") is not False:
+              raise SystemExit("release environment must use protected-branch policy, not an unrestricted custom policy")
+          PY
+      - name: Download closed release bundle from successful CI
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ env.SOURCE_RUN_ID }}
+          name: release-bundle-${{ env.HEAD_SHA }}
+          path: dist
+      - name: Verify archive identity without executing candidate content
+        run: |
+          set -euo pipefail
+          (cd dist && sha256sum --check SHA256SUMS)
+          (cd dist && sha256sum --check RELEASE_SHA256SUMS)
+          python - "$HEAD_SHA" <<'PY'
+          import json
+          import sys
+          metadata = json.load(open("dist/IMAGE_METADATA.json", encoding="utf-8"))
+          if metadata.get("source_sha") != sys.argv[1]:
+              raise SystemExit("release artifact source SHA mismatch")
+          PY
+
+  quarantine:
+    needs: verify-artifact
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      reference: ${{ steps.quarantine.outputs.reference }}
+      digest: ${{ steps.quarantine.outputs.digest }}
+    env:
+      QUARANTINE_REGISTRY: ${{ vars.QUARANTINE_REGISTRY }}
+      QUARANTINE_REPOSITORY: ${{ vars.QUARANTINE_REPOSITORY }}
+    steps:
+      - name: Download closed release bundle from successful CI
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ env.SOURCE_RUN_ID }}
+          name: release-bundle-${{ env.HEAD_SHA }}
+          path: dist
+      - name: Re-verify archive before unprivileged quarantine execution
+        run: |
+          set -euo pipefail
+          (cd dist && sha256sum --check SHA256SUMS)
+          (cd dist && sha256sum --check RELEASE_SHA256SUMS)
+          python - "$HEAD_SHA" <<'PY'
+          import json
+          import sys
+          metadata = json.load(open("dist/IMAGE_METADATA.json", encoding="utf-8"))
+          if metadata.get("source_sha") != sys.argv[1]:
+              raise SystemExit("release artifact source SHA mismatch")
+          PY
+      - name: Load and verify source-labelled CI image before registry credentials exist
+        run: |
+          set -euo pipefail
+          gzip -dc dist/kontomierz-mcp-image.tar.gz | docker load
+          SOURCE="kontomierz-mcp:$HEAD_SHA"
+          REVISION="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$SOURCE")"
+          test "$REVISION" = "$HEAD_SHA"
+      - name: Validate isolated quarantine coordinates
+        id: quarantine-config
+        run: |
+          set -euo pipefail
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import os
+          import re
+
+          registry = os.environ.get("QUARANTINE_REGISTRY", "").strip().lower()
+          repository = os.environ.get("QUARANTINE_REPOSITORY", "").strip().lower()
+          if not re.fullmatch(r"[a-z0-9.-]+(?::[0-9]{1,5})?", registry):
+              raise SystemExit("QUARANTINE_REGISTRY must be an explicit registry host")
+          if registry == "ghcr.io":
+              raise SystemExit("quarantine must use a registry authority isolated from production GHCR")
+          if not re.fullmatch(r"[a-z0-9][a-z0-9._/-]{0,254}", repository):
+              raise SystemExit("QUARANTINE_REPOSITORY is malformed")
+          reference = f"{registry}/{repository}"
+          if reference == os.environ["IMAGE"].lower():
+              raise SystemExit("quarantine repository must differ from the production image")
+          print(f"registry={registry}")
+          print(f"reference={reference}")
+          PY
+      - name: Push, resolve, pull, and smoke exact quarantined digest
+        id: quarantine
+        env:
+          QUARANTINE_USERNAME: ${{ secrets.QUARANTINE_USERNAME }}
+          QUARANTINE_TOKEN: ${{ secrets.QUARANTINE_TOKEN }}
+          REGISTRY: ${{ steps.quarantine-config.outputs.registry }}
+          REFERENCE: ${{ steps.quarantine-config.outputs.reference }}
+        run: |
+          set -euo pipefail
+          test -n "$QUARANTINE_USERNAME"
+          test -n "$QUARANTINE_TOKEN"
+          printf '%s' "$QUARANTINE_TOKEN" | docker login "$REGISTRY" -u "$QUARANTINE_USERNAME" --password-stdin
+          SOURCE="kontomierz-mcp:$HEAD_SHA"
+          TAG="$REFERENCE:sha-$HEAD_SHA"
+          docker tag "$SOURCE" "$TAG"
+          docker push "$TAG"
+          DIGEST="$(docker buildx imagetools inspect "$TAG" --format '{{json .Manifest.Digest}}' | tr -d '"')"
+          case "$DIGEST" in sha256:[0-9a-f][0-9a-f]*) ;; *) exit 1 ;; esac
+          test "${#DIGEST}" -eq 71
+          docker image rm "$TAG" "$SOURCE" >/dev/null 2>&1 || true
+          docker pull "$REFERENCE@$DIGEST"
+          docker logout "$REGISTRY"
+          REVISION="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$REFERENCE@$DIGEST")"
+          test "$REVISION" = "$HEAD_SHA"
+          docker run --rm --entrypoint python "$REFERENCE@$DIGEST" -c \
+            "import os, kontomierz_mcp; assert os.geteuid() != 0; print(kontomierz_mcp.__version__)"
+          echo "reference=$REFERENCE" >> "$GITHUB_OUTPUT"
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+      - name: Remove quarantine credentials from runner
+        if: always()
+        run: docker logout "${{ steps.quarantine-config.outputs.registry }}" >/dev/null 2>&1 || true
+
+  publish:
+    needs: [verify-artifact, quarantine]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: release
+    permissions:
+      contents: read
+      actions: read
+      packages: write
+      id-token: write
+      attestations: write
+    env:
+      QUARANTINE_REGISTRY: ${{ vars.QUARANTINE_REGISTRY }}
+    steps:
+      - name: Validate immutable quarantine promotion input
+        id: promotion-input
+        env:
+          QUARANTINE_REF: ${{ needs.quarantine.outputs.reference }}
+          QUARANTINE_DIGEST: ${{ needs.quarantine.outputs.digest }}
+        run: |
+          set -euo pipefail
+          test -n "$QUARANTINE_REF"
+          test -n "$QUARANTINE_DIGEST"
+          test "$QUARANTINE_REF" != "$IMAGE"
+          case "$QUARANTINE_DIGEST" in sha256:[0-9a-f][0-9a-f]*) ;; *) exit 1 ;; esac
+          test "${#QUARANTINE_DIGEST}" -eq 71
+          echo "reference=$QUARANTINE_REF" >> "$GITHUB_OUTPUT"
+          echo "digest=$QUARANTINE_DIGEST" >> "$GITHUB_OUTPUT"
+      - name: Authenticate bounded quarantine source registry
+        env:
+          QUARANTINE_USERNAME: ${{ secrets.QUARANTINE_USERNAME }}
+          QUARANTINE_TOKEN: ${{ secrets.QUARANTINE_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$QUARANTINE_USERNAME"
+          test -n "$QUARANTINE_TOKEN"
+          printf '%s' "$QUARANTINE_TOKEN" | docker login "$QUARANTINE_REGISTRY" \
+            -u "$QUARANTINE_USERNAME" --password-stdin
+      - name: Authenticate production GHCR
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+          GHCR_USERNAME: ${{ github.actor }}
+        run: printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
+      - name: Promote exact registry digest without loading or executing candidate image
+        env:
+          QUARANTINE_REF: ${{ steps.promotion-input.outputs.reference }}
+          QUARANTINE_DIGEST: ${{ steps.promotion-input.outputs.digest }}
+        run: |
+          set -euo pipefail
+          docker buildx imagetools create \
+            --tag "$IMAGE:sha-$HEAD_SHA" \
+            --tag "$IMAGE:latest" \
+            "$QUARANTINE_REF@$QUARANTINE_DIGEST"
+      - name: Verify production tags equal the quarantined digest
+        id: digest
+        env:
+          EXPECTED_DIGEST: ${{ steps.promotion-input.outputs.digest }}
+        run: |
+          set -euo pipefail
+          SHA_DIGEST="$(docker buildx imagetools inspect "$IMAGE:sha-$HEAD_SHA" --format '{{json .Manifest.Digest}}' | tr -d '"')"
+          LATEST_DIGEST="$(docker buildx imagetools inspect "$IMAGE:latest" --format '{{json .Manifest.Digest}}' | tr -d '"')"
+          test -n "$SHA_DIGEST"
+          test "$SHA_DIGEST" = "$EXPECTED_DIGEST"
+          test "$LATEST_DIGEST" = "$EXPECTED_DIGEST"
+          echo "digest=$SHA_DIGEST" >> "$GITHUB_OUTPUT"
+          printf '%s\n' "$IMAGE@$SHA_DIGEST" | tee IMAGE_DIGEST
+      - name: Attest promotion of the quarantined CI-tested digest
+        id: attest
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.digest.outputs.digest }}
+          predicate-type: https://kontomierz-mcp.dev/attestations/image-promotion/v2
+          predicate: |
+            {
+              "source_repository": "${{ github.repository }}",
+              "source_revision": "${{ env.HEAD_SHA }}",
+              "source_workflow_run_id": "${{ env.SOURCE_RUN_ID }}",
+              "quarantine_reference": "${{ needs.quarantine.outputs.reference }}",
+              "quarantine_digest": "${{ needs.quarantine.outputs.digest }}"
+            }
+      - name: Upload promotion evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: promotion-evidence-${{ env.HEAD_SHA }}
+          path: |
+            IMAGE_DIGEST
+            ${{ steps.attest.outputs.bundle-path }}
+          if-no-files-found: error
+          retention-days: 90
+      - name: Remove registry credentials from runner
+        if: always()
+        run: |
+          docker logout "$QUARANTINE_REGISTRY" >/dev/null 2>&1 || true
+          docker logout ghcr.io >/dev/null 2>&1 || true

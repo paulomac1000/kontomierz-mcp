@@ -1,10 +1,14 @@
-tests/
-.venv/
-.pytest_cache/
-.ruff_cache/
-.mypy_cache/
-__pycache__/
+.env
+.envrc
+.git
+.github
+.venv
+.pytest_cache
+.mypy_cache
+.ruff_cache
+__pycache__
 *.pyc
-.git/
-.env.example
-*.md
+.coverage
+coverage.xml
+tests
+# dist is intentionally included: Docker installs the wheel already tested by CI.
