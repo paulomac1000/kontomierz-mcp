@@ -39,7 +39,11 @@ def test_exact_artifact_build_binds_image_to_full_source_revision() -> None:
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
     assert "printf '%s\\n' \"$SOURCE_SHA\" > dist/SOURCE_REVISION" in ci
     assert '--build-arg "EXPECTED_SOURCE_REVISION=${SOURCE_SHA}"' in ci
-    assert "ARG EXPECTED_SOURCE_REVISION" in dockerfile
-    assert 'test "$(cat SOURCE_REVISION)" = "$EXPECTED_SOURCE_REVISION"' in dockerfile
+    assert "AS verified-artifacts" in dockerfile
+    assert dockerfile.count("ARG EXPECTED_SOURCE_REVISION") == 2
+    assert 'SHELL ["/bin/sh", "-c"]' in dockerfile
+    assert "read -r ACTUAL_SOURCE_REVISION < /tmp/dist/SOURCE_REVISION" in dockerfile
+    assert 'test "$ACTUAL_SOURCE_REVISION" = "$EXPECTED_SOURCE_REVISION"' in dockerfile
+    assert "COPY --from=verified-artifacts /tmp/dist/ /tmp/dist/" in dockerfile
     assert "org.opencontainers.image.revision=$EXPECTED_SOURCE_REVISION" in dockerfile
     assert "trusted-executable-sources.lock.yaml" in ci
