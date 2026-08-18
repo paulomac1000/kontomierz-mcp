@@ -15,7 +15,7 @@ sources:
       - authority_path: skills/ci-cd-architect/tools/check_consumer_trust_hygiene.py
         sha256: sha256:2732542649d10624dc14fd099df533c494abddd8136dcbe520dc017ab72deca9
       - authority_path: skills/mcp-server-architect/tools/inspect_existing_project.py
-        sha256: sha256:6fb568efa1e56358b3fa7699a6932ca8791ac334190845ecb019e5c79abcd6df
+        sha256: sha256:cc85492bbc56b828e1835f54d2c8ea2246e28b8381180510f4604eead310f567
       - authority_path: skills/mcp-server-architect/tools/plan_existing_project.py
         sha256: sha256:445b02b42e66c5e44e4ab7cce2aa434ea5d47fc7d05a526cf7b3d45e7b221219
       - authority_path: skills/mcp-server-architect/tools/capture_mcp_contract.py
@@ -27,9 +27,9 @@ sources:
       - authority_path: contracts/validate_live_backend_test_policy.py
         sha256: sha256:23d9fde3565667424ddb7a6763b92908da10b265a7a311c0988e328764685e8b
       - authority_path: contracts/validate_trusted_executable_sources.py
-        sha256: sha256:a97d353e99bd0ac04ce90e41b552e422cbe421e65ca27c7226894c216dfc2447
+        sha256: sha256:6b111ea3238d18de7b9a18cffe2371b8407a677e6054c1e3be0beeec993bb5a1
       - authority_path: contracts/validate_external_adoption.py
-        sha256: sha256:85750486b7bd3eff2905c4d105531863e003e693240390088bb1a9afb1cfffcb
+        sha256: sha256:66bdda683519ded05c24d346c83b223dba5704ea2a89cdd7f78392201f9e52a7
       - authority_path: contracts/validate_external_trust_lock.py
         sha256: sha256:301952354990e9222a3a2cd587040ba10d15cf67f0458546d81138348e1dd348
       - authority_path: skills/ci-cd-architect/tools/check_github_provider_controls.py
