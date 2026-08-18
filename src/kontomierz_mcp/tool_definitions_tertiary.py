@@ -38,7 +38,9 @@ TERTIARY_TOOL_DEFINITIONS: dict[str, ToolDefinition] = {
         usage_notes=(
             "The verified upstream returns an empty success body, so creation returns AMBIGUOUS_OUTCOME until "
             "the exact created resource is independently reconciled; do not infer identity from non-unique "
-            "schedule fields."
+            "schedule fields. Reconcile with list_scheduled_transactions passing start_on/end_on covering "
+            "deadline_on: without an explicit range the upstream lists only the current scheduling window, "
+            "so distant deadlines stay invisible and a created schedule would look missing."
         ),
     ),
     "update_schedule": ToolDefinition(

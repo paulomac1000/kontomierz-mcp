@@ -284,6 +284,8 @@ class MockKontomierzClient:
     def get_scheduled_transactions(self, **filters: Any) -> list[dict[str, Any]]:
         paid = filters.get("schedule_group_name") == "paid"
         values = [deepcopy(item) for item in self.schedules if bool(item.get("paid")) is paid]
+        start_bound = self._domain_date(filters.get("start_on") or None)
+        end_bound = self._domain_date(filters.get("end_on") or None)
         page_number = self._positive_page(filters.get("page", 1), "page")
         if page_number is None:
             raise ApplicationError(ErrorCode.INVALID_PARAMETER, "page must be a positive integer")
@@ -291,17 +293,24 @@ class MockKontomierzClient:
         if per_page is not None:
             start = (page_number - 1) * per_page
             values = values[start : start + per_page]
-        return [
-            {
-                "schedule_id": item["id"],
-                "transaction_on": "2026-09-01",
-                "description": item["description"],
-                "currency_amount": item["currency_amount"],
-                "currency_name": item["currency_name"],
-                "paid": "false" if not item.get("paid") else "true",
-            }
-            for item in values
-        ]
+        rows = []
+        for item in values:
+            occurrence = date.fromisoformat("2026-09-01")
+            if start_bound is not None and occurrence < start_bound:
+                continue
+            if end_bound is not None and occurrence > end_bound:
+                continue
+            rows.append(
+                {
+                    "schedule_id": item["id"],
+                    "transaction_on": "2026-09-01",
+                    "description": item["description"],
+                    "currency_amount": item["currency_amount"],
+                    "currency_name": item["currency_name"],
+                    "paid": "false" if not item.get("paid") else "true",
+                }
+            )
+        return rows
 
     def get_schedule(self, schedule_id: int) -> dict[str, Any]:
         item = self._find(self.schedules, schedule_id)

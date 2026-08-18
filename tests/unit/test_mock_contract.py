@@ -26,3 +26,31 @@ def test_mock_schedule_pagination_rejects_floats(field: str, value: float) -> No
 
     assert captured.value.code is ErrorCode.INVALID_PARAMETER
     assert captured.value.message == f"{field} must be a positive integer"
+
+
+def test_mock_schedule_listing_honors_explicit_date_bounds() -> None:
+    backend = MockKontomierzClient()
+
+    inside = backend.get_scheduled_transactions(
+        schedule_group_name="unpaid", start_on="2026-09-01", end_on="2026-09-30"
+    )
+    before = backend.get_scheduled_transactions(
+        schedule_group_name="unpaid", start_on="2026-01-01", end_on="2026-08-31"
+    )
+    after = backend.get_scheduled_transactions(schedule_group_name="unpaid", start_on="2026-10-01", end_on="2027-12-31")
+
+    assert [row["schedule_id"] for row in inside] == [301]
+    assert before == []
+    assert after == []
+
+
+def test_schedule_tooling_documents_window_and_reconcile_contract() -> None:
+    from kontomierz_mcp.manifests import TOOL_DEFINITIONS
+
+    listing_notes = TOOL_DEFINITIONS["list_scheduled_transactions"].usage_notes
+    create_notes = TOOL_DEFINITIONS["create_schedule"].usage_notes
+
+    assert "current scheduling window" in listing_notes
+    assert "start_on/end_on" in create_notes
+    assert "deadline_on" in create_notes
+    assert "stay invisible" in create_notes

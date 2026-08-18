@@ -58,7 +58,11 @@ SECONDARY_TOOL_DEFINITIONS: dict[str, ToolDefinition] = {
             p("end_on", "str", "Optional ISO date YYYY-MM-DD; must not precede start_on.", ""),
             p("direction", "str", "withdrawal, deposit, or all.", "all"),
         ),
-        usage_notes="A full page only sets may_have_more and next_page_hint",
+        usage_notes=(
+            "Without start_on/end_on the upstream returns only the current scheduling window"
+            " (nearest occurrences), so distant schedules stay invisible; pass explicit dates"
+            " covering the deadline when reconciling after a create"
+        ),
     ),
     "get_schedule": ToolDefinition(
         read_manifest("get_schedule", confidentiality="financial"),
