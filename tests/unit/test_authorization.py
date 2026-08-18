@@ -162,7 +162,7 @@ async def test_http_destructive_requires_exact_capability_and_resource_allowlist
     assert "not explicitly allowlisted" in captured.value.message
     assert called == []
 
-    document = kernel.capability_document(context)
+    document = kernel.capability_document(context, verbose=True)
     assert document["tools"]["destroy_wallet"]["manifest"]["active_state"] == "active"
 
     result = await kernel.invoke("destroy_wallet", {"wallet_id": 123}, context=context)

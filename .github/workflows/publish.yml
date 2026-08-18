@@ -33,11 +33,11 @@ jobs:
           ref: ${{ github.event.repository.default_branch }}
           fetch-depth: 0
           persist-credentials: false
-      - name: Prove release SHA is reachable from trusted default branch
+      - name: Require release SHA to be the trusted default-branch tip
         run: |
           set -euo pipefail
           git cat-file -e "$HEAD_SHA^{commit}"
-          git merge-base --is-ancestor "$HEAD_SHA" HEAD
+          test "$(git rev-parse HEAD)" = "$HEAD_SHA"
       - name: Require protected release environment policy
         env:
           GH_TOKEN: ${{ github.token }}

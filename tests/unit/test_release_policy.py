@@ -34,6 +34,13 @@ def test_quarantine_stage_is_unprivileged_and_smokes_exact_registry_digest() -> 
     assert "org.opencontainers.image.revision" in text
 
 
+def test_release_gate_requires_release_sha_to_be_default_branch_tip() -> None:
+    workflow = yaml.safe_load((ROOT / ".github/workflows/publish.yml").read_text(encoding="utf-8"))
+    text = yaml.safe_dump(workflow, sort_keys=True)
+    assert 'test "$(git rev-parse HEAD)" = "$HEAD_SHA"' in text
+    assert "merge-base" not in text
+
+
 def test_exact_artifact_build_binds_image_to_full_source_revision() -> None:
     ci = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")

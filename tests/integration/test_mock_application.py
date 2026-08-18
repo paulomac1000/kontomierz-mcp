@@ -39,8 +39,28 @@ async def test_mock_write_plan_execute_verify(write_kernel) -> None:
 @pytest.mark.asyncio
 async def test_capability_discovery_matches_kernel_catalog(readonly_kernel) -> None:
     result = await readonly_kernel.invoke("describe_kontomierz_capabilities", {"verbose": True})
-    assert set(result["data"]["tools"]) == set(TOOL_MANIFESTS)
-    assert result["data"]["supported_transports"] == ["stdio", "streamable-http"]
+    document = result["data"]
+    assert set(document["tools"]) == set(TOOL_MANIFESTS)
+    assert document["supported_transports"] == ["stdio", "streamable-http"]
+
+    required_manifest_fields = (
+        "name",
+        "risk",
+        "side_effects",
+        "active_state",
+        "idempotent",
+        "retryable",
+        "concurrent_safe",
+    )
+    for name, contract in document["tools"].items():
+        manifest = contract["manifest"]
+        assert manifest["name"] == name
+        for field in required_manifest_fields:
+            assert manifest[field] is not None
+
+    assert {name for name, tool in document["tools"].items() if tool["manifest"]["active_state"] == "active"} == set(
+        document["active_tools"]
+    )
 
 
 @pytest.mark.integration
@@ -60,3 +80,20 @@ async def test_capability_discovery_defaults_to_compact_tool_summaries(readonly_
     assert "claim_evidence" not in json.dumps(data)
     assert len(json.dumps(data, ensure_ascii=False)) < 20_000
     assert all(isinstance(tool, str) for tool in data["active_tools"])
+
+    expected_names = set(TOOL_MANIFESTS)
+    assert set(data["active_tools"]) <= expected_names
+    assert {name for name, tool_summary in data["tools"].items() if tool_summary["active_state"] == "active"} == set(
+        data["active_tools"]
+    )
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_capability_discovery_rejects_non_boolean_verbose(readonly_kernel) -> None:
+    from kontomierz_mcp.errors import ApplicationError, ErrorCode
+
+    with pytest.raises(ApplicationError) as captured:
+        await readonly_kernel.invoke("describe_kontomierz_capabilities", {"verbose": "yes"})
+    assert captured.value.code is ErrorCode.INVALID_PARAMETER
+    assert captured.value.message == "verbose must be a boolean"

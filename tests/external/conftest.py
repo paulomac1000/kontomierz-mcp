@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Iterator
+from datetime import date, timedelta
 
 import httpx
 import pytest
@@ -76,6 +77,11 @@ def _budget_ids(client: httpx.Client, key: str) -> set[int]:
 
 
 def _prefixed_schedule_ids(client: httpx.Client, key: str) -> set[int]:
+    # A range-less listing exposes only the current scheduling window
+    # (docs/upstream-api.md), so cleanup must scan an explicit range or a
+    # prefixed schedule with a distant deadline stays invisible.
+    scan_start = (date.today() - timedelta(days=1)).strftime("%d-%m-%Y")
+    scan_end = (date.today() + timedelta(days=730)).strftime("%d-%m-%Y")
     result: set[int] = set()
     for group in live._SCHEDULE_GROUPS:
         terminated = False
@@ -87,6 +93,8 @@ def _prefixed_schedule_ids(client: httpx.Client, key: str) -> set[int]:
                 schedule_group_name=group,
                 page=page_number,
                 per_page=live._EVIDENCE_PAGE_SIZE,
+                start_on=scan_start,
+                end_on=scan_end,
             )
             response.raise_for_status()
             payload = response.json()

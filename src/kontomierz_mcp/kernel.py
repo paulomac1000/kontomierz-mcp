@@ -214,7 +214,7 @@ class InvocationKernel:
             protocol_versions = []
         return sdk_version, protocol_versions
 
-    def capability_document(self, context: InvocationContext | None = None, *, verbose: bool = True) -> dict[str, Any]:
+    def capability_document(self, context: InvocationContext | None = None, *, verbose: bool = False) -> dict[str, Any]:
         dependency_ready = self.cached_dependency_ready
         projected: dict[str, ToolManifest] = {}
         for name, definition in TOOL_DEFINITIONS.items():
@@ -404,11 +404,16 @@ class InvocationKernel:
                             )
                         executed_decision = revalidated
                         operation_started = True
-                        data = (
-                            self.capability_document(invocation_context, verbose=arguments.get("verbose") is True)
-                            if tool_name == _CAPABILITY_TOOL
-                            else await self._run(operation, arguments)
-                        )
+                        if tool_name == _CAPABILITY_TOOL:
+                            verbose_argument = arguments.get("verbose", False)
+                            if not isinstance(verbose_argument, bool):
+                                raise ApplicationError(
+                                    ErrorCode.INVALID_PARAMETER,
+                                    "verbose must be a boolean",
+                                )
+                            data = self.capability_document(invocation_context, verbose=verbose_argument)
+                        else:
+                            data = await self._run(operation, arguments)
             except TimeoutError as exc:
                 if not timeout_scope.expired():
                     raise
