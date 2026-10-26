@@ -28,7 +28,7 @@ jobs:
           ref: ${{ env.CANDIDATE_SHA }}
           fetch-depth: 1
           persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v6
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v6
         with:
           python-version: "3.12"
       - name: Install hash-locked project quality environment
@@ -62,7 +62,7 @@ jobs:
         run: python scripts/mock_smoke.py
       - name: Upload quality evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: quality-evidence-${{ env.CANDIDATE_SHA }}
           path: |
@@ -84,7 +84,7 @@ jobs:
           ref: ${{ env.CANDIDATE_SHA }}
           fetch-depth: 1
           persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v6
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v6
         with:
           python-version: ${{ matrix.python }}
       - name: Install lane-specific hash-locked development graph
@@ -168,7 +168,7 @@ jobs:
             digest="$(sha256sum "$RUNNER_TEMP/ai-skills/$path" | awk '{print $1}')"
             printf 'AUTHORITY_SHA256 %s sha256:%s\n' "$path" "$digest"
           done
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v6
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v6
         with:
           python-version: "3.12"
       - name: Install trusted validator lock
@@ -263,7 +263,7 @@ jobs:
           ref: ${{ env.SOURCE_SHA }}
           fetch-depth: 1
           persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v6
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v6
         with:
           python-version: "3.12"
       - name: Install hash-locked build environment
@@ -453,7 +453,7 @@ jobs:
             sha256sum --check RELEASE_SHA256SUMS
           )
       - name: Upload exact closed release bundle
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: release-bundle-${{ env.SOURCE_SHA }}
           path: |
